@@ -125,14 +125,19 @@ function showHome(){
 
 
 
-function openData(content, parent){
+function openData(content){
+
+    let previous = () => {
+
+        showHome();
+
+    };
 
 
-    history.push(() => openData(parent, null));
+    history.push(previous);
 
 
     clear();
-
 
 
     if(Array.isArray(content)){
@@ -165,7 +170,6 @@ function openData(content, parent){
             let value = content[key];
 
 
-
             if(typeof value === "string"){
 
 
@@ -181,23 +185,33 @@ function openData(content, parent){
 
             }
 
-
             else{
 
 
                 let button = document.createElement("button");
+
 
                 button.textContent = key;
 
 
                 button.onclick = () => {
 
-                    openData(value, content);
+
+                    history.push(() => {
+
+                        openData(content);
+
+                    });
+
+
+                    openData(value);
+
 
                 };
 
 
                 app.appendChild(button);
+
 
             }
 
