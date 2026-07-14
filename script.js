@@ -125,19 +125,18 @@ function showHome(){
 
 
 
-function openData(content){
-
-    let previous = () => {
-
-        showHome();
-
-    };
+function openData(content, saveHistory = true){
 
 
-    history.push(previous);
+    if(saveHistory){
+
+        history.push(content);
+
+    }
 
 
     clear();
+
 
 
     if(Array.isArray(content)){
@@ -148,7 +147,9 @@ function openData(content){
 
             let div = document.createElement("div");
 
+
             div.className = "item";
+
 
             div.textContent = item;
 
@@ -160,6 +161,7 @@ function openData(content){
 
 
     }
+
 
     else if(typeof content === "object"){
 
@@ -175,7 +177,9 @@ function openData(content){
 
                 let div = document.createElement("div");
 
+
                 div.className = "item";
+
 
                 div.textContent = value;
 
@@ -184,6 +188,7 @@ function openData(content){
 
 
             }
+
 
             else{
 
@@ -194,27 +199,13 @@ function openData(content){
                 button.textContent = key;
 
 
-                button.onclick = () => {
-
-
-                    history.push(() => {
-
-                        openData(content);
-
-                    });
-
-
-                    openData(value);
-
-
-                };
+                button.onclick = () => openData(value);
 
 
                 app.appendChild(button);
 
 
             }
-
 
         }
 
@@ -258,17 +249,30 @@ function addNavigation(){
     back.onclick = () => {
 
 
-        let previous = history.pop();
+    history.pop();
 
 
-        if(previous){
-
-            previous();
-
-        }
+    let previous = history[history.length - 1];
 
 
-    };
+    if(previous){
+
+
+        openData(previous, false);
+
+
+    }
+
+    else{
+
+
+        showHome();
+
+
+    }
+
+
+};
 
 
 
