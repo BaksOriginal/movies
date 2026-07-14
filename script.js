@@ -19,6 +19,7 @@ const data = {
             "Psycho-Pass",
             "Cowboy Bebop"
         ]
+
     },
 
 
@@ -34,53 +35,40 @@ const data = {
             "John Wick",
             "Nobody",
             "Mad Max"
-        ],
-
-        "Хоррор": [
-            "Alien",
-            "The Thing",
-            "The Conjuring"
         ]
+
     },
 
 
     "Мультфильмы": {
 
-    "Комедия": [
-        "Шрек": [
-            "Шрек 1",
-            "Шрек 2",
-            "Шрек 3"],
-        "Мадагаскар",
-        "Кунг-фу Панда"
-    ],
+        "Комедия": {
 
-    "Приключения": [
-        "Как приручить дракона",
-        "Рио",
-        "В поисках Немо"
-    ],
+            "Шрек": [
+                "Шрек 1",
+                "Шрек 2",
+                "Шрек 3"
+            ],
 
-    "Фэнтези": [
-        "Коралина",
-        "Кошмар перед Рождеством",
-        "Храбрая сердцем"
-    ],
+            "Мадагаскар": [
+                "Мадагаскар 1",
+                "Мадагаскар 2"
+            ],
 
-    "Семейные": [
-        "ВАЛЛ-И",
-        "Вверх",
-        "Зверополис"
-    ]
+            "Кот в сапогах": "Кот в сапогах"
 
-}
+        }
+
+    }
 
 };
+
 
 
 const app = document.getElementById("app");
 
 let history = [];
+
 
 
 function clear(){
@@ -105,19 +93,28 @@ function showHome(){
 
     clear();
 
+
     let title = document.createElement("h1");
 
     title.textContent = "Что сегодня посмотрим?";
 
     app.appendChild(title);
 
-    for(let category in data){
+
+
+    for(let key in data){
+
 
         let button = document.createElement("button");
 
-        button.textContent = category;
+        button.textContent = key;
 
-        button.onclick = () => openCategory(category);
+
+        button.onclick = () => {
+
+            openData(data[key], data);
+
+        };
 
 
         app.appendChild(button);
@@ -128,40 +125,86 @@ function showHome(){
 
 
 
-function openCategory(category){
+function openData(content, parent){
 
-    history.push(showHome);
+
+    history.push(() => openData(parent, null));
 
 
     clear();
 
-
-    let content = data[category];
 
 
     if(Array.isArray(content)){
 
-        showItems(content);
+
+        content.forEach(item => {
+
+
+            let div = document.createElement("div");
+
+            div.className = "item";
+
+            div.textContent = item;
+
+
+            app.appendChild(div);
+
+
+        });
+
 
     }
 
-    else{
+    else if(typeof content === "object"){
 
 
-        for(let genre in content){
-
-            let button = document.createElement("button");
-
-            button.textContent = genre;
+        for(let key in content){
 
 
-            button.onclick = () => openGenre(content[genre], category);
+            let value = content[key];
 
 
-            app.appendChild(button);
+
+            if(typeof value === "string"){
+
+
+                let div = document.createElement("div");
+
+                div.className = "item";
+
+                div.textContent = value;
+
+
+                app.appendChild(div);
+
+
+            }
+
+
+            else{
+
+
+                let button = document.createElement("button");
+
+                button.textContent = key;
+
+
+                button.onclick = () => {
+
+                    openData(value, content);
+
+                };
+
+
+                app.appendChild(button);
+
+            }
+
 
         }
 
+
     }
 
 
@@ -169,49 +212,11 @@ function openCategory(category){
 
 }
 
-
-
-function openGenre(items, category){
-
-    history.push(() => openCategory(category));
-
-
-    clear();
-
-
-    showItems(items);
-
-
-    addNavigation();
-
-}
-
-
-
-function showItems(items){
-
-    items.forEach(item => {
-
-
-        let div = document.createElement("div");
-
-
-        div.className = "item";
-
-
-        div.textContent = item;
-
-
-        app.appendChild(div);
-
-
-    });
-
-}
 
 
 
 function addNavigation(){
+
 
     let oldNav = document.querySelector(".navigation");
 
@@ -226,13 +231,11 @@ function addNavigation(){
 
     let nav = document.createElement("div");
 
-
     nav.className = "navigation";
 
 
 
     let back = document.createElement("button");
-
 
     back.textContent = "⬅ Назад";
 
@@ -250,15 +253,14 @@ function addNavigation(){
 
         }
 
+
     };
 
 
 
     let home = document.createElement("button");
 
-
     home.textContent = "🏠 Домой";
-
 
 
     home.onclick = showHome;
@@ -278,6 +280,7 @@ function addNavigation(){
         document.querySelector(".container")
 
     );
+
 
 }
 
