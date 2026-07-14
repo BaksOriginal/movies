@@ -99,11 +99,13 @@ h1{
 
 .navigation button{
 
-    flex:1;
+    min-height:45px;
 
-    background:#f7c6d8;
+    padding:10px 15px;
 
-    color:#8a3f60;
+    margin:0;
+
+    border-radius:22px;
 
     font-size:16px;
 
@@ -117,14 +119,16 @@ button{
 
     width:100%;
 
-    padding:16px;
+    min-height:60px;
 
-    margin:8px 0;
+    padding:18px 20px;
+
+    margin:12px 0;
 
 
     border:none;
 
-    border-radius:25px;
+    border-radius:30px;
 
 
     background:white;
@@ -132,7 +136,7 @@ button{
     color:#9b4f70;
 
 
-    font-size:18px;
+    font-size:20px;
 
     font-weight:600;
 
@@ -141,21 +145,17 @@ button{
 
 
     box-shadow:
-
-    0 5px 15px rgba(180,80,120,0.15);
+    0 6px 18px rgba(180,80,120,0.18);
 
 
     transition:
 
     transform 0.2s ease,
-
     box-shadow 0.2s ease,
-
     background 0.2s ease;
 
 
     animation:
-
     fadeUp 0.3s ease both;
 
 }
@@ -205,24 +205,22 @@ button:active{
 
     background:white;
 
+    margin:12px 0;
 
-    margin:8px 0;
-
-
-    padding:16px;
+    padding:18px;
 
 
-    border-radius:20px;
+    border-radius:22px;
 
 
-    font-size:18px;
+    font-size:20px;
 
     font-weight:500;
 
 
     box-shadow:
 
-    0 5px 15px rgba(180,80,120,0.12);
+    0 6px 18px rgba(180,80,120,0.15);
 
 
     animation:
