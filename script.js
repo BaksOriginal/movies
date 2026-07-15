@@ -285,22 +285,29 @@ async function showHome() {
 
         // --- Функция для создания кнопок-кругляшей ---
         const createIconButton = (icon, onClick) => {
-            let btn = document.createElement("button");
-            btn.textContent = icon;
-            btn.style.width = "40px";
-            btn.style.height = "40px";
-            btn.style.padding = "0";
-            btn.style.borderRadius = "50%";
-            btn.style.display = "flex";
-            btn.style.justifyContent = "center";
-            btn.style.alignItems = "center";
-            btn.style.cursor = "pointer";
-            btn.style.border = "1px solid #ccc";
-            btn.style.background = "#f9f9f9";
-            btn.style.fontSize = "18px";
-            btn.onclick = onClick;
-            return btn;
-        };
+    let btn = document.createElement("button");
+    btn.textContent = icon;
+    
+    // Принудительные стили с !important
+    btn.style.setProperty('width', '40px', 'important');
+    btn.style.setProperty('height', '40px', 'important');
+    btn.style.setProperty('padding', '0px', 'important'); // Убираем твой паддинг
+    btn.style.setProperty('margin', '0px', 'important');
+    btn.style.setProperty('border-radius', '50%', 'important'); // Теперь точно круг
+    
+    // Базовая настройка
+    btn.style.display = 'flex';
+    btn.style.justifyContent = 'center';
+    btn.style.alignItems = 'center';
+    btn.style.cursor = 'pointer';
+    btn.style.border = '1px solid #ccc';
+    btn.style.background = '#f9f9f9';
+    btn.style.fontSize = '16px';
+    btn.style.boxSizing = 'border-box';
+    
+    btn.onclick = onClick;
+    return btn;
+};
 
         // Кнопка Музыки
         let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
