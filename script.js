@@ -835,6 +835,7 @@ function showActionMenu(itemText) {
 }
 
 // Функция открытия контента
+// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     if (saveHistory) {
@@ -849,8 +850,8 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(title);
     }
 
-    // --- ДОБАВЛЕНИЕ ТУМБЛЕНА ДЛЯ КАТЕГОРИИ "Для моей Любимой" ---
-    const isMyBelovedCategory = (currentCategoryName === "Для моей Любимой") || (customTitle && customTitle.includes("Для моей Любимой"));
+    // --- ДОБАВЛЕНИЕ ТУМБЛЕРА ДЛЯ КАТЕГОРИИ "Для моей Любимой" ---
+    const isMyBelovedCategory = (currentCategoryName === "💌 Послание для Любимой") || (customTitle && customTitle.includes("💌 Послание для Любимой"));
     if (isMyBelovedCategory && currentUser) {
         let toggleBlock = document.createElement("div");
         toggleBlock.style.cssText = `
@@ -868,7 +869,7 @@ function openData(content, saveHistory = true, customTitle = null) {
             <span style="font-weight: 600; font-size: 15px; color: ${isEchpochmoniActive ? "#512da8" : "#d81b60"};">
                 😈 Стиль Эчпочмони
             </span>
-            <label class="switch-toggle" style="position: relative; display: inline-block; width: 46px; height: 24px; cursor: pointer;">
+            <label class="switch-toggle" style="position: relative; display: inline-block; width: 46px; height: 24px;">
                 <input type="checkbox" id="echpochmoniSwitch" style="opacity: 0; width: 0; height: 0;" ${isEchpochmoniActive ? "checked" : ""}>
                 <span class="slider-toggle" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px;"></span>
             </label>
@@ -876,15 +877,12 @@ function openData(content, saveHistory = true, customTitle = null) {
 
         app.appendChild(toggleBlock);
 
-        // Вешаем событие изменения состояния тумблера
         toggleBlock.querySelector("#echpochmoniSwitch").onchange = (e) => {
             isEchpochmoniActive = e.target.checked;
             
-            // Сохраняем индивидуально под текущий аккаунт
             localStorage.setItem("echpochmoni_mode_" + currentUser.id, isEchpochmoniActive);
             applyEchpochmoniTheme(isEchpochmoniActive);
 
-            // Мягко меняем цвет самого блока тумблера на лету
             toggleBlock.style.background = isEchpochmoniActive ? "#ebd9fc" : "#ffe3ec";
             toggleBlock.querySelector("span").style.color = isEchpochmoniActive ? "#512da8" : "#d81b60";
         };
@@ -898,8 +896,7 @@ function openData(content, saveHistory = true, customTitle = null) {
             } 
             else if (typeof item === "object" && item !== null) {
                 for (let franchiseName in item) {
-                    let button = document.createElement("button");
-                    button.className = "btn-pink-style"; // Применяем наш эталонный стиль к кнопкам подкатегорий
+                    let button = document.createElement("button"); // Убрали btn-pink-style, возвращаем дефолтный белый стиль
                     button.textContent = franchiseName;
                     button.onclick = () => openData(item[franchiseName], true);
                     app.appendChild(button);
@@ -910,8 +907,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     else if (typeof content === "object" && content !== null) {
         for (let key in content) {
             let value = content[key];
-            let button = document.createElement("button");
-            button.className = "btn-pink-style"; // Применяем наш эталонный стиль к кнопкам подкатегорий
+            let button = document.createElement("button"); // Убрали btn-pink-style, возвращаем дефолтный белый стиль
             button.textContent = key;
             button.onclick = () => openData(value, true);
             app.appendChild(button);
