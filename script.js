@@ -851,7 +851,13 @@ function onPhoneShake() {
     }
 
     // Принудительная вибрация
-    if (navigator.vibrate) navigator.vibrate(200);
+    if (navigator.vibrate) {
+        try {
+            navigator.vibrate([500]); // 500мс — это долгая, ощутимая вибрация
+        } catch (e) {
+            console.error("Ошибка вибрации:", e);
+        }
+    }
 
     // Логика выбора (максимально простая)
     const currentDataBranch = history[history.length - 1];
