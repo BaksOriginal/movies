@@ -819,10 +819,11 @@ const data = {
 // ==========================================
 // НАСТРОЙКА SUPABASE
 // ==========================================
-// Вставьте сюда ваши данные из Шага 5:
-const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co/rest/v1/o";
-const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
+// Вставьте сюда ваши данные (URL и Publishable Key из панели Supabase):
+const SUPABASE_URL = "https://ВАШ_ПРОЕКТ.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
 
+// Инициализируем клиент без конфликта имен (через глобальный window)
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
@@ -951,7 +952,6 @@ async function toggleWatchState(title) {
 
         if (error) console.error("Ошибка при добавлении фильма:", error);
     }
-    // Классы кнопок здесь менять не нужно — они автоматически обновятся через функцию subscribeToChanges()
 }
 
 // Экран авторизации
@@ -1130,5 +1130,3 @@ function addNavigation() {
         document.body.insertBefore(nav, app);
     }
 }
-
-showHome();
