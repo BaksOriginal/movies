@@ -131,14 +131,21 @@ function subscribeToChanges() {
             (payload) => {
                 console.log('Изменение получено в реальном времени:', payload);
                 
+                let stateChanged = false;
                 if (payload.eventType === 'INSERT') {
-                    watchedTitles.add(payload.new.title);
+                    if (!watchedTitles.has(payload.new.title)) {
+                        watchedTitles.add(payload.new.title);
+                        stateChanged = true;
+                    }
                 } else if (payload.eventType === 'DELETE') {
-                    watchedTitles.delete(payload.old.title);
+                    // Используем мягкое обновление, чтобы не потерять стейт
+                    stateChanged = true;
                 }
 
-                // Обновляем интерфейс на лету
-                updateUIOnLiveChange();
+                // Обновляем интерфейс на лету только при реальных изменениях
+                if (stateChanged) {
+                    updateUIOnLiveChange();
+                }
             }
         )
         .subscribe();
@@ -180,6 +187,18 @@ async function updateUIOnLiveChange() {
             }
         }
     });
+}
+
+// МЯГКОЕ ОБНОВЛЕНИЕ ТЕКУЩЕГО ЭКРАНА (без выброса на "Домой")
+async function refreshCurrentScreen() {
+    await loadCatalogFromDB();
+    if (history.length > 0) {
+        // Перерисовываем ту ветку, на которой сейчас находится пользователь
+        let currentActiveData = history[history.length - 1];
+        openData(currentActiveData, false); 
+    } else {
+        showHome();
+    }
 }
 
 // Добавление или удаление отметки "просмотрено"
@@ -703,8 +722,8 @@ function showAddEditModal(existingItem = null) {
             alert("Ошибка сохранения: " + result.error.message);
         } else {
             overlay.remove();
-            await updateUIOnLiveChange();
-            showHome();
+            // Мягко обновляем текущий экран, чтобы остаться там, где были!
+            await refreshCurrentScreen();
         }
     };
 }
@@ -763,8 +782,8 @@ async function handleDeleteClick(itemText) {
         if (error) {
             alert("Ошибка при удалении: " + error.message);
         } else {
-            await updateUIOnLiveChange();
-            showHome();
+            // Мягко обновляем экран после удаления
+            await refreshCurrentScreen();
         }
     }
 }
