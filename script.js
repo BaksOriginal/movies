@@ -1,7 +1,6 @@
-let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
-let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
+let dbData = {}; 
+let isTransitioning = false; 
 
-// Включаем временную блокировку кликов на 350мс
 function startTransitionLock() {
     isTransitioning = true;
     setTimeout(() => {
@@ -9,14 +8,12 @@ function startTransitionLock() {
     }, 350); 
 }
 
-// Перехватываем ВСЕ клики на сайте на стадии погружения
 document.addEventListener('click', (e) => {
     if (isTransitioning) {
         e.preventDefault();
         e.stopPropagation();
     }
-}, true); // true обязателен — это заставит событие обрабатываться в первую очередь
-// Функция для загрузки тайтлов из Supabase и сборки структуры
+}, true); 
 async function loadCatalogFromDB() {
     const { data: titles, error } = await db
         .from('titles')
@@ -28,7 +25,6 @@ async function loadCatalogFromDB() {
         return;
     }
 
-    // Собираем плоский список из базы обратно в древовидную структуру для сайта
     const tempStructure = {};
 
     titles.forEach(item => {
@@ -41,7 +37,6 @@ async function loadCatalogFromDB() {
         if (!tempStructure[cat][gen]) tempStructure[cat][gen] = [];
 
         if (fran) {
-            // Ищем, есть ли уже такая франшиза внутри жанра
             let franchiseObj = tempStructure[cat][gen].find(
                 i => typeof i === 'object' && i !== null && i[fran]
             );
@@ -52,7 +47,6 @@ async function loadCatalogFromDB() {
             }
             franchiseObj[fran].push(titleWithYear);
         } else {
-            // Обычный фильм без франшизы
             tempStructure[cat][gen].push(titleWithYear);
         }
     });
@@ -60,35 +54,27 @@ async function loadCatalogFromDB() {
     dbData = tempStructure;
 }
 
-// ==========================================
-// НАСТРОЙКА SUPABASE
-// ==========================================
-// Вставьте сюда ваши реальные данные из панели Supabase:
 const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
 
-// Инициализируем клиент под именем db, чтобы не было конфликта с глобальной переменной supabase
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
 let currentUser = null;
-let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
+let watchedTitles = new Set(); 
 let history = [];
-let realtimeChannel = null; // Канал для мгновенных обновлений
+let realtimeChannel = null; 
 
-// Слушатель событий авторизации
-// Слушатель событий авторизации с предварительной загрузкой каталога
 db.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
         
-        // Качаем параллельно: и список просмотренного, и сам каталог фильмов
         Promise.all([
             loadWatchedFromDB(),
-            loadCatalogFromDB() // Качаем каталог один раз при старте!
+            loadCatalogFromDB() 
         ]).then(() => {
             subscribeToChanges(); 
-            showHome(); // Теперь запускается мгновенно
+            showHome(); 
         });
     } else {
         currentUser = null;
@@ -101,7 +87,6 @@ db.auth.onAuthStateChange((event, session) => {
     }
 });
 
-// Загрузка просмотренных тайтлов из общей базы данных
 async function loadWatchedFromDB() {
     if (!currentUser) return;
     
@@ -117,7 +102,6 @@ async function loadWatchedFromDB() {
     watchedTitles = new Set(dbData.map(item => item.title));
 }
 
-// Подписка на изменения базы данных в реальном времени (Websockets)
 function subscribeToChanges() {
     if (realtimeChannel) return; 
 
@@ -126,7 +110,7 @@ function subscribeToChanges() {
         .on(
             'postgres_changes',
             {
-                event: '*', // Отслеживаем INSERT и DELETE
+                event: '*', 
                 schema: 'public',
                 table: 'watched_items'
             },
@@ -139,21 +123,15 @@ function subscribeToChanges() {
                     watchedTitles.delete(payload.old.title);
                 }
 
-                // Обновляем интерфейс на лету
                 updateUIOnLiveChange();
             }
         )
         .subscribe();
 }
 
-// Логика авто-обновления экрана без перезагрузки
-// Живое обновление интерфейса без перезагрузки страницы
-// Умное живое обновление интерфейса без принудительного сброса на главную
 async function updateUIOnLiveChange() {
-    // Подтягиваем свежие данные из базы
     await loadCatalogFromDB();
 
-    // 1. Обновляем счетчик на кнопке "Просмотрено" (если мы на главной)
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
         if (btn.textContent.includes("Просмотрено")) {
@@ -161,7 +139,6 @@ async function updateUIOnLiveChange() {
         }
     });
 
-    // 2. Обновляем иконки звездочек (★ / ☆) у текущих элементов на экране
     let rows = document.querySelectorAll(".item-row");
     rows.forEach(row => {
         let itemDiv = row.querySelector(".item");
@@ -170,8 +147,6 @@ async function updateUIOnLiveChange() {
         if (itemDiv && watchBtn) {
             let itemText = itemDiv.textContent.trim();
             
-            // Восстанавливаем оригинальный текст с годом для проверки в watchedTitles
-            // (так как в "Секретах" мы год убирали при отрисовке)
             const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
             let lookupText = itemText;
             if (isSecret && !itemText.includes("(2026)")) {
@@ -189,16 +164,13 @@ async function updateUIOnLiveChange() {
     });
 }
 
-// Добавление или удаление отметки "просмотрено"
 async function toggleWatchState(title) {
     if (!currentUser) return;
 
     if (watchedTitles.has(title)) {
-        // Локально сразу удаляем, чтобы интерфейс откликнулся мгновенно
         watchedTitles.delete(title);
         updateUIOnLiveChange();
 
-        // Отправляем запрос на удаление в БД (фильтруем по названию И по ID текущего юзера)
         const { error } = await db
             .from('watched_items')
             .delete()
@@ -207,30 +179,24 @@ async function toggleWatchState(title) {
 
         if (error) {
             console.error("Ошибка при удалении фильма из БД:", error);
-            // Если в БД удалить не удалось, возвращаем обратно
             watchedTitles.add(title);
             updateUIOnLiveChange();
         }
     } else {
-        // Локально сразу добавляем для быстроты отклика
         watchedTitles.add(title);
         updateUIOnLiveChange();
 
-        // Добавляем в БД
         const { error } = await db
             .from('watched_items')
             .insert([{ user_id: currentUser.id, title: title }]);
 
         if (error) {
             console.error("Ошибка при добавлении фильма в БД:", error);
-            // Если в БД добавить не удалось, откатываем назад
             watchedTitles.delete(title);
             updateUIOnLiveChange();
         }
     }
 }
-// Экран авторизации
-// Экран авторизации с подменой никнеймов на почты
 function showLoginScreen() {
     app.innerHTML = `
         <h1>Авторизация</h1>
@@ -244,23 +210,19 @@ function showLoginScreen() {
     document.getElementById("loginForm").onsubmit = async (e) => {
         e.preventDefault();
         
-        // Получаем введенный никнейм и приводим к нижнему регистру, чтобы не зависеть от опечаток (Asmoday или asmoday)
         const username = document.getElementById("loginUsername").value.trim().toLowerCase();
         const password = document.getElementById("loginPassword").value;
 
         let email = "";
 
-        // Карта сопоставления никнеймов и реальных почт
         if (username === "myakish") {
             email = "nowyouseemeinvi@gmail.com";
         } else if (username === "asmoday") {
             email = "unknownqsrll@gmail.com";
         } else {
-            // Если введен неизвестный никнейм, пробуем отправить его как есть (на случай, если захотите войти по обычной почте)
             email = username;
         }
 
-        // Выполняем вход в Supabase
         const { error } = await db.auth.signInWithPassword({ email, password });
         if (error) {
             alert("Ошибка входа: неверный никнейм или пароль.");
@@ -269,9 +231,6 @@ function showLoginScreen() {
     };
 }
 
-// Главная страница
-// Главная страница с динамической загрузкой категорий из Supabase
-// Главная страница — теперь работает МГНОВЕННО без запросов в сеть
 function showHome() {
     startTransitionLock();
     history = [];
@@ -284,10 +243,8 @@ function showHome() {
     if (currentUser) {
         let header = document.createElement("div");
         header.className = "user-header";
-        header.innerHTML = `
-            <span>Аккаунт: ${currentUser.email}</span>
-            <button class="btn-logout" id="logoutBtn">Выйти</button>
-        `;
+        header.innerHTML = `<span id="userEmailSpan"></span> <button class="btn-logout" id="logoutBtn">Выйти</button>`;
+        header.querySelector("#userEmailSpan").textContent = "Аккаунт: " + currentUser.email;
         app.appendChild(header);
         document.getElementById("logoutBtn").onclick = () => db.auth.signOut();
     }
@@ -296,7 +253,6 @@ function showHome() {
     title.textContent = "Время Кино!";
     app.appendChild(title);
 
-    // Кнопка: Добавить тайтл (только для авторизованных)
     if (currentUser) {
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
@@ -325,10 +281,6 @@ function showHome() {
     app.appendChild(watchedBtn);
 }
 
-// Отрисовка строки элемента с интерактивом
-// Отрисовка строки элемента (тайтла)
-// Отрисовка строки элемента (тайтла) с умным зажатием без фантомных кликов
-// Отрисовка строки элемента (тайтла) с умным зажатием без фантомных кликов
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
@@ -336,14 +288,10 @@ function renderItemRow(itemText, container) {
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
     
-    // --- ПРОВЕРКА НА СЕКРЕТНОСТЬ ---
-    // 1. Проверяем по конкретным текстам (на всякий случай)
     let isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
     
-    // 2. И проверяем по названию текущей категории в истории
     if (history.length > 0) {
         const currentCategoryData = history[history.length - 1];
-        // Ищем в dbData категорию, которая совпадает с текущим экраном
         for (let catName in dbData) {
             if (dbData[catName] === currentCategoryData && (catName.includes("Секрет") || catName.includes("🔒") || catName.includes("❤️"))) {
                 isSecret = true;
@@ -353,29 +301,25 @@ function renderItemRow(itemText, container) {
     }
 
     if (isSecret) {
-        // Убираем год в конце (любые четыре цифры в скобках)
         itemDiv.textContent = itemText.replace(/\s*\(\d{4}\)$/, "");
     } else {
         itemDiv.textContent = itemText;
         itemDiv.style.cursor = "pointer";
-        itemDiv.style.userSelect = "none"; // Запрещаем выделение текста при зажатии
+        itemDiv.style.userSelect = "none"; 
         itemDiv.style.webkitUserSelect = "none";
         
         let pressTimer = null;
-        let isMoving = false; // Флаг, чтобы отличать скролл от зажатия
+        let isMoving = false; 
         let startX = 0, startY = 0;
 
-        // Начало нажатия
         const startPress = (e) => {
             isMoving = false;
             
-            // Запоминаем начальную точку тача (для проверки скролла)
             if (e.type === 'touchstart') {
                 startX = e.touches[0].clientX;
                 startY = e.touches[0].clientY;
             }
 
-            // Запускаем таймер зажатия на 700мс
             pressTimer = setTimeout(() => {
                 if (!isMoving) {
                     showActionMenu(itemText);
@@ -383,7 +327,6 @@ function renderItemRow(itemText, container) {
             }, 700);
         };
 
-        // Отмена таймера (если отпустили раньше времени)
         const cancelPress = () => {
             if (pressTimer !== null) {
                 clearTimeout(pressTimer);
@@ -391,7 +334,6 @@ function renderItemRow(itemText, container) {
             }
         };
 
-        // Проверка движения пальца (если сдвинули больше чем на 10px — это скролл, а не зажатие)
         const movePress = (e) => {
             if (e.type === 'touchmove') {
                 let diffX = Math.abs(e.touches[0].clientX - startX);
@@ -403,13 +345,11 @@ function renderItemRow(itemText, container) {
             }
         };
 
-        // Защита от фантомных кликов
         const preventPhantomClick = (e) => {
             e.preventDefault();
             e.stopPropagation();
         };
 
-        // Слушатели для ПК
         itemDiv.addEventListener("mousedown", startPress);
         itemDiv.addEventListener("mouseup", cancelPress);
         itemDiv.addEventListener("mouseleave", cancelPress);
@@ -417,7 +357,6 @@ function renderItemRow(itemText, container) {
             e.preventDefault();
         });
 
-        // Слушатели для мобилок (тач)
         itemDiv.addEventListener("touchstart", startPress, { passive: true });
         itemDiv.addEventListener("touchmove", movePress, { passive: true });
         itemDiv.addEventListener("touchend", (e) => {
@@ -432,7 +371,6 @@ function renderItemRow(itemText, container) {
     
     row.appendChild(itemDiv);
 
-    // Звёздочку рисуем только для НЕ секретных тайтлов
     if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
@@ -449,9 +387,7 @@ function renderItemRow(itemText, container) {
     container.appendChild(row);
 }
 
-// Всплывающее меню выбора действия при клике на тайтл
 function showActionMenu(itemText) {
-    // Проверяем на секрет (на всякий случай)
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
     const overlay = document.createElement("div");
@@ -460,7 +396,7 @@ function showActionMenu(itemText) {
 
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">${itemText}</h3>
+            <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons">
                 <button class="btn-action-edit" id="actEdit">✏️ Редактировать</button>
@@ -470,9 +406,10 @@ function showActionMenu(itemText) {
         </div>
     `;
 
+    overlay.querySelector("#menuTitle").textContent = itemText;
+
     document.body.appendChild(overlay);
 
-    // Привязываем действия к кнопкам
     document.getElementById("actEdit").onclick = () => {
         overlay.remove();
         handleEditClick(itemText);
@@ -488,7 +425,6 @@ function showActionMenu(itemText) {
     };
 }
 
-// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     if (saveHistory) {
@@ -531,7 +467,6 @@ function openData(content, saveHistory = true, customTitle = null) {
     addNavigation();
 }
 
-// Навигационная панель Назад/Домой
 function addNavigation() {
     let oldNav = document.querySelector(".navigation");
     if (oldNav) {
@@ -569,16 +504,13 @@ function addNavigation() {
         document.body.insertBefore(nav, app);
     }
 }
-// Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ
-// Показ модального окна добавления или редактирования тайтла
-// Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ (с родным стилем сайта)
+
 function showAddEditModal(existingItem = null) {
-    // Создаем оверлей модалки
+
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "addEditModal";
 
-    // Собираем все уникальные ЖАНРЫ и ФРАНШИЗЫ из базы для автодополнения
     const existingGenres = new Set();
     const existingFranchises = new Set();
 
@@ -646,7 +578,6 @@ function showAddEditModal(existingItem = null) {
     const mCategory = document.getElementById("mCategory");
     const mGenre = document.getElementById("mGenre");
 
-    // Если мы РЕДАКТИРУЕМ, заполняем поля старыми данными
     if (existingItem) {
         document.getElementById("mTitle").value = existingItem.title;
         document.getElementById("mYear").value = existingItem.year;
@@ -655,10 +586,8 @@ function showAddEditModal(existingItem = null) {
         document.getElementById("mFranchise").value = existingItem.franchise || "";
     }
 
-    // Закрытие по кнопке Отмена
     document.getElementById("mCancel").onclick = () => overlay.remove();
 
-    // Отправка формы
     document.getElementById("modalForm").onsubmit = async (e) => {
         e.preventDefault();
 
@@ -673,13 +602,11 @@ function showAddEditModal(existingItem = null) {
         let result;
 
         if (existingItem) {
-            // Запрос на ОБНОВЛЕНИЕ в Supabase
             result = await db
                 .from("titles")
                 .update({ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal })
                 .eq("id", existingItem.id);
         } else {
-            // Запрос на ДОБАВЛЕНИЕ в Supabase
             result = await db
                 .from("titles")
                 .insert([{ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal }]);
@@ -689,14 +616,12 @@ function showAddEditModal(existingItem = null) {
             alert("Ошибка сохранения: " + result.error.message);
         } else {
             overlay.remove();
-            // Мгновенно обновляем интерфейс
             await updateUIOnLiveChange();
         }
     };
 }
     document.getElementById("closeModalBtn").onclick = () => overlay.remove();
 
-    // Обработка отправки формы
     document.getElementById("addTitleForm").onsubmit = async (e) => {
         e.preventDefault();
 
@@ -705,12 +630,10 @@ function showAddEditModal(existingItem = null) {
         const category = document.getElementById("mCategory").value;
         const genre = document.getElementById("mGenre").value.trim();
         
-        // Получаем франшизу (если пусто — записываем null в базу)
         let franchise = document.getElementById("mFranchise").value.trim();
         if (franchise === "") franchise = null;
 
         if (editItem) {
-            // Обновление существующей записи
             const { error } = await db
                 .from("titles")
                 .update({ title, year, category, genre, franchise })
@@ -723,7 +646,6 @@ function showAddEditModal(existingItem = null) {
                 await updateUIOnLiveChange();
             }
         } else {
-            // Добавление новой записи
             const { error } = await db
                 .from("titles")
                 .insert([{ title, year, category, genre, franchise }]);
@@ -738,16 +660,13 @@ function showAddEditModal(existingItem = null) {
     };
 }
 
-// Обработка кнопки "Редактировать"
 async function handleEditClick(itemText) {
-    // Парсим название и год обратно (например "Крик (2026)")
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
 
     const cleanTitle = match[1].trim();
     const year = parseInt(match[2], 10);
 
-    // Ищем запись в базе, чтобы узнать её ID, категорию и жанр
     const { data, error } = await db
         .from("titles")
         .select("*")
@@ -764,7 +683,6 @@ async function handleEditClick(itemText) {
     showAddEditModal(data);
 }
 
-// Обработка кнопки "Удалить"
 async function handleDeleteClick(itemText) {
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
@@ -783,7 +701,6 @@ async function handleDeleteClick(itemText) {
             alert("Ошибка при удалении: " + error.message);
         } else {
             await updateUIOnLiveChange();
-            // Возвращаемся на главную
             showHome();
         }
     }
