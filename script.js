@@ -1,5 +1,21 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
+let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 
+// Включаем временную блокировку кликов на 350мс
+function startTransitionLock() {
+    isTransitioning = true;
+    setTimeout(() => {
+        isTransitioning = false;
+    }, 350); 
+}
+
+// Перехватываем ВСЕ клики на сайте на стадии погружения
+document.addEventListener('click', (e) => {
+    if (isTransitioning) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+}, true); // true обязателен — это заставит событие обрабатываться в первую очередь
 // Функция для загрузки тайтлов из Supabase и сборки структуры
 async function loadCatalogFromDB() {
     const { data: titles, error } = await db
@@ -250,6 +266,7 @@ function showLoginScreen() {
 // Главная страница
 // Главная страница с динамической загрузкой категорий из Supabase
 async function showHome() {
+    startTransitionLock();
     history = [];
     await loadCatalogFromDB();
     
@@ -415,6 +432,7 @@ function showActionMenu(itemText) {
 
 // Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
+    startTransitionLock();
     if (saveHistory) {
         history.push(content);
     }
