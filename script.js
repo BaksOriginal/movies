@@ -321,34 +321,22 @@ async function showHome() {
     app.appendChild(title);
 
     if (currentUser) {
-        // 1. Создаем контейнер для кнопки "Добавить" и разделителя
-        let addContainer = document.createElement("div");
-        addContainer.style.display = "flex";
-        addContainer.style.alignItems = "center"; // Выравнивание по центру
-        addContainer.style.marginBottom = "20px";
-
+        // Кнопка "Добавить"
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
         addBtn.style.background = "#e3f2fd";
         addBtn.style.color = "#0d47a1";
-        // Убираем margin-bottom у кнопки, так как он теперь у контейнера
+        addBtn.style.marginBottom = "10px"; // Чуть меньше отступ
         addBtn.onclick = () => showAddEditModal();
+        app.appendChild(addBtn);
         
-        // 2. Разделитель
-        let separator = document.createElement("div");
-        separator.style.width = "1px";
-        separator.style.height = "24px";
-        separator.style.background = "#ccc";
-        separator.style.margin = "0 15px"; // Отступы по бокам
-        separator.style.flexShrink = "0";
-
-        // 3. Собираем всё вместе
-        addContainer.appendChild(addBtn);
-        addContainer.appendChild(separator);
-        
-        // 4. Добавляем контейнер в app, а не элементы по отдельности
-        app.appendChild(addContainer);
+        // Горизонтальный разделитель
+        let hr = document.createElement("hr");
+        hr.style.border = "0";
+        hr.style.borderTop = "1px solid #ccc"; // Тонкая серая линия
+        hr.style.margin = "15px 0"; // Отступы сверху и снизу
+        app.appendChild(hr);
     }
 
     for (let key in dbData) {
