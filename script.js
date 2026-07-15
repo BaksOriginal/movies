@@ -1,6 +1,7 @@
-let dbData = {}; 
-let isTransitioning = false; 
+let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
+let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 
+// Включаем временную блокировку кликов на 350мс
 function startTransitionLock() {
     isTransitioning = true;
     setTimeout(() => {
@@ -8,12 +9,15 @@ function startTransitionLock() {
     }, 350); 
 }
 
+// Перехватываем ВСЕ клики на сайте на стадии погружения
 document.addEventListener('click', (e) => {
     if (isTransitioning) {
         e.preventDefault();
         e.stopPropagation();
     }
-}, true); 
+}, true); // true обязателен — это заставит событие обрабатываться в первую очередь
+
+// Функция для загрузки тайтлов из Supabase и сборки структуры
 async function loadCatalogFromDB() {
     const { data: titles, error } = await db
         .from('titles')
@@ -25,6 +29,7 @@ async function loadCatalogFromDB() {
         return;
     }
 
+    // Собираем плоский список из базы обратно в древовидную структуру для сайта
     const tempStructure = {};
 
     titles.forEach(item => {
@@ -37,6 +42,7 @@ async function loadCatalogFromDB() {
         if (!tempStructure[cat][gen]) tempStructure[cat][gen] = [];
 
         if (fran) {
+            // Ищем, есть ли уже такая франшиза внутри жанра
             let franchiseObj = tempStructure[cat][gen].find(
                 i => typeof i === 'object' && i !== null && i[fran]
             );
@@ -47,6 +53,7 @@ async function loadCatalogFromDB() {
             }
             franchiseObj[fran].push(titleWithYear);
         } else {
+            // Обычный фильм без франшизы
             tempStructure[cat][gen].push(titleWithYear);
         }
     });
@@ -54,27 +61,31 @@ async function loadCatalogFromDB() {
     dbData = tempStructure;
 }
 
+// ==========================================
+// НАСТРОЙКА SUPABASE
+// ==========================================
 const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
 
+// Инициализируем клиент под именем db
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
 let currentUser = null;
-let watchedTitles = new Set(); 
+let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
 let history = [];
-let realtimeChannel = null; 
+let realtimeChannel = null; // Канал для мгновенных обновлений
 
+// Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
+let currentCategoryName = null; 
+
+// Слушатель событий авторизации
 db.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
-        
-        Promise.all([
-            loadWatchedFromDB(),
-            loadCatalogFromDB() 
-        ]).then(() => {
+        loadWatchedFromDB().then(() => {
             subscribeToChanges(); 
-            showHome(); 
+            showHome();
         });
     } else {
         currentUser = null;
@@ -87,6 +98,7 @@ db.auth.onAuthStateChange((event, session) => {
     }
 });
 
+// Загрузка просмотренных тайтлов из общей базы данных
 async function loadWatchedFromDB() {
     if (!currentUser) return;
     
@@ -102,6 +114,7 @@ async function loadWatchedFromDB() {
     watchedTitles = new Set(dbData.map(item => item.title));
 }
 
+// Подписка на изменения базы данных в реальном времени (Websockets)
 function subscribeToChanges() {
     if (realtimeChannel) return; 
 
@@ -123,15 +136,18 @@ function subscribeToChanges() {
                     watchedTitles.delete(payload.old.title);
                 }
 
+                // Обновляем интерфейс на лету
                 updateUIOnLiveChange();
             }
         )
         .subscribe();
 }
 
+// Живое обновление интерфейса без принудительного сброса на главную
 async function updateUIOnLiveChange() {
     await loadCatalogFromDB();
 
+    // 1. Обновляем счетчик на кнопке "Просмотрено"
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
         if (btn.textContent.includes("Просмотрено")) {
@@ -139,6 +155,7 @@ async function updateUIOnLiveChange() {
         }
     });
 
+    // 2. Обновляем иконки звездочек
     let rows = document.querySelectorAll(".item-row");
     rows.forEach(row => {
         let itemDiv = row.querySelector(".item");
@@ -164,6 +181,7 @@ async function updateUIOnLiveChange() {
     });
 }
 
+// Добавление или удаление отметки "просмотрено"
 async function toggleWatchState(title) {
     if (!currentUser) return;
 
@@ -197,6 +215,8 @@ async function toggleWatchState(title) {
         }
     }
 }
+
+// Экран авторизации
 function showLoginScreen() {
     app.innerHTML = `
         <h1>Авторизация</h1>
@@ -210,6 +230,9 @@ function showLoginScreen() {
     document.getElementById("loginForm").onsubmit = async (e) => {
         e.preventDefault();
         
+        // Запускаем отслеживание акселерометра (пользователь кликнул, браузер разрешит)
+        startShakeDetection();
+
         const username = document.getElementById("loginUsername").value.trim().toLowerCase();
         const password = document.getElementById("loginPassword").value;
 
@@ -231,9 +254,12 @@ function showLoginScreen() {
     };
 }
 
-function showHome() {
+// Главная страница
+async function showHome() {
     startTransitionLock();
     history = [];
+    currentCategoryName = null; // Сбрасываем текущую категорию на главной
+    await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
     if (nav) nav.remove();
@@ -267,7 +293,11 @@ function showHome() {
     for (let key in dbData) {
         let button = document.createElement("button");
         button.textContent = key;
-        button.onclick = () => openData(dbData[key], true);
+        // При клике на категорию запоминаем её название
+        button.onclick = () => {
+            currentCategoryName = key;
+            openData(dbData[key], true);
+        };
         app.appendChild(button);
     }
 
@@ -276,11 +306,13 @@ function showHome() {
     watchedBtn.style.background = "#ffe3ec";
     watchedBtn.onclick = () => {
         const list = Array.from(watchedTitles);
+        currentCategoryName = "🎬 Просмотрено";
         openData(list, true, "🎬 Просмотрено");
     };
     app.appendChild(watchedBtn);
 }
 
+// Отрисовка строки элемента (тайтла)
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
@@ -288,16 +320,12 @@ function renderItemRow(itemText, container) {
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
     
-    let isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
+    // --- ПРОВЕРКА НА СЕКРЕТНОСТЬ ---
+    let isSecret = itemText.includes("Я Тебя Очень Сильно LЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
     
-    if (history.length > 0) {
-        const currentCategoryData = history[history.length - 1];
-        for (let catName in dbData) {
-            if (dbData[catName] === currentCategoryData && (catName.includes("Секрет") || catName.includes("🔒") || catName.includes("❤️"))) {
-                isSecret = true;
-                break;
-            }
-        }
+    // Если мы внутри секретной категории, делаем тайтл секретным
+    if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️"))) {
+        isSecret = true;
     }
 
     if (isSecret) {
@@ -305,16 +333,15 @@ function renderItemRow(itemText, container) {
     } else {
         itemDiv.textContent = itemText;
         itemDiv.style.cursor = "pointer";
-        itemDiv.style.userSelect = "none"; 
+        itemDiv.style.userSelect = "none";
         itemDiv.style.webkitUserSelect = "none";
         
         let pressTimer = null;
-        let isMoving = false; 
+        let isMoving = false;
         let startX = 0, startY = 0;
 
         const startPress = (e) => {
             isMoving = false;
-            
             if (e.type === 'touchstart') {
                 startX = e.touches[0].clientX;
                 startY = e.touches[0].clientY;
@@ -353,9 +380,7 @@ function renderItemRow(itemText, container) {
         itemDiv.addEventListener("mousedown", startPress);
         itemDiv.addEventListener("mouseup", cancelPress);
         itemDiv.addEventListener("mouseleave", cancelPress);
-        itemDiv.addEventListener("click", (e) => {
-            e.preventDefault();
-        });
+        itemDiv.addEventListener("click", (e) => { e.preventDefault(); });
 
         itemDiv.addEventListener("touchstart", startPress, { passive: true });
         itemDiv.addEventListener("touchmove", movePress, { passive: true });
@@ -387,6 +412,7 @@ function renderItemRow(itemText, container) {
     container.appendChild(row);
 }
 
+// Всплывающее меню выбора действия
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -400,12 +426,13 @@ function showActionMenu(itemText) {
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons">
                 <button class="btn-action-edit" id="actEdit">✏️ Редактировать</button>
-                <button class="btn-action-delete" id="actDelete">❌ Удалить</button>
+                <button class="btn-action-delete" id="actDelete">❌ Удалить из базы</button>
                 <button class="btn-action-cancel" id="actCancel">Отмена</button>
             </div>
         </div>
     `;
 
+    // Записываем заголовок безопасно (защита от XSS)
     overlay.querySelector("#menuTitle").textContent = itemText;
 
     document.body.appendChild(overlay);
@@ -425,6 +452,7 @@ function showActionMenu(itemText) {
     };
 }
 
+// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     if (saveHistory) {
@@ -467,6 +495,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     addNavigation();
 }
 
+// Навигационная панель Назад/Домой
 function addNavigation() {
     let oldNav = document.querySelector(".navigation");
     if (oldNav) {
@@ -484,6 +513,11 @@ function addNavigation() {
         let previous = history[history.length - 1];
 
         if (previous) {
+            // Если выходим назад к списку категорий первого уровня, восстанавливаем имя категории
+            if (history.length === 1) {
+                // Если остался один шаг в истории, значит мы на уровне жанров текущей категории
+                // Категорию не сбрасываем
+            }
             openData(previous, false);
         } else {
             showHome();
@@ -505,12 +539,15 @@ function addNavigation() {
     }
 }
 
+// Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ
 function showAddEditModal(existingItem = null) {
-
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "addEditModal";
 
+    const categories = Object.keys(dbData);
+    
+    // Собираем все уникальные ЖАНРЫ и ФРАНШИЗЫ из базы для автодополнения
     const existingGenres = new Set();
     const existingFranchises = new Set();
 
@@ -535,8 +572,6 @@ function showAddEditModal(existingItem = null) {
 
     const genreOptions = sortedGenres.map(g => `<option value="${g}">`).join("");
     const franchiseOptions = sortedFranchises.map(f => `<option value="${f}">`).join("");
-
-    const categories = Object.keys(dbData);
     
     overlay.innerHTML = `
         <div class="modal-content">
@@ -595,7 +630,6 @@ function showAddEditModal(existingItem = null) {
         const yearVal = parseInt(document.getElementById("mYear").value, 10);
         const catVal = mCategory.value;
         const genreVal = mGenre.value.trim();
-        
         let franchiseVal = document.getElementById("mFranchise").value.trim();
         if (franchiseVal === "") franchiseVal = null;
 
@@ -617,10 +651,12 @@ function showAddEditModal(existingItem = null) {
         } else {
             overlay.remove();
             await updateUIOnLiveChange();
+            showHome();
         }
     };
 }
-   
+
+// Обработка кнопки "Редактировать"
 async function handleEditClick(itemText) {
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
@@ -644,6 +680,7 @@ async function handleEditClick(itemText) {
     showAddEditModal(data);
 }
 
+// Обработка кнопки "Удалить"
 async function handleDeleteClick(itemText) {
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
@@ -652,6 +689,18 @@ async function handleDeleteClick(itemText) {
     const year = parseInt(match[2], 10);
 
     if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
+        
+        // 1. Сначала чистим из просмотренных, чтобы не ругалась БД на связи
+        const { error: watchedError } = await db
+            .from("watched_items")
+            .delete()
+            .eq("title", itemText);
+
+        if (watchedError) {
+            console.error("Не удалось удалить из просмотренных:", watchedError.message);
+        }
+
+        // 2. Теперь удаляем сам фильм
         const { error } = await db
             .from("titles")
             .delete()
@@ -664,5 +713,154 @@ async function handleDeleteClick(itemText) {
             await updateUIOnLiveChange();
             showHome();
         }
+    }
+}
+
+
+// =======================================================
+// ЛОГИКА ТРЯСКИ ТЕЛЕФОНА (SHAKE DETECTION)
+// =======================================================
+const SHAKE_THRESHOLD = 15; // Чувствительность датчика (15 — оптимально)
+const SHAKE_TIMEOUT = 2500;  // Задержка между взмахами (2.5 сек), чтобы не спамило
+let lastX = null, lastY = null, lastZ = null;
+let lastShakeTime = 0;
+let isShakeModalOpen = false; // Чтобы не открывать две модалки рандома одновременно
+
+// Функция, которая собирает абсолютно ВСЕ фильмы из текущей выбранной ветки (включая все жанры и франшизы)
+function getAllTitlesFromCategory(dataBranch) {
+    let resultList = [];
+
+    if (Array.isArray(dataBranch)) {
+        dataBranch.forEach(item => {
+            if (typeof item === 'string') {
+                resultList.push(item);
+            } else if (typeof item === 'object' && item !== null) {
+                // Если внутри лежит франшиза
+                for (let key in item) {
+                    if (Array.isArray(item[key])) {
+                        resultList = resultList.concat(item[key]);
+                    }
+                }
+            }
+        });
+    } else if (typeof dataBranch === 'object' && dataBranch !== null) {
+        for (let key in dataBranch) {
+            resultList = resultList.concat(getAllTitlesFromCategory(dataBranch[key]));
+        }
+    }
+
+    return resultList;
+}
+
+// Показ красивого модального окна со случайным выбором
+function showRandomTitleModal(titleText) {
+    if (isShakeModalOpen) return;
+    isShakeModalOpen = true;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "shakeRandomModal";
+    overlay.style.zIndex = "10000"; // Поверх всех остальных меню
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center; border: 3px solid #ff4081; animation: popIn 0.3s ease;">
+            <div style="font-size: 40px; margin-bottom: 10px;">🎰</div>
+            <h3 style="color: #ff4081; margin-bottom: 5px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Выбор Судьбы!</h3>
+            <h2 id="shakeRandomTitle" style="margin-bottom: 25px; font-size: 22px; line-height: 1.4;"></h2>
+            <button id="closeShakeBtn" class="btn-save" style="background: #ff4081; width: 100%; border: none;">Супер, смотрим!</button>
+        </div>
+    `;
+
+    // Безопасно выводим рандомный тайтл без XSS уязвимостей
+    // И сразу убираем год для секретов, если выпал секрет
+    const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️")));
+    
+    const displayText = isSecret ? titleText.replace(/\s*\(\d{4}\)$/, "") : titleText;
+    overlay.querySelector("#shakeRandomTitle").textContent = displayText;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("closeShakeBtn").onclick = () => {
+        overlay.remove();
+        isShakeModalOpen = false;
+    };
+}
+
+// Функция, реагирующая на тряску
+function onPhoneShake() {
+    const now = Date.now();
+    if (now - lastShakeTime < SHAKE_TIMEOUT) return; 
+
+    // Если мы на главном экране (категория не выбрана) или уже открыто окно рандома — игнорируем тряску
+    if (!currentCategoryName || isShakeModalOpen) return;
+
+    // Слегка вибрируем телефон (работает на Android)
+    if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]); 
+    }
+
+    // Собираем все фильмы из открытой в данный момент ветки истории
+    const currentDataBranch = history[history.length - 1];
+    if (!currentDataBranch) return;
+
+    const allCategoryTitles = getAllTitlesFromCategory(currentDataBranch);
+
+    if (allCategoryTitles.length === 0) return;
+
+    lastShakeTime = now;
+
+    // Выбираем случайный тайтл
+    const randomIndex = Math.floor(Math.random() * allCategoryTitles.length);
+    const chosenTitle = allCategoryTitles[randomIndex];
+
+    // Показываем модалку счастливчика
+    showRandomTitleModal(chosenTitle);
+}
+
+// Обработчик акселерометра
+function handleMotion(event) {
+    const acceleration = event.accelerationIncludingGravity;
+    if (!acceleration) return;
+
+    let x = acceleration.x;
+    let y = acceleration.y;
+    let z = acceleration.z;
+
+    if (lastX === null) {
+        lastX = x; lastY = y; lastZ = z;
+        return;
+    }
+
+    let deltaX = Math.abs(lastX - x);
+    let deltaY = Math.abs(lastY - y);
+    let deltaZ = Math.abs(lastZ - z);
+
+    // Если движение превысило порог резкости по двум осям — это тряска!
+    if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || 
+        (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || 
+        (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
+        
+        onPhoneShake();
+    }
+
+    lastX = x; lastY = y; lastZ = z;
+}
+
+// Запуск детектора тряски
+function startShakeDetection() {
+    // Для iOS 13+ требуется явное разрешение
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission()
+            .then(permissionState => {
+                if (permissionState === 'granted') {
+                    window.addEventListener('devicemotion', handleMotion);
+                    console.log("Детектор тряски успешно запущен (iOS)");
+                }
+            })
+            .catch(console.error);
+    } else {
+        // Для Android
+        window.addEventListener('devicemotion', handleMotion);
+        console.log("Детектор тряски успешно запущен (Android)");
     }
 }
