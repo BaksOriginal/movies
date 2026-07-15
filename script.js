@@ -845,43 +845,31 @@ function showRandomTitleModal(titleText) {
 
 // Функция, реагирующая на тряску
 function onPhoneShake() {
-    console.log("Попытка тряски..."); // Проверка в консоли
-
-    // 1. Проверка на секрет (самая строгая)
+    // УБИРАЕМ ВСЕ ПРОВЕРКИ КРОМЕ СЕКРЕТА
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒"))) {
-        console.log("Секрет: тряска игнорируется");
         return;
     }
 
-    // 2. Тайм-аут (чтобы не было спама)
-    const now = Date.now();
-    if (now - lastShakeTime < 2000) return; // Увеличил до 2 секунд для теста
+    // Принудительная вибрация
+    if (navigator.vibrate) navigator.vibrate(200);
 
-    // 3. Проверка на модалку
-    if (isShakeModalOpen) return;
-
-    // 4. Сбор данных
+    // Логика выбора (максимально простая)
     const currentDataBranch = history[history.length - 1];
     if (!currentDataBranch) {
-        console.log("Нет данных в истории");
+        console.log("История пуста");
         return;
     }
 
     const allTitles = getAllTitlesFromCategory(currentDataBranch);
-    if (allTitles.length === 0) {
-        console.log("Нет фильмов в списке");
-        return;
-    }
+    if (allTitles.length === 0) return;
 
-    // 5. Действие
-    lastShakeTime = now;
-    if (navigator.vibrate) navigator.vibrate(200);
+    // Показываем окно
+    const randomTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
+    showRandomTitleModal(randomTitle);
     
-    const chosenTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
-    showRandomTitleModal(chosenTitle);
-    console.log("Успех: показан фильм", chosenTitle);
+    // СБРОС ФЛАГА (если он у тебя есть)
+    isShakeModalOpen = true; 
 }
-
 // Обработчик акселерометра
 function handleMotion(event) {
     const acceleration = event.accelerationIncludingGravity;
