@@ -819,24 +819,23 @@ const data = {
 // ==========================================
 // НАСТРОЙКА SUPABASE
 // ==========================================
-// Вставьте сюда ваши данные (URL и Publishable Key из панели Supabase):
+// Вставьте сюда ваши реальные данные из панели Supabase:
 const SUPABASE_URL = "https://ВАШ_ПРОЕКТ.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
 
-// Инициализируем клиент без конфликта имен (через глобальный window)
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Инициализируем клиент под именем db, чтобы не было конфликта с глобальной переменной supabase
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
 let currentUser = null;
-let watchedTitles = new Set(); // Общий список просмотренных фильмов обоими юзерами
+let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
 let history = [];
-let realtimeChannel = null; // Вебсокет для realtime-обновлений
+let realtimeChannel = null; // Канал для мгновенных обновлений
 
-// Слушатель событий авторизации (срабатывает при загрузке страницы и логине/выходе)
-supabase.auth.onAuthStateChange((event, session) => {
+// Слушатель событий авторизации
+db.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
-        // Сначала загружаем текущий список из базы, затем подписываемся на изменения и открываем сайт
         loadWatchedFromDB().then(() => {
             subscribeToChanges(); 
             showHome();
@@ -845,7 +844,7 @@ supabase.auth.onAuthStateChange((event, session) => {
         currentUser = null;
         watchedTitles.clear();
         if (realtimeChannel) {
-            supabase.removeChannel(realtimeChannel);
+            db.removeChannel(realtimeChannel);
             realtimeChannel = null;
         }
         showLoginScreen();
@@ -856,7 +855,7 @@ supabase.auth.onAuthStateChange((event, session) => {
 async function loadWatchedFromDB() {
     if (!currentUser) return;
     
-    const { data: dbData, error } = await supabase
+    const { data: dbData, error } = await db
         .from('watched_items')
         .select('title');
 
@@ -872,17 +871,17 @@ async function loadWatchedFromDB() {
 function subscribeToChanges() {
     if (realtimeChannel) return; 
 
-    realtimeChannel = supabase
+    realtimeChannel = db
         .channel('schema-db-changes')
         .on(
             'postgres_changes',
             {
-                event: '*', // Отслеживаем и добавления, и удаления
+                event: '*', // Отслеживаем INSERT и DELETE
                 schema: 'public',
                 table: 'watched_items'
             },
             (payload) => {
-                console.log('Изменение получено:', payload);
+                console.log('Изменение получено в реальном времени:', payload);
                 
                 if (payload.eventType === 'INSERT') {
                     watchedTitles.add(payload.new.title);
@@ -890,16 +889,15 @@ function subscribeToChanges() {
                     watchedTitles.delete(payload.old.title);
                 }
 
-                // Перерисовываем элементы на экране в реальном времени
+                // Обновляем интерфейс на лету
                 updateUIOnLiveChange();
             }
         )
         .subscribe();
 }
 
-// Логика обновления интерфейса без перезагрузки страницы
+// Логика авто-обновления экрана без перезагрузки
 function updateUIOnLiveChange() {
-    // 1. Если мы на главной странице, просто обновляем счетчик на кнопке "Просмотрено"
     const logoutBtn = document.getElementById("logoutBtn");
     const isHomePage = logoutBtn && !document.querySelector(".navigation"); 
     
@@ -908,7 +906,7 @@ function updateUIOnLiveChange() {
         return;
     }
 
-    // 2. Если открыт обычный список фильмов, обновляем закрашенные звездочки
+    // Обновляем состояние звёзд в открытом списке
     const rows = document.querySelectorAll(".item-row");
     rows.forEach(row => {
         const itemText = row.querySelector(".item").textContent;
@@ -923,30 +921,30 @@ function updateUIOnLiveChange() {
         }
     });
 
-    // 3. Если мы находимся прямо внутри категории "Просмотрено", при удалении элемента обновляем весь список
+    // Если находимся прямо в "Просмотрено", мгновенно убираем удалённый элемент
     const pageTitle = document.querySelector("h1");
     if (pageTitle && pageTitle.textContent === "🎬 Просмотрено") {
         const updatedList = Array.from(watchedTitles);
-        history[history.length - 1] = updatedList; // Обновляем историю переходов
+        history[history.length - 1] = updatedList; 
         openData(updatedList, false); 
     }
 }
 
-// Добавление или удаление отметки просмотрено
+// Добавление или удаление отметки "просмотрено"
 async function toggleWatchState(title) {
     if (!currentUser) return;
 
     if (watchedTitles.has(title)) {
-        // Запись существует -> удаляем из общей базы
-        const { error } = await supabase
+        // Запись уже есть — удаляем её
+        const { error } = await db
             .from('watched_items')
             .delete()
             .eq('title', title);
 
         if (error) console.error("Ошибка при удалении фильма:", error);
     } else {
-        // Записи нет -> добавляем в общую базу
-        const { error } = await supabase
+        // Записи нет — добавляем в базу
+        const { error } = await db
             .from('watched_items')
             .insert([{ user_id: currentUser.id, title: title }]);
 
@@ -970,7 +968,7 @@ function showLoginScreen() {
         const email = document.getElementById("loginEmail").value;
         const password = document.getElementById("loginPassword").value;
 
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await db.auth.signInWithPassword({ email, password });
         if (error) {
             alert("Ошибка входа: " + error.message);
         }
@@ -997,14 +995,14 @@ function showHome() {
             <button class="btn-logout" id="logoutBtn">Выйти</button>
         `;
         app.appendChild(header);
-        document.getElementById("logoutBtn").onclick = () => supabase.auth.signOut();
+        document.getElementById("logoutBtn").onclick = () => db.auth.signOut();
     }
 
     let title = document.createElement("h1");
     title.textContent = "Что сегодня посмотрим?";
     app.appendChild(title);
 
-    // Вывод обычных категорий из вашего объекта data
+    // Вывод обычных категорий из объекта data
     for (let key in data) {
         let button = document.createElement("button");
         button.textContent = key;
@@ -1025,7 +1023,7 @@ function showHome() {
     app.appendChild(watchedBtn);
 }
 
-// Отрисовка строки элемента (тайтла) с интерактивной звездочкой
+// Отрисовка строки элемента с интерактивом
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
@@ -1051,7 +1049,7 @@ function renderItemRow(itemText, container) {
     container.appendChild(row);
 }
 
-// Модифицированная функция открытия контента
+// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     if (saveHistory) {
         history.push(content);
@@ -1093,6 +1091,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     addNavigation();
 }
 
+// Навигационная панель Назад/Домой
 function addNavigation() {
     let oldNav = document.querySelector(".navigation");
     if (oldNav) {
