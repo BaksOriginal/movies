@@ -571,24 +571,25 @@ function addNavigation() {
 }
 // Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ
 // Показ модального окна добавления или редактирования тайтла
-async function showAddEditModal(editItem = null) {
+// Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ (с родным стилем сайта)
+function showAddEditModal(existingItem = null) {
+    // Создаем оверлей модалки
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "addEditModal";
 
-    // Собираем все уникальные ЖАНРЫ и ФРАНШИЗЫ, которые уже есть в базе
+    // Собираем все уникальные ЖАНРЫ и ФРАНШИЗЫ из базы для автодополнения
     const existingGenres = new Set();
     const existingFranchises = new Set();
 
     for (let catKey in dbData) {
         const categoryData = dbData[catKey];
-        if (Array.isArray(categoryData)) continue; // Пропускаем плоские списки (например, "Просмотрено")
+        if (Array.isArray(categoryData)) continue; 
 
         for (let genreKey in categoryData) {
             existingGenres.add(genreKey);
             const titles = categoryData[genreKey];
             
-            // Если внутри жанра лежит объект (франшизы)
             if (typeof titles === "object" && !Array.isArray(titles)) {
                 for (let franchiseKey in titles) {
                     existingFranchises.add(franchiseKey);
@@ -597,53 +598,44 @@ async function showAddEditModal(editItem = null) {
         }
     }
 
-    // Превращаем сеты в упорядоченные массивы
     const sortedGenres = Array.from(existingGenres).sort();
     const sortedFranchises = Array.from(existingFranchises).sort();
 
-    // Генерируем HTML-опции для автодополнения жанров
-    const genreOptions = sortedGenres.map(g => `<option value="${g}"></option>`).join("");
-    // Генерируем HTML-опции для автодополнения франшиз
-    const franchiseOptions = sortedFranchises.map(f => `<option value="${f}"></option>`).join("");
+    const genreOptions = sortedGenres.map(g => `<option value="${g}">`).join("");
+    const franchiseOptions = sortedFranchises.map(f => `<option value="${f}">`).join("");
 
+    const categories = Object.keys(dbData);
+    
     overlay.innerHTML = `
         <div class="modal-content">
-            <h3>${editItem ? "✏️ Редактировать тайтл" : "➕ Добавить новый тайтл"}</h3>
-            <form id="addTitleForm">
-                <div class="form-group">
-                    <label>Название фильма:</label>
-                    <input type="text" id="mTitle" required placeholder="Например: Шрек 5" value="${editItem ? editItem.title : ""}">
-                </div>
-                <div class="form-group">
-                    <label>Год выпуска:</label>
-                    <input type="number" id="mYear" required placeholder="Например: 2026" value="${editItem ? editItem.year : new Date().getFullYear()}">
-                </div>
-                <div class="form-group">
-                    <label>Категория:</label>
-                    <select id="mCategory" required>
-                        <option value="🎥 Фильмы" ${editItem && editItem.category === "🎥 Фильмы" ? "selected" : ""}>🎥 Фильмы</option>
-                        <option value="🍿 Сериалы" ${editItem && editItem.category === "🍿 Сериалы" ? "selected" : ""}>🍿 Сериалы</option>
-                        <option value="🏮 Аниме" ${editItem && editItem.category === "🏮 Аниме" ? "selected" : ""}>🏮 Аниме</option>
-                        <option value="🔒 Секрет" ${editItem && editItem.category === "🔒 Секрет" ? "selected" : ""}>🔒 Секрет</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Жанр (выберите из списка или впишите свой):</label>
-                    <input type="text" id="mGenre" list="genresList" required placeholder="Начните писать или выберите жанр..." value="${editItem ? editItem.genre : ""}">
-                    <datalist id="genresList">
-                        ${genreOptions}
-                    </datalist>
-                </div>
-                <div class="form-group">
-                    <label>Франшиза (необязательно, выберите или впишите свою):</label>
-                    <input type="text" id="mFranchise" list="franchisesList" placeholder="Оставьте пустым, если нет франшизы" value="${editItem && editItem.franchise ? editItem.franchise : ""}">
-                    <datalist id="franchisesList">
-                        ${franchiseOptions}
-                    </datalist>
-                </div>
-                <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button type="submit" class="btn-submit" style="flex: 1; padding: 12px; background: #0d47a1; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">Сохранить</button>
-                    <button type="button" id="closeModalBtn" style="flex: 1; padding: 12px; background: #eee; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">Отмена</button>
+            <h3>${existingItem ? "Редактировать" : "Добавить фильм/серию"}</h3>
+            <form class="modal-form" id="modalForm">
+                <label>Название</label>
+                <input type="text" id="mTitle" required placeholder="Например: Крик 7">
+
+                <label>Год выпуска</label>
+                <input type="number" id="mYear" required placeholder="Например: 2026" value="2026">
+
+                <label>Категория</label>
+                <select id="mCategory" required>
+                    ${categories.map(cat => `<option value="${cat}">${cat}</option>`).join("")}
+                </select>
+
+                <label>Жанр (Выберите или напишите свой)</label>
+                <input type="text" id="mGenre" required placeholder="Например: Ужасы" list="genresList">
+                <datalist id="genresList">
+                    ${genreOptions}
+                </datalist>
+
+                <label>Франшиза (Если это часть серии, необязательно)</label>
+                <input type="text" id="mFranchise" placeholder="Например: Крик" list="franchisesList">
+                <datalist id="franchisesList">
+                    ${franchiseOptions}
+                </datalist>
+
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-save">Сохранить</button>
+                    <button type="button" class="btn-cancel" id="mCancel">Отмена</button>
                 </div>
             </form>
         </div>
@@ -651,6 +643,57 @@ async function showAddEditModal(editItem = null) {
 
     document.body.appendChild(overlay);
 
+    const mCategory = document.getElementById("mCategory");
+    const mGenre = document.getElementById("mGenre");
+
+    // Если мы РЕДАКТИРУЕМ, заполняем поля старыми данными
+    if (existingItem) {
+        document.getElementById("mTitle").value = existingItem.title;
+        document.getElementById("mYear").value = existingItem.year;
+        mCategory.value = existingItem.category;
+        mGenre.value = existingItem.genre;
+        document.getElementById("mFranchise").value = existingItem.franchise || "";
+    }
+
+    // Закрытие по кнопке Отмена
+    document.getElementById("mCancel").onclick = () => overlay.remove();
+
+    // Отправка формы
+    document.getElementById("modalForm").onsubmit = async (e) => {
+        e.preventDefault();
+
+        const titleVal = document.getElementById("mTitle").value.trim();
+        const yearVal = parseInt(document.getElementById("mYear").value, 10);
+        const catVal = mCategory.value;
+        const genreVal = mGenre.value.trim();
+        
+        let franchiseVal = document.getElementById("mFranchise").value.trim();
+        if (franchiseVal === "") franchiseVal = null;
+
+        let result;
+
+        if (existingItem) {
+            // Запрос на ОБНОВЛЕНИЕ в Supabase
+            result = await db
+                .from("titles")
+                .update({ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal })
+                .eq("id", existingItem.id);
+        } else {
+            // Запрос на ДОБАВЛЕНИЕ в Supabase
+            result = await db
+                .from("titles")
+                .insert([{ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal }]);
+        }
+
+        if (result.error) {
+            alert("Ошибка сохранения: " + result.error.message);
+        } else {
+            overlay.remove();
+            // Мгновенно обновляем интерфейс
+            await updateUIOnLiveChange();
+        }
+    };
+}
     document.getElementById("closeModalBtn").onclick = () => overlay.remove();
 
     // Обработка отправки формы
