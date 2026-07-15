@@ -816,30 +816,197 @@ const data = {
 };
 
 
+// ==========================================
+// НАСТРОЙКА SUPABASE
+// ==========================================
+// Вставьте сюда ваши данные из Шага 5:
+const SUPABASE_URL = "https://ВАШ_ПРОЕКТ.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+
+// Инициализация клиента Supabase
+const supabase = lib.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 const app = document.getElementById("app");
+let currentUser = null;
+let watchedTitles = new Set(); // Общий список просмотренных фильмов обоими юзерами
 let history = [];
+let realtimeChannel = null; // Вебсокет для realtime-обновлений
 
+// Слушатель событий авторизации (срабатывает при загрузке страницы и логине/выходе)
+supabase.auth.onAuthStateChange((event, session) => {
+    if (session) {
+        currentUser = session.user;
+        // Сначала загружаем текущий список из базы, затем подписываемся на изменения и открываем сайт
+        loadWatchedFromDB().then(() => {
+            subscribeToChanges(); 
+            showHome();
+        });
+    } else {
+        currentUser = null;
+        watchedTitles.clear();
+        if (realtimeChannel) {
+            supabase.removeChannel(realtimeChannel);
+            realtimeChannel = null;
+        }
+        showLoginScreen();
+    }
+});
 
-function clear(){
-    app.innerHTML = "";
+// Загрузка просмотренных тайтлов из общей базы данных
+async function loadWatchedFromDB() {
+    if (!currentUser) return;
+    
+    const { data: dbData, error } = await supabase
+        .from('watched_items')
+        .select('title');
+
+    if (error) {
+        console.error("Ошибка при загрузке списка просмотренного:", error);
+        return;
+    }
+
+    watchedTitles = new Set(dbData.map(item => item.title));
 }
 
+// Подписка на изменения базы данных в реальном времени (Websockets)
+function subscribeToChanges() {
+    if (realtimeChannel) return; 
 
-function showHome(){
+    realtimeChannel = supabase
+        .channel('schema-db-changes')
+        .on(
+            'postgres_changes',
+            {
+                event: '*', // Отслеживаем и добавления, и удаления
+                schema: 'public',
+                table: 'watched_items'
+            },
+            (payload) => {
+                console.log('Изменение получено:', payload);
+                
+                if (payload.eventType === 'INSERT') {
+                    watchedTitles.add(payload.new.title);
+                } else if (payload.eventType === 'DELETE') {
+                    watchedTitles.delete(payload.old.title);
+                }
+
+                // Перерисовываем элементы на экране в реальном времени
+                updateUIOnLiveChange();
+            }
+        )
+        .subscribe();
+}
+
+// Логика обновления интерфейса без перезагрузки страницы
+function updateUIOnLiveChange() {
+    // 1. Если мы на главной странице, просто обновляем счетчик на кнопке "Просмотрено"
+    const logoutBtn = document.getElementById("logoutBtn");
+    const isHomePage = logoutBtn && !document.querySelector(".navigation"); 
+    
+    if (isHomePage) {
+        showHome();
+        return;
+    }
+
+    // 2. Если открыт обычный список фильмов, обновляем закрашенные звездочки
+    const rows = document.querySelectorAll(".item-row");
+    rows.forEach(row => {
+        const itemText = row.querySelector(".item").textContent;
+        const watchBtn = row.querySelector(".btn-watch");
+        
+        if (watchedTitles.has(itemText)) {
+            watchBtn.classList.add("watched");
+            watchBtn.textContent = "★";
+        } else {
+            watchBtn.classList.remove("watched");
+            watchBtn.textContent = "☆";
+        }
+    });
+
+    // 3. Если мы находимся прямо внутри категории "Просмотрено", при удалении элемента обновляем весь список
+    const pageTitle = document.querySelector("h1");
+    if (pageTitle && pageTitle.textContent === "🎬 Просмотрено") {
+        const updatedList = Array.from(watchedTitles);
+        history[history.length - 1] = updatedList; // Обновляем историю переходов
+        openData(updatedList, false); 
+    }
+}
+
+// Добавление или удаление отметки просмотрено
+async function toggleWatchState(title) {
+    if (!currentUser) return;
+
+    if (watchedTitles.has(title)) {
+        // Запись существует -> удаляем из общей базы
+        const { error } = await supabase
+            .from('watched_items')
+            .delete()
+            .eq('title', title);
+
+        if (error) console.error("Ошибка при удалении фильма:", error);
+    } else {
+        // Записи нет -> добавляем в общую базу
+        const { error } = await supabase
+            .from('watched_items')
+            .insert([{ user_id: currentUser.id, title: title }]);
+
+        if (error) console.error("Ошибка при добавлении фильма:", error);
+    }
+    // Классы кнопок здесь менять не нужно — они автоматически обновятся через функцию subscribeToChanges()
+}
+
+// Экран авторизации
+function showLoginScreen() {
+    app.innerHTML = `
+        <h1>Кто зашел?</h1>
+        <form class="login-form" id="loginForm">
+            <input type="email" id="loginEmail" placeholder="Ваша почта" required autocomplete="email">
+            <input type="password" id="loginPassword" placeholder="Ваш пароль" required autocomplete="current-password">
+            <button type="submit">Войти</button>
+        </form>
+    `;
+
+    document.getElementById("loginForm").onsubmit = async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("loginEmail").value;
+        const password = document.getElementById("loginPassword").value;
+
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+            alert("Ошибка входа: " + error.message);
+        }
+    };
+}
+
+// Главная страница
+function showHome() {
     history = [];
     
     let nav = document.querySelector(".navigation");
-    if(nav){
+    if (nav) {
         nav.remove();
     }
 
-    clear();
+    app.innerHTML = "";
+
+    // Шапка профиля с кнопкой выхода
+    if (currentUser) {
+        let header = document.createElement("div");
+        header.className = "user-header";
+        header.innerHTML = `
+            <span>Аккаунт: ${currentUser.email}</span>
+            <button class="btn-logout" id="logoutBtn">Выйти</button>
+        `;
+        app.appendChild(header);
+        document.getElementById("logoutBtn").onclick = () => supabase.auth.signOut();
+    }
 
     let title = document.createElement("h1");
     title.textContent = "Что сегодня посмотрим?";
     app.appendChild(title);
 
-    for(let key in data){
+    // Вывод обычных категорий из вашего объекта data
+    for (let key in data) {
         let button = document.createElement("button");
         button.textContent = key;
         button.onclick = () => {
@@ -847,29 +1014,65 @@ function showHome(){
         };
         app.appendChild(button);
     }
+
+    // Кнопка категории "Просмотрено"
+    let watchedBtn = document.createElement("button");
+    watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
+    watchedBtn.style.background = "#ffe3ec";
+    watchedBtn.onclick = () => {
+        const list = Array.from(watchedTitles);
+        openData(list, true, "🎬 Просмотрено");
+    };
+    app.appendChild(watchedBtn);
 }
 
+// Отрисовка строки элемента (тайтла) с интерактивной звездочкой
+function renderItemRow(itemText, container) {
+    let row = document.createElement("div");
+    row.className = "item-row";
 
-function openData(content, saveHistory = true){
-    if(saveHistory){
+    let itemDiv = document.createElement("div");
+    itemDiv.className = "item";
+    itemDiv.textContent = itemText;
+
+    let watchBtn = document.createElement("button");
+    watchBtn.className = "btn-watch";
+    
+    if (watchedTitles.has(itemText)) {
+        watchBtn.classList.add("watched");
+        watchBtn.textContent = "★";
+    } else {
+        watchBtn.textContent = "☆";
+    }
+
+    watchBtn.onclick = () => toggleWatchState(itemText);
+
+    row.appendChild(itemDiv);
+    row.appendChild(watchBtn);
+    container.appendChild(row);
+}
+
+// Модифицированная функция открытия контента
+function openData(content, saveHistory = true, customTitle = null) {
+    if (saveHistory) {
         history.push(content);
     }
 
-    clear();
+    app.innerHTML = "";
 
-    // Если перед нами список (массив) фильмов/франшиз
-    if(Array.isArray(content)){
+    if (customTitle) {
+        let title = document.createElement("h1");
+        title.textContent = customTitle;
+        app.appendChild(title);
+    }
+
+    if (Array.isArray(content)) {
         content.forEach(item => {
-            if(typeof item === "string"){
-                // Обычный фильм — выводим как элемент списка
-                let div = document.createElement("div");
-                div.className = "item";
-                div.textContent = item;
-                app.appendChild(div);
+            if (typeof item === "string") {
+                renderItemRow(item, app);
             } 
-            else if(typeof item === "object" && item !== null){
-                // Франшиза (внутри фигурных скобок) — создаём кнопку для неё
-                for(let franchiseName in item){
+            else if (typeof item === "object" && item !== null) {
+                for (let franchiseName in item) {
                     let button = document.createElement("button");
                     button.textContent = franchiseName;
                     button.onclick = () => openData(item[franchiseName], true);
@@ -878,10 +1081,8 @@ function openData(content, saveHistory = true){
             }
         });
     }
-
-    // Если перед нами категория (объект с жанрами вроде "Романтика", "Детектив" и т.д.)
-    else if(typeof content === "object" && content !== null){
-        for(let key in content){
+    else if (typeof content === "object" && content !== null) {
+        for (let key in content) {
             let value = content[key];
             let button = document.createElement("button");
             button.textContent = key;
@@ -893,10 +1094,9 @@ function openData(content, saveHistory = true){
     addNavigation();
 }
 
-
-function addNavigation(){
+function addNavigation() {
     let oldNav = document.querySelector(".navigation");
-    if(oldNav){
+    if (oldNav) {
         oldNav.remove();
     }
 
@@ -907,13 +1107,12 @@ function addNavigation(){
     back.textContent = "⬅ Назад";
 
     back.onclick = () => {
-        history.pop(); // Удаляем текущее состояние
+        history.pop();
         let previous = history[history.length - 1];
 
-        if(previous){
-            openData(previous, false); // Открываем предыдущее БЕЗ повторного добавления в историю
-        }
-        else{
+        if (previous) {
+            openData(previous, false);
+        } else {
             showHome();
         }
     };
@@ -925,7 +1124,6 @@ function addNavigation(){
     nav.appendChild(back);
     nav.appendChild(home);
 
-    // Безопасная вставка навигации в контейнер или перед контентом
     let container = document.querySelector(".container");
     if (container) {
         container.insertBefore(nav, container.firstChild);
@@ -933,6 +1131,5 @@ function addNavigation(){
         document.body.insertBefore(nav, app);
     }
 }
-
 
 showHome();
