@@ -620,46 +620,7 @@ function showAddEditModal(existingItem = null) {
         }
     };
 }
-    document.getElementById("closeModalBtn").onclick = () => overlay.remove();
-
-    document.getElementById("addTitleForm").onsubmit = async (e) => {
-        e.preventDefault();
-
-        const title = document.getElementById("mTitle").value.trim();
-        const year = parseInt(document.getElementById("mYear").value, 10);
-        const category = document.getElementById("mCategory").value;
-        const genre = document.getElementById("mGenre").value.trim();
-        
-        let franchise = document.getElementById("mFranchise").value.trim();
-        if (franchise === "") franchise = null;
-
-        if (editItem) {
-            const { error } = await db
-                .from("titles")
-                .update({ title, year, category, genre, franchise })
-                .eq("id", editItem.id);
-
-            if (error) {
-                alert("Ошибка изменения: " + error.message);
-            } else {
-                overlay.remove();
-                await updateUIOnLiveChange();
-            }
-        } else {
-            const { error } = await db
-                .from("titles")
-                .insert([{ title, year, category, genre, franchise }]);
-
-            if (error) {
-                alert("Ошибка добавления: " + error.message);
-            } else {
-                overlay.remove();
-                await updateUIOnLiveChange();
-            }
-        }
-    };
-}
-
+   
 async function handleEditClick(itemText) {
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
