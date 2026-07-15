@@ -138,7 +138,6 @@ function subscribeToChanges() {
                         stateChanged = true;
                     }
                 } else if (payload.eventType === 'DELETE') {
-                    // Используем мягкое обновление, чтобы не потерять стейт
                     stateChanged = true;
                 }
 
@@ -286,7 +285,6 @@ async function showHome() {
 
     app.innerHTML = "";
 
-    // Функция для создания круглой кнопки (размещаем её внутри или снаружи showHome)
     const createIconButton = (icon, onClick) => {
         let btn = document.createElement("button");
         btn.textContent = icon;
@@ -320,7 +318,6 @@ async function showHome() {
         controls.style.alignItems = "center";
         controls.style.gap = "10px";
 
-        // Кнопки
         let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
             const audio = document.getElementById("bgMusic");
             if (audio.paused) { audio.play(); isMusicPlaying = true; localStorage.setItem("musicEnabled", "true"); musicBtn.textContent = "🔊"; }
@@ -340,21 +337,19 @@ async function showHome() {
     app.appendChild(title);
 
     if (currentUser) {
-        // Кнопка "Добавить"
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
         addBtn.style.background = "#e3f2fd";
         addBtn.style.color = "#0d47a1";
-        addBtn.style.marginBottom = "10px"; // Чуть меньше отступ
+        addBtn.style.marginBottom = "10px";
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
         
-        // Горизонтальный разделитель
         let hr = document.createElement("hr");
         hr.style.border = "0";
         hr.style.borderTop = "2px solid #9b4f70"; 
-        hr.style.margin = "15px 0"; // Отступы сверху и снизу
+        hr.style.margin = "15px 0";
         app.appendChild(hr);
     }
 
@@ -392,10 +387,8 @@ function renderItemRow(itemText, container) {
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
     
-    // --- ПРОВЕРКА НА СЕКРЕТНОСТЬ ---
-    let isSecret = itemText.includes("Я Тебя Очень Сильно LЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
+    let isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
     
-    // Если мы внутри секретной категории, делаем тайтл секретным
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️"))) {
         isSecret = true;
     }
@@ -504,9 +497,7 @@ function showActionMenu(itemText) {
         </div>
     `;
 
-    // Записываем заголовок безопасно (защита от XSS)
     overlay.querySelector("#menuTitle").textContent = itemText;
-
     document.body.appendChild(overlay);
 
     document.getElementById("actEdit").onclick = () => {
@@ -585,11 +576,6 @@ function addNavigation() {
         let previous = history[history.length - 1];
 
         if (previous) {
-            // Если выходим назад к списку категорий первого уровня, восстанавливаем имя категории
-            if (history.length === 1) {
-                // Если остался один шаг в истории, значит мы на уровне жанров текущей категории
-                // Категорию не сбрасываем
-            }
             openData(previous, false);
         } else {
             showHome();
@@ -619,31 +605,19 @@ function showAddEditModal(existingItem = null) {
 
     const categories = Object.keys(dbData);
     
-    // Собираем все уникальные ЖАНРЫ и ФРАНШИЗЫ из базы для автодополнения
+    // Собираем все уникальные жанры для автодополнения (по всему каталогу)
     const existingGenres = new Set();
-    const existingFranchises = new Set();
-
     for (let catKey in dbData) {
         const categoryData = dbData[catKey];
-        if (Array.isArray(categoryData)) continue; 
-
-        for (let genreKey in categoryData) {
-            existingGenres.add(genreKey);
-            const titles = categoryData[genreKey];
-            
-            if (typeof titles === "object" && !Array.isArray(titles)) {
-                for (let franchiseKey in titles) {
-                    existingFranchises.add(franchiseKey);
-                }
+        if (typeof categoryData === "object" && !Array.isArray(categoryData)) {
+            for (let genreKey in categoryData) {
+                existingGenres.add(genreKey);
             }
         }
     }
 
     const sortedGenres = Array.from(existingGenres).sort();
-    const sortedFranchises = Array.from(existingFranchises).sort();
-
     const genreOptions = sortedGenres.map(g => `<option value="${g}">`).join("");
-    const franchiseOptions = sortedFranchises.map(f => `<option value="${f}">`).join("");
     
     overlay.innerHTML = `
         <div class="modal-content">
@@ -669,8 +643,7 @@ function showAddEditModal(existingItem = null) {
                 <label>Франшиза (Если это часть серии, необязательно)</label>
                 <input type="text" id="mFranchise" placeholder="Например: Крик" list="franchisesList">
                 <datalist id="franchisesList">
-                    ${franchiseOptions}
-                </datalist>
+                    </datalist>
 
                 <div class="modal-buttons">
                     <button type="submit" class="btn-save">Сохранить</button>
@@ -684,14 +657,54 @@ function showAddEditModal(existingItem = null) {
 
     const mCategory = document.getElementById("mCategory");
     const mGenre = document.getElementById("mGenre");
+    const mFranchise = document.getElementById("mFranchise");
+    const franchisesList = document.getElementById("franchisesList");
+
+    // Функция динамического обновления списка франшиз на основе выбранных категории и жанра
+    function updateFranchisesDatalist() {
+        const selectedCategory = mCategory.value;
+        const selectedGenre = mGenre.value.trim();
+
+        // Сюда соберем только локальные франшизы
+        const localFranchises = new Set();
+
+        if (dbData[selectedCategory] && dbData[selectedCategory][selectedGenre]) {
+            const listOrObj = dbData[selectedCategory][selectedGenre];
+            
+            // Пробегаемся по содержимому выбранного жанра
+            if (Array.isArray(listOrObj)) {
+                listOrObj.forEach(item => {
+                    if (typeof item === 'object' && item !== null) {
+                        // Это объект франшизы вида { "Крик": [...] }
+                        Object.keys(item).forEach(franchiseName => {
+                            localFranchises.add(franchiseName);
+                        });
+                    }
+                });
+            }
+        }
+
+        // Очищаем и заново генерируем <option> теги внутри datalist франшиз
+        franchisesList.innerHTML = Array.from(localFranchises)
+            .sort()
+            .map(f => `<option value="${f}">`)
+            .join("");
+    }
+
+    // Слушаем изменения категории и жанра на лету
+    mCategory.addEventListener("change", updateFranchisesDatalist);
+    mGenre.addEventListener("input", updateFranchisesDatalist);
 
     if (existingItem) {
         document.getElementById("mTitle").value = existingItem.title;
         document.getElementById("mYear").value = existingItem.year;
         mCategory.value = existingItem.category;
         mGenre.value = existingItem.genre;
-        document.getElementById("mFranchise").value = existingItem.franchise || "";
+        mFranchise.value = existingItem.franchise || "";
     }
+
+    // Первоначальный запуск обновления франшиз (чтобы при открытии уже отфильтровалось по умолчанию)
+    updateFranchisesDatalist();
 
     document.getElementById("mCancel").onclick = () => overlay.remove();
 
@@ -702,7 +715,7 @@ function showAddEditModal(existingItem = null) {
         const yearVal = parseInt(document.getElementById("mYear").value, 10);
         const catVal = mCategory.value;
         const genreVal = mGenre.value.trim();
-        let franchiseVal = document.getElementById("mFranchise").value.trim();
+        let franchiseVal = mFranchise.value.trim();
         if (franchiseVal === "") franchiseVal = null;
 
         let result;
@@ -722,7 +735,6 @@ function showAddEditModal(existingItem = null) {
             alert("Ошибка сохранения: " + result.error.message);
         } else {
             overlay.remove();
-            // Мягко обновляем текущий экран, чтобы остаться там, где были!
             await refreshCurrentScreen();
         }
     };
@@ -762,7 +774,6 @@ async function handleDeleteClick(itemText) {
 
     if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
         
-        // 1. Сначала чистим из просмотренных, чтобы не ругалась БД на связи
         const { error: watchedError } = await db
             .from("watched_items")
             .delete()
@@ -772,7 +783,6 @@ async function handleDeleteClick(itemText) {
             console.error("Не удалось удалить из просмотренных:", watchedError.message);
         }
 
-        // 2. Теперь удаляем сам фильм
         const { error } = await db
             .from("titles")
             .delete()
@@ -782,7 +792,6 @@ async function handleDeleteClick(itemText) {
         if (error) {
             alert("Ошибка при удалении: " + error.message);
         } else {
-            // Мягко обновляем экран после удаления
             await refreshCurrentScreen();
         }
     }
@@ -792,13 +801,12 @@ async function handleDeleteClick(itemText) {
 // =======================================================
 // ЛОГИКА ТРЯСКИ ТЕЛЕФОНА (SHAKE DETECTION)
 // =======================================================
-const SHAKE_THRESHOLD = 15; // Чувствительность датчика (15 — оптимально)
-const SHAKE_TIMEOUT = 2500;  // Задержка между взмахами (2.5 сек), чтобы не спамило
+const SHAKE_THRESHOLD = 15; 
+const SHAKE_TIMEOUT = 2500;  
 let lastX = null, lastY = null, lastZ = null;
 let lastShakeTime = 0;
-let isShakeModalOpen = false; // Чтобы не открывать две модалки рандома одновременно
+let isShakeModalOpen = false; 
 
-// Функция, которая собирает абсолютно ВСЕ фильмы из текущей выбранной ветки (включая все жанры и франшизы)
 function getAllTitlesFromCategory(dataBranch) {
     let resultList = [];
 
@@ -807,7 +815,6 @@ function getAllTitlesFromCategory(dataBranch) {
             if (typeof item === 'string') {
                 resultList.push(item);
             } else if (typeof item === 'object' && item !== null) {
-                // Если внутри лежит франшиза
                 for (let key in item) {
                     if (Array.isArray(item[key])) {
                         resultList = resultList.concat(item[key]);
@@ -824,7 +831,6 @@ function getAllTitlesFromCategory(dataBranch) {
     return resultList;
 }
 
-// Показ красивого модального окна со случайным выбором
 function showRandomTitleModal(titleText) {
     if (isShakeModalOpen) return;
     isShakeModalOpen = true;
@@ -860,33 +866,27 @@ function showRandomTitleModal(titleText) {
     };
 }
 
-// Функция, реагирующая на тряску
 function onPhoneShake() {
-    // 1. Проверка на Секрет (защита)
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒"))) {
         return;
     }
 
-    // 2. Базовые проверки состояния
     const now = Date.now();
     if (now - lastShakeTime < 2000 || isShakeModalOpen) return;
 
-    // 3. Сбор данных
     const currentDataBranch = history[history.length - 1];
     if (!currentDataBranch) return;
 
     const allTitles = getAllTitlesFromCategory(currentDataBranch);
     if (allTitles.length === 0) return;
 
-    // 4. Запуск рандома
     lastShakeTime = now;
     const randomTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
     
-    // 5. Показываем результат
     showRandomTitleModal(randomTitle);
     isShakeModalOpen = true; 
 }
-// Обработчик акселерометра
+
 function handleMotion(event) {
     const acceleration = event.accelerationIncludingGravity;
     if (!acceleration) return;
@@ -904,7 +904,6 @@ function handleMotion(event) {
     let deltaY = Math.abs(lastY - y);
     let deltaZ = Math.abs(lastZ - z);
 
-    // Если движение превысило порог резкости по двум осям — это тряска!
     if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || 
         (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || 
         (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
@@ -915,9 +914,7 @@ function handleMotion(event) {
     lastX = x; lastY = y; lastZ = z;
 }
 
-// Запуск детектора тряски
 function startShakeDetection() {
-    // Для iOS 13+ требуется явное разрешение
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
         DeviceMotionEvent.requestPermission()
             .then(permissionState => {
@@ -928,26 +925,24 @@ function startShakeDetection() {
             })
             .catch(console.error);
     } else {
-        // Для Android
         window.addEventListener('devicemotion', handleMotion);
         console.log("Детектор тряски успешно запущен (Android)");
     }
 }
-// Слушаем самый первый клик по сайту
+
 function setupMusicAutoplay() {
     const audio = document.getElementById("bgMusic");
     
     const playHandler = () => {
         if (isMusicPlaying) {
             audio.play().catch(e => console.log("Музыка не смогла запуститься"));
-            document.removeEventListener("click", playHandler); // Убираем слушатель после первого клика
+            document.removeEventListener("click", playHandler); 
         }
     };
 
     document.addEventListener("click", playHandler);
 }
 
-// Запускаем настройку при загрузке страницы
 setupMusicAutoplay();
 const style = document.createElement('style');
 style.textContent = `
