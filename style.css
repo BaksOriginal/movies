@@ -496,3 +496,40 @@ button:nth-child(6){
 }
 .btn-edit:hover { transform: scale(1.2); }
 .btn-delete:hover { transform: scale(1.2); }
+/* Кнопки действий внутри модального окна */
+.action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
+.action-buttons button {
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-action-edit {
+    background: #e3f2fd;
+    color: #0d47a1;
+}
+.btn-action-edit:hover {
+    background: #d0e8ff;
+}
+.btn-action-delete {
+    background: #ffebee;
+    color: #c62828;
+}
+.btn-action-delete:hover {
+    background: #ffdde0;
+}
+.btn-action-cancel {
+    background: #eeeeee;
+    color: #333;
+}
+.btn-action-cancel:hover {
+    background: #e0e0e0;
+}
