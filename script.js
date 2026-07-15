@@ -287,7 +287,34 @@ async function showHome() {
         const createIconButton = (icon, onClick) => {
     let btn = document.createElement("button");
     btn.textContent = icon;
-    btn.className = "round-btn"; // Применяем наш "ядерный" класс
+    
+    btn.style.cssText = `
+        width: 40px !important;
+        height: 40px !important;
+        min-width: 40px !important;
+        min-height: 40px !important;
+        
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 50% !important;
+        
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        
+        cursor: pointer !important;
+        border: 1px solid #ccc !important;
+        background: #f9f9f9 !important;
+        
+        /* Уменьшаем шрифт, чтобы эмодзи гарантированно влезли */
+        font-size: 16px !important; 
+        
+        box-sizing: border-box !important;
+        /* Убираем hidden, чтобы не резало, если чуть вылезет */
+        overflow: visible !important; 
+        line-height: 1 !important;
+    `;
+    
     btn.onclick = onClick;
     return btn;
 };
