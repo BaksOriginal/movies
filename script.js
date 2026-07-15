@@ -82,6 +82,15 @@ let realtimeChannel = null; // Канал для мгновенных обнов
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
+// Вспомогательная функция для включения/выключения класса темы на body
+function applyEchpochmoniTheme(active) {
+    if (active) {
+        document.body.classList.add("echpochmoni-mode");
+    } else {
+        document.body.classList.remove("echpochmoni-mode");
+    }
+}
+
 // ==========================================
 // РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
 // ==========================================
@@ -130,10 +139,9 @@ db.auth.onAuthStateChange(async (event, session) => {
         currentUser = session.user;
         saveSessionBackup(session); // Бэкапим сессию
         
-        // --- НОВОЕ: Восстанавливаем скин из памяти аккаунта ---
+        // Восстанавливаем скин из памяти аккаунта
         isEchpochmoniActive = localStorage.getItem("echpochmoni_mode_" + currentUser.id) === "true";
         applyEchpochmoniTheme(isEchpochmoniActive);
-        // -----------------------------------------------------
         
         // Загружаем списки просмотренного и вишлиста параллельно
         Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]).then(() => {
@@ -157,10 +165,9 @@ db.auth.onAuthStateChange(async (event, session) => {
         isAppInitialized = false;
         saveSessionBackup(null);
         
-        // --- НОВОЕ: Сбрасываем скин при выходе из аккаунта ---
+        // Сбрасываем скин при выходе из аккаунта
         isEchpochmoniActive = false;
         applyEchpochmoniTheme(false);
-        // -----------------------------------------------------
         
         if (realtimeChannel) {
             db.removeChannel(realtimeChannel);
@@ -272,7 +279,7 @@ async function refreshCurrentScreen() {
 }
 
 // =======================================================
-// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ ИЛИ СНЯТИЕ)
+// ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ ИЛИ СНЯТИЕ)
 // =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
@@ -861,7 +868,7 @@ function openData(content, saveHistory = true, customTitle = null) {
             <span style="font-weight: 600; font-size: 15px; color: ${isEchpochmoniActive ? "#512da8" : "#d81b60"};">
                 😈 Стиль Эчпочмони
             </span>
-            <label class="switch-toggle" style="position: relative; display: inline-block; width: 46px; height: 24px;">
+            <label class="switch-toggle" style="position: relative; display: inline-block; width: 46px; height: 24px; cursor: pointer;">
                 <input type="checkbox" id="echpochmoniSwitch" style="opacity: 0; width: 0; height: 0;" ${isEchpochmoniActive ? "checked" : ""}>
                 <span class="slider-toggle" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px;"></span>
             </label>
@@ -1002,7 +1009,7 @@ function showAddEditModal(existingItem = null) {
                 <label>Франшиза (Если это часть серии, необязательно)</label>
                 <input type="text" id="mFranchise" placeholder="Например: Крик" list="franchisesList">
                 <datalist id="franchisesList">
-                    </datalist>
+                </datalist>
 
                 <div class="modal-buttons">
                     <button type="submit" class="btn-save">Сохранить</button>
@@ -1305,6 +1312,7 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
+
 // Генератор бесконечных нежных сердечек/демонов на заднем фоне
 function initHeartsBackground() {
     if (document.querySelector('.hearts-background')) return;
@@ -1348,6 +1356,7 @@ function initHeartsBackground() {
 initHeartsBackground();
 setupMusicAutoplay();
 
+// Создание тега стилей
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
