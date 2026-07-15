@@ -321,24 +321,34 @@ async function showHome() {
     app.appendChild(title);
 
     if (currentUser) {
+        // 1. Создаем контейнер для кнопки "Добавить" и разделителя
+        let addContainer = document.createElement("div");
+        addContainer.style.display = "flex";
+        addContainer.style.alignItems = "center"; // Выравнивание по центру
+        addContainer.style.marginBottom = "20px";
+
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
         addBtn.style.background = "#e3f2fd";
         addBtn.style.color = "#0d47a1";
-        addBtn.style.marginBottom = "20px";
+        // Убираем margin-bottom у кнопки, так как он теперь у контейнера
         addBtn.onclick = () => showAddEditModal();
         
-        // Разделитель
+        // 2. Разделитель
         let separator = document.createElement("div");
-        separator.style.width = "1px";          // Толщина линии (ширина)
-        separator.style.height = "24px";        // Высота линии
-        separator.style.background = "#ccc";    // Цвет линии
-        separator.style.margin = "0 10px";      // Отступы слева и справа
-        separator.style.display = "block";      // Обязательно block или inline-block
+        separator.style.width = "1px";
+        separator.style.height = "24px";
+        separator.style.background = "#ccc";
+        separator.style.margin = "0 15px"; // Отступы по бокам
+        separator.style.flexShrink = "0";
+
+        // 3. Собираем всё вместе
+        addContainer.appendChild(addBtn);
+        addContainer.appendChild(separator);
         
-        app.appendChild(addBtn);
-        app.appendChild(separator); // Палочка между кнопкой "Добавить" и списком категорий
+        // 4. Добавляем контейнер в app, а не элементы по отдельности
+        app.appendChild(addContainer);
     }
 
     for (let key in dbData) {
@@ -845,35 +855,28 @@ function showRandomTitleModal(titleText) {
 
 // Функция, реагирующая на тряску
 function onPhoneShake() {
-    // УБИРАЕМ ВСЕ ПРОВЕРКИ КРОМЕ СЕКРЕТА
+    // 1. Проверка на Секрет (защита)
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒"))) {
         return;
     }
 
-    // Принудительная вибрация
-    if (navigator.vibrate) {
-        try {
-            navigator.vibrate([500]); // 500мс — это долгая, ощутимая вибрация
-        } catch (e) {
-            console.error("Ошибка вибрации:", e);
-        }
-    }
+    // 2. Базовые проверки состояния
+    const now = Date.now();
+    if (now - lastShakeTime < 2000 || isShakeModalOpen) return;
 
-    // Логика выбора (максимально простая)
+    // 3. Сбор данных
     const currentDataBranch = history[history.length - 1];
-    if (!currentDataBranch) {
-        console.log("История пуста");
-        return;
-    }
+    if (!currentDataBranch) return;
 
     const allTitles = getAllTitlesFromCategory(currentDataBranch);
     if (allTitles.length === 0) return;
 
-    // Показываем окно
+    // 4. Запуск рандома
+    lastShakeTime = now;
     const randomTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
-    showRandomTitleModal(randomTitle);
     
-    // СБРОС ФЛАГА (если он у тебя есть)
+    // 5. Показываем результат
+    showRandomTitleModal(randomTitle);
     isShakeModalOpen = true; 
 }
 // Обработчик акселерометра
