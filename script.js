@@ -1,5 +1,6 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
+let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
 // Включаем временную блокировку кликов на 350мс
 function startTransitionLock() {
@@ -269,10 +270,49 @@ async function showHome() {
     if (currentUser) {
         let header = document.createElement("div");
         header.className = "user-header";
-        header.innerHTML = `<span id="userEmailSpan"></span> <button class="btn-logout" id="logoutBtn">Выйти</button>`;
-        header.querySelector("#userEmailSpan").textContent = "Аккаунт: " + currentUser.email;
+        // Добавляем flex-стили прямо здесь, чтобы элементы встали в ряд
+        header.style.display = "flex";
+        header.style.justifyContent = "space-between";
+        header.style.alignItems = "center";
+        header.style.marginBottom = "15px";
+
+        // Левая часть: Email
+        header.innerHTML = `<span id="userEmailSpan">Аккаунт: ${currentUser.email}</span>`;
+        
+        // Правая часть: Контейнер для кнопок (чтобы они были рядом)
+        let controls = document.createElement("div");
+        controls.style.display = "flex";
+        controls.style.gap = "10px";
+
+        // Кнопка Музыки
+        let musicBtn = document.createElement("button");
+        musicBtn.textContent = isMusicPlaying ? "🔊 Вкл" : "🔇 Выкл";
+        musicBtn.onclick = () => {
+            const audio = document.getElementById("bgMusic");
+            if (audio.paused) {
+                audio.play();
+                isMusicPlaying = true;
+                localStorage.setItem("musicEnabled", "true");
+                musicBtn.textContent = "🔊 Вкл";
+            } else {
+                audio.pause();
+                isMusicPlaying = false;
+                localStorage.setItem("musicEnabled", "false");
+                musicBtn.textContent = "🔇 Выкл";
+            }
+        };
+
+        // Кнопка Выйти
+        let logoutBtn = document.createElement("button");
+        logoutBtn.className = "btn-logout";
+        logoutBtn.textContent = "Выйти";
+        logoutBtn.onclick = () => db.auth.signOut();
+
+        controls.appendChild(musicBtn);
+        controls.appendChild(logoutBtn);
+        header.appendChild(controls);
+        
         app.appendChild(header);
-        document.getElementById("logoutBtn").onclick = () => db.auth.signOut();
     }
 
     let title = document.createElement("h1");
@@ -310,6 +350,13 @@ async function showHome() {
         openData(list, true, "🎬 Просмотрено");
     };
     app.appendChild(watchedBtn);
+    let footer = document.createElement("p");
+    footer.style.textAlign = "center";
+    footer.style.marginTop = "40px";
+    footer.style.fontSize = "10px";
+    footer.style.color = "#999";
+    footer.innerHTML = 'Музыка: "Echoes Of Home" by Scott Buckley (www.scottbuckley.com.au) — Licensed under CC-BY 4.0';
+    app.appendChild(footer);
 }
 
 // Отрисовка строки элемента (тайтла)
@@ -760,29 +807,31 @@ function showRandomTitleModal(titleText) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "shakeRandomModal";
-    overlay.style.zIndex = "10000"; // Поверх всех остальных меню
+    overlay.style.zIndex = "10000";
+
+    overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); isShakeModalOpen = false; } };
 
     overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center; border: 3px solid #ff4081; animation: popIn 0.3s ease;">
-            <div style="font-size: 40px; margin-bottom: 10px;">🎰</div>
-            <h3 style="color: #ff4081; margin-bottom: 5px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Выбор Судьбы!</h3>
-            <h2 id="shakeRandomTitle" style="margin-bottom: 25px; font-size: 22px; line-height: 1.4;"></h2>
-            <button id="closeShakeBtn" class="btn-save" style="background: #ff4081; width: 100%; border: none;">Супер, смотрим!</button>
+        <div class="modal-content" style="text-align: center; border: 3px solid #ff4081;">
+            <div style="font-size: 40px;">🎰</div>
+            <h2 id="shakeRandomTitle" style="margin: 15px 0;"></h2>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="closeShakeBtn" class="btn-save">Супер, смотрим!</button>
+                <button id="rerollShakeBtn" class="btn-cancel">🔄 Другой фильм</button>
+            </div>
         </div>
     `;
 
-    // Безопасно выводим рандомный тайтл без XSS уязвимостей
-    // И сразу убираем год для секретов, если выпал секрет
-    const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️")));
-    
-    const displayText = isSecret ? titleText.replace(/\s*\(\d{4}\)$/, "") : titleText;
-    overlay.querySelector("#shakeRandomTitle").textContent = displayText;
+    const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒")));
+    overlay.querySelector("#shakeRandomTitle").textContent = isSecret ? titleText.replace(/\s*\(\d{4}\)$/, "") : titleText;
 
     document.body.appendChild(overlay);
 
-    document.getElementById("closeShakeBtn").onclick = () => {
-        overlay.remove();
-        isShakeModalOpen = false;
+    document.getElementById("closeShakeBtn").onclick = () => { overlay.remove(); isShakeModalOpen = false; };
+    document.getElementById("rerollShakeBtn").onclick = () => {
+        const all = getAllTitlesFromCategory(history[history.length - 1]);
+        const next = all[Math.floor(Math.random() * all.length)];
+        overlay.querySelector("#shakeRandomTitle").textContent = isSecret ? next.replace(/\s*\(\d{4}\)$/, "") : next;
     };
 }
 
@@ -864,3 +913,19 @@ function startShakeDetection() {
         console.log("Детектор тряски успешно запущен (Android)");
     }
 }
+// Слушаем самый первый клик по сайту
+function setupMusicAutoplay() {
+    const audio = document.getElementById("bgMusic");
+    
+    const playHandler = () => {
+        if (isMusicPlaying) {
+            audio.play().catch(e => console.log("Музыка не смогла запуститься"));
+            document.removeEventListener("click", playHandler); // Убираем слушатель после первого клика
+        }
+    };
+
+    document.addEventListener("click", playHandler);
+}
+
+// Запускаем настройку при загрузке страницы
+setupMusicAutoplay();
