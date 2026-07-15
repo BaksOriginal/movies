@@ -286,19 +286,29 @@ async function showHome() {
 
         // Кнопка Музыки
         let musicBtn = document.createElement("button");
-        musicBtn.textContent = isMusicPlaying ? "🔊 Вкл" : "🔇 Выкл";
+        musicBtn.textContent = isMusicPlaying ? "🔊" : "🔇"; // Оставляем только иконку, чтобы было компактно
+        
+        // Добавляем стили для компактности
+        musicBtn.style.padding = "5px 10px";
+        musicBtn.style.fontSize = "16px";
+        musicBtn.style.minWidth = "40px"; // Фиксированная ширина
+        musicBtn.style.cursor = "pointer";
+        musicBtn.style.border = "1px solid #ccc";
+        musicBtn.style.borderRadius = "5px";
+        musicBtn.style.background = "#f9f9f9";
+
         musicBtn.onclick = () => {
             const audio = document.getElementById("bgMusic");
             if (audio.paused) {
                 audio.play();
                 isMusicPlaying = true;
                 localStorage.setItem("musicEnabled", "true");
-                musicBtn.textContent = "🔊 Вкл";
+                musicBtn.textContent = "🔊";
             } else {
                 audio.pause();
                 isMusicPlaying = false;
                 localStorage.setItem("musicEnabled", "false");
-                musicBtn.textContent = "🔇 Выкл";
+                musicBtn.textContent = "🔇";
             }
         };
 
