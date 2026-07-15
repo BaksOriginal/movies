@@ -241,18 +241,13 @@ function showLoginScreen() {
 // Главная страница с динамической загрузкой категорий из Supabase
 async function showHome() {
     history = [];
-    
-    // Ждем, пока данные скачаются из базы данных, прежде чем рисовать интерфейс
     await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
-    if (nav) {
-        nav.remove();
-    }
+    if (nav) nav.remove();
 
     app.innerHTML = "";
 
-    // Шапка профиля с кнопкой выхода
     if (currentUser) {
         let header = document.createElement("div");
         header.className = "user-header";
@@ -268,17 +263,25 @@ async function showHome() {
     title.textContent = "Время Кино!";
     app.appendChild(title);
 
-    // Вывод обычных категорий из объекта dbData (из базы данных)
+    // НОВАЯ КНОПКА: Добавить тайтл (только для авторизованных)
+    if (currentUser) {
+        let addBtn = document.createElement("button");
+        addBtn.className = "btn-add-new";
+        addBtn.textContent = "➕ Добавить тайтл";
+        addBtn.style.background = "#e3f2fd";
+        addBtn.style.color = "#0d47a1";
+        addBtn.style.marginBottom = "20px";
+        addBtn.onclick = () => showAddEditModal();
+        app.appendChild(addBtn);
+    }
+
     for (let key in dbData) {
         let button = document.createElement("button");
         button.textContent = key;
-        button.onclick = () => {
-            openData(dbData[key], true);
-        };
+        button.onclick = () => openData(dbData[key], true);
         app.appendChild(button);
     }
 
-    // Кнопка категории "Просмотрено"
     let watchedBtn = document.createElement("button");
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
     watchedBtn.style.background = "#ffe3ec";
@@ -299,26 +302,36 @@ function renderItemRow(itemText, container) {
     itemDiv.textContent = itemText;
     row.appendChild(itemDiv);
 
-    // Список строк из категории "Секрет", у которых не должно быть звездочки
-    const secretItems = [
-        "❤️ Я Тебя Очень Сильно ЛЮБЛЮ! ❤️",
-        "👑 Бакс Ориджинал 👑"
-    ];
+    const secretItems = ["Я Тебя Очень Сильно ЛЮБЛЮ!", "Бакс Ориджинал"];
 
-    // Добавляем звездочку только если элемент НЕ входит в секретный список
     if (!secretItems.includes(itemText)) {
+        // Кнопка просмотра (Звездочка)
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
-        
         if (watchedTitles.has(itemText)) {
             watchBtn.classList.add("watched");
             watchBtn.textContent = "★";
         } else {
             watchBtn.textContent = "☆";
         }
-
         watchBtn.onclick = () => toggleWatchState(itemText);
         row.appendChild(watchBtn);
+
+        // Кнопка редактирования (Карандаш)
+        let editBtn = document.createElement("button");
+        editBtn.className = "btn-edit";
+        editBtn.textContent = "✏️";
+        editBtn.title = "Редактировать";
+        editBtn.onclick = () => handleEditClick(itemText);
+        row.appendChild(editBtn);
+
+        // Кнопка удаления (Крестик)
+        let deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn-delete";
+        deleteBtn.textContent = "❌";
+        deleteBtn.title = "Удалить";
+        deleteBtn.onclick = () => handleDeleteClick(itemText);
+        row.appendChild(deleteBtn);
     }
 
     container.appendChild(row);
@@ -402,5 +415,161 @@ function addNavigation() {
         container.insertBefore(nav, container.firstChild);
     } else {
         document.body.insertBefore(nav, app);
+    }
+}
+// Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ
+function showAddEditModal(existingItem = null) {
+    // Создаем оверлей модалки
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "addEditModal";
+
+    // Собираем списки категорий и жанров для выпадашек
+    const categories = Object.keys(dbData);
+    
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <h3>${existingItem ? "Редактировать" : "Добавить фильм/серию"}</h3>
+            <form class="modal-form" id="modalForm">
+                <label>Название</label>
+                <input type="text" id="mTitle" required placeholder="Например: Крик 7">
+
+                <label>Год выпуска</label>
+                <input type="number" id="mYear" required placeholder="Например: 2026" value="2026">
+
+                <label>Категория</label>
+                <select id="mCategory" required>
+                    ${categories.map(cat => `<option value="${cat}">${cat}</option>`).join("")}
+                </select>
+
+                <label>Жанр (Выберите или напишите свой)</label>
+                <input type="text" id="mGenre" required placeholder="Например: Ужасы" list="genresList">
+                <datalist id="genresList"></datalist>
+
+                <label>Франшиза (Если это часть серии, необязательно)</label>
+                <input type="text" id="mFranchise" placeholder="Например: Крик">
+
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-save">Сохранить</button>
+                    <button type="button" class="btn-cancel" id="mCancel">Отмена</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const mCategory = document.getElementById("mCategory");
+    const mGenre = document.getElementById("mGenre");
+    const genresList = document.getElementById("genresList");
+
+    // Функция динамического обновления списка жанров в зависимости от категории
+    function updateGenresDatalist() {
+        const selectedCat = mCategory.value;
+        const genres = dbData[selectedCat] ? Object.keys(dbData[selectedCat]) : [];
+        genresList.innerHTML = genres.map(g => `<option value="${g}">`).join("");
+    }
+
+    mCategory.onchange = updateGenresDatalist;
+    updateGenresDatalist(); // Инициализация при открытии
+
+    // Если мы РЕДАКТИРУЕМ, заполняем поля старыми данными
+    if (existingItem) {
+        document.getElementById("mTitle").value = existingItem.title;
+        document.getElementById("mYear").value = existingItem.year;
+        mCategory.value = existingItem.category;
+        updateGenresDatalist();
+        mGenre.value = existingItem.genre;
+        document.getElementById("mFranchise").value = existingItem.franchise || "";
+    }
+
+    // Закрытие по кнопке Отмена
+    document.getElementById("mCancel").onclick = () => overlay.remove();
+
+    // Отправка формы
+    document.getElementById("modalForm").onsubmit = async (e) => {
+        e.preventDefault();
+
+        const titleVal = document.getElementById("mTitle").value.trim();
+        const yearVal = parseInt(document.getElementById("mYear").value, 10);
+        const catVal = mCategory.value;
+        const genreVal = mGenre.value.trim();
+        const franchiseVal = document.getElementById("mFranchise").value.trim() || null;
+
+        let result;
+
+        if (existingItem) {
+            // Запрос на ОБНОВЛЕНИЕ в Supabase
+            result = await db
+                .from("titles")
+                .update({ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal })
+                .eq("id", existingItem.id);
+        } else {
+            // Запрос на ДОБАВЛЕНИЕ в Supabase
+            result = await db
+                .from("titles")
+                .insert([{ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal }]);
+        }
+
+        if (result.error) {
+            alert("Ошибка сохранения: " + result.error.message);
+        } else {
+            overlay.remove();
+            // Мгновенно обновляем интерфейс
+            await updateUIOnLiveChange();
+            // Возвращаемся на главный экран, чтобы увидеть изменения
+            showHome();
+        }
+    };
+}
+
+// Обработка кнопки "Редактировать"
+async function handleEditClick(itemText) {
+    // Парсим название и год обратно (например "Крик (2026)")
+    const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
+    if (!match) return;
+
+    const cleanTitle = match[1].trim();
+    const year = parseInt(match[2], 10);
+
+    // Ищем запись в базе, чтобы узнать её ID, категорию и жанр
+    const { data, error } = await db
+        .from("titles")
+        .select("*")
+        .eq("title", cleanTitle)
+        .eq("year", year)
+        .limit(1)
+        .single();
+
+    if (error || !data) {
+        alert("Не удалось найти этот элемент в базе данных.");
+        return;
+    }
+
+    showAddEditModal(data);
+}
+
+// Обработка кнопки "Удалить"
+async function handleDeleteClick(itemText) {
+    const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
+    if (!match) return;
+
+    const cleanTitle = match[1].trim();
+    const year = parseInt(match[2], 10);
+
+    if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
+        const { error } = await db
+            .from("titles")
+            .delete()
+            .eq("title", cleanTitle)
+            .eq("year", year);
+
+        if (error) {
+            alert("Ошибка при удалении: " + error.message);
+        } else {
+            await updateUIOnLiveChange();
+            // Возвращаемся на главную
+            showHome();
+        }
     }
 }
