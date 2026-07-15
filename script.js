@@ -331,11 +331,11 @@ async function showHome() {
         
         // Разделитель
         let separator = document.createElement("div");
-        separator.style.width = "1px";
-        separator.style.height = "24px";
-        separator.style.borderRadius = "1px";
-        separator.style.background = "#ccc";
-        separator.style.margin = "0 10px";
+        separator.style.width = "1px";          // Толщина линии (ширина)
+        separator.style.height = "24px";        // Высота линии
+        separator.style.background = "#ccc";    // Цвет линии
+        separator.style.margin = "0 10px";      // Отступы слева и справа
+        separator.style.display = "block";      // Обязательно block или inline-block
         
         app.appendChild(addBtn);
         app.appendChild(separator); // Палочка между кнопкой "Добавить" и списком категорий
@@ -845,35 +845,41 @@ function showRandomTitleModal(titleText) {
 
 // Функция, реагирующая на тряску
 function onPhoneShake() {
-    // 1. Проверка на "Секрет"
+    console.log("Попытка тряски..."); // Проверка в консоли
+
+    // 1. Проверка на секрет (самая строгая)
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒"))) {
+        console.log("Секрет: тряска игнорируется");
         return;
     }
 
-    // --- ДОБАВЛЯЕМ ВИБРАЦИЮ ---
-    if (navigator.vibrate) {
-        // [200, 100, 200] означает: 
-        // 200мс вибрируем, 100мс пауза, 200мс вибрируем
-        navigator.vibrate([200, 100, 200]); 
-    }
-    // --------------------------
-
+    // 2. Тайм-аут (чтобы не было спама)
     const now = Date.now();
-    if (now - lastShakeTime < SHAKE_TIMEOUT) return; 
+    if (now - lastShakeTime < 2000) return; // Увеличил до 2 секунд для теста
 
-    if (!currentCategoryName || isShakeModalOpen) return;
+    // 3. Проверка на модалку
+    if (isShakeModalOpen) return;
 
+    // 4. Сбор данных
     const currentDataBranch = history[history.length - 1];
-    if (!currentDataBranch) return;
+    if (!currentDataBranch) {
+        console.log("Нет данных в истории");
+        return;
+    }
 
-    const allCategoryTitles = getAllTitlesFromCategory(currentDataBranch);
-    if (allCategoryTitles.length === 0) return;
+    const allTitles = getAllTitlesFromCategory(currentDataBranch);
+    if (allTitles.length === 0) {
+        console.log("Нет фильмов в списке");
+        return;
+    }
 
+    // 5. Действие
     lastShakeTime = now;
-    const randomIndex = Math.floor(Math.random() * allCategoryTitles.length);
-    const chosenTitle = allCategoryTitles[randomIndex];
-
+    if (navigator.vibrate) navigator.vibrate(200);
+    
+    const chosenTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
     showRandomTitleModal(chosenTitle);
+    console.log("Успех: показан фильм", chosenTitle);
 }
 
 // Обработчик акселерометра
