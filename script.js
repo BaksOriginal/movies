@@ -447,7 +447,7 @@ function showActionMenu(itemText) {
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons">
                 <button class="btn-action-edit" id="actEdit">✏️ Редактировать</button>
-                <button class="btn-action-delete" id="actDelete">❌ Удалить из базы</button>
+                <button class="btn-action-delete" id="actDelete">❌ Удалить</button>
                 <button class="btn-action-cancel" id="actCancel">Отмена</button>
             </div>
         </div>
