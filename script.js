@@ -293,19 +293,62 @@ async function showHome() {
 }
 
 // Отрисовка строки элемента с интерактивом
+// Отрисовка строки элемента (тайтла)
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
 
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
-    itemDiv.textContent = itemText;
+    
+    // Проверяем на "Секрет"
+    const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
+
+    if (isSecret) {
+        itemDiv.textContent = itemText.replace(/\s*\(\d{4}\)$/, "");
+    } else {
+        itemDiv.textContent = itemText;
+        itemDiv.style.cursor = "pointer";
+        
+        // --- ЛОГИКА ЗАЖАТИЯ (LONG PRESS) ---
+        let pressTimer = null;
+        
+        // Функция, которая срабатывает при начале нажатия
+        const startPress = (e) => {
+            // Предотвращаем стандартное поведение (выделение текста на телефонах)
+            if (e.type === 'touchstart') {
+                e.preventDefault(); 
+            }
+            
+            // Запускаем таймер на 700 миллисекунд (можно поменять на 500, если нужно быстрее)
+            pressTimer = setTimeout(() => {
+                showActionMenu(itemText);
+            }, 700);
+        };
+
+        // Функция, которая отменяет таймер, если палец/мышка отпущены раньше времени
+        const cancelPress = () => {
+            if (pressTimer !== null) {
+                clearTimeout(pressTimer);
+                pressTimer = null;
+            }
+        };
+
+        // Слушатели для ПК (мышь)
+        itemDiv.addEventListener("mousedown", startPress);
+        itemDiv.addEventListener("mouseup", cancelPress);
+        itemDiv.addEventListener("mouseleave", cancelPress);
+
+        // Слушатели для телефонов (тач)
+        itemDiv.addEventListener("touchstart", startPress, { passive: false });
+        itemDiv.addEventListener("touchend", cancelPress);
+        itemDiv.addEventListener("touchcancel", cancelPress);
+    }
+    
     row.appendChild(itemDiv);
 
-    const secretItems = ["Я Тебя Очень Сильно ЛЮБЛЮ!", "Бакс Ориджинал"];
-
-    if (!secretItems.includes(itemText)) {
-        // Кнопка просмотра (Звездочка)
+    // Оставляем только аккуратную звёздочку
+    if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
         if (watchedTitles.has(itemText)) {
@@ -316,25 +359,48 @@ function renderItemRow(itemText, container) {
         }
         watchBtn.onclick = () => toggleWatchState(itemText);
         row.appendChild(watchBtn);
-
-        // Кнопка редактирования (Карандаш)
-        let editBtn = document.createElement("button");
-        editBtn.className = "btn-edit";
-        editBtn.textContent = "✏️";
-        editBtn.title = "Редактировать";
-        editBtn.onclick = () => handleEditClick(itemText);
-        row.appendChild(editBtn);
-
-        // Кнопка удаления (Крестик)
-        let deleteBtn = document.createElement("button");
-        deleteBtn.className = "btn-delete";
-        deleteBtn.textContent = "❌";
-        deleteBtn.title = "Удалить";
-        deleteBtn.onclick = () => handleDeleteClick(itemText);
-        row.appendChild(deleteBtn);
     }
 
     container.appendChild(row);
+}
+
+// Всплывающее меню выбора действия при клике на тайтл
+function showActionMenu(itemText) {
+    // Проверяем на секрет (на всякий случай)
+    if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "actionMenuModal";
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 10px;">${itemText}</h3>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
+            <div class="action-buttons">
+                <button class="btn-action-edit" id="actEdit">✏️ Редактировать</button>
+                <button class="btn-action-delete" id="actDelete">❌ Удалить из базы</button>
+                <button class="btn-action-cancel" id="actCancel">Отмена</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Привязываем действия к кнопкам
+    document.getElementById("actEdit").onclick = () => {
+        overlay.remove();
+        handleEditClick(itemText);
+    };
+
+    document.getElementById("actDelete").onclick = () => {
+        overlay.remove();
+        handleDeleteClick(itemText);
+    };
+
+    document.getElementById("actCancel").onclick = () => {
+        overlay.remove();
+    };
 }
 
 // Функция открытия контента
