@@ -298,7 +298,7 @@ function showStarChoiceModal(title) {
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>
                 <button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>
-                <button id="choiceCancel">Отмена</button>
+                <button id="choiceCancel" class="btn-cancel-gray">Отмена</button>
             </div>
         </div>
     `;
@@ -636,9 +636,8 @@ async function showHome() {
         }
     }
 
-   // Сначала идет вишлист "Будем смотреть" (теперь тоже нежно-розовый)
     let wishlistBtn = document.createElement("button");
-    wishlistBtn.className = "btn-pink-style"; 
+    wishlistBtn.className = "btn-pink-style";
     wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
     wishlistBtn.onclick = () => {
         const list = Array.from(wishlistTitles);
@@ -647,9 +646,9 @@ async function showHome() {
     };
     app.appendChild(wishlistBtn);
 
-    // Только потом "Просмотрено"
+    // Кнопка "Просмотрено" на главной
     let watchedBtn = document.createElement("button");
-    watchedBtn.className = "btn-pink-style"; 
+    watchedBtn.className = "btn-pink-style";
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
     watchedBtn.onclick = () => {
         const list = Array.from(watchedTitles);
@@ -772,6 +771,7 @@ function renderItemRow(itemText, container) {
 }
 
 // Всплывающее меню выбора действия
+// Всплывающее меню выбора действия
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -783,25 +783,16 @@ function showActionMenu(itemText) {
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
-            <div class="action-buttons">
-                <button class="btn-action-trailer" id="actTrailer" style="background: #ffebee !important; color: #c62828 !important; margin-bottom: 8px;">🎬 Трейлер на YouTube</button>
-                <button class="btn-action-edit" id="actEdit" style="margin-bottom: 8px;">✏️ Редактировать</button>
-                <button class="btn-action-delete" id="actDelete" style="margin-bottom: 8px;">❌ Удалить из базы</button>
-                <button class="btn-action-cancel" id="actCancel">Отмена</button>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
+                <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
+                <button class="btn-cancel-gray" id="actCancel">Отмена</button>
             </div>
         </div>
     `;
 
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
-
-    document.getElementById("actTrailer").onclick = () => {
-        overlay.remove();
-        const cleanTitle = itemText.replace(/\s*\(\d{4}\)$/, "").trim();
-        const searchQuery = encodeURIComponent(`${cleanTitle} фильм трейлер`);
-        const youtubeUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
-        window.open(youtubeUrl, '_blank');
-    };
 
     document.getElementById("actEdit").onclick = () => {
         overlay.remove();
@@ -818,7 +809,6 @@ function showActionMenu(itemText) {
     };
 }
 
-// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     if (saveHistory) {
@@ -1255,7 +1245,6 @@ function setupMusicAutoplay() {
 
 setupMusicAutoplay();
 
-// Добавляем единые стили для кнопок и звёзд
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
@@ -1275,18 +1264,18 @@ style.textContent = `
         box-sizing: border-box !important;
         line-height: 1 !important;
     }
-    
+
     /* Звёздочка для вишлиста (Красивый голубой) */
     .btn-watch.wishlist-active {
         color: #2196f3 !important;
         opacity: 1 !important;
     }
 
-    /* --- ЕДИНЫЙ НЕЖНО-РОЗОВЫЙ СТИЛЬ ДЛЯ ОБЕИХ КНОПОК --- */
+    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
     .btn-pink-style {
         background-color: #ffe3ec !important;
         color: #d81b60 !important;
-        border: 1px solid #ffd0df !important;
+        border: none !important;
         font-weight: 600 !important;
         transition: background-color 0.2s ease, transform 0.1s ease;
     }
@@ -1294,11 +1283,16 @@ style.textContent = `
         background-color: #ffd5e3 !important;
     }
 
-    /* Общие корректировки размеров для кнопок в модалке */
-    .modal-content .action-buttons button {
-        padding: 12px 20px !important;
-        font-size: 15px !important;
-        /* Убрали принудительный border-radius, возвращая стандартное скругление сайта */
+    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
+    .btn-cancel-gray {
+        background-color: #f0f0f0 !important;
+        color: #333333 !important;
+        border: none !important;
+        font-weight: 600 !important;
+        transition: background-color 0.2s ease;
+    }
+    .btn-cancel-gray:hover {
+        background-color: #e5e5e5 !important;
     }
 `;
 document.head.appendChild(style);
