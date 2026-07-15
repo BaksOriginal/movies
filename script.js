@@ -1173,3 +1173,71 @@ function addNavigation() {
         document.body.insertBefore(nav, app);
     }
 }
+// ==========================================
+// ВРЕМЕННЫЙ СКРИПТ ДЛЯ ПЕРЕНОСА ДАННЫХ В БД
+// ==========================================
+async function migrateDataToSupabase() {
+    console.log("Начало миграции данных...");
+    const payload = [];
+
+    // Рекурсивная функция для разбора элементов
+    function processItems(itemsArray, category, genre, franchise = null) {
+        itemsArray.forEach(item => {
+            if (typeof item === 'string') {
+                // Извлекаем название и год (например, "Фильм (2024)" -> "Фильм" и 2024)
+                const match = item.match(/^(.*?)\s*\((\d{4})\)$/);
+                let cleanTitle = item;
+                let year = 2026; // Год по умолчанию, если не найден
+
+                if (match) {
+                    cleanTitle = match[1].trim();
+                    year = parseInt(match[2], 10);
+                }
+
+                payload.push({
+                    title: cleanTitle,
+                    year: year,
+                    category: category,
+                    genre: genre,
+                    franchise: franchise
+                });
+            } else if (typeof item === 'object' && item !== null) {
+                // Если внутри объект (это франшиза вроде "Когда плачут цикады")
+                for (const [franchiseName, nestedItems] of Object.entries(item)) {
+                    processItems(nestedItems, category, genre, franchiseName);
+                }
+            }
+        });
+    }
+
+    // Проходим по всему твоему объекту data
+    for (const [category, genres] of Object.entries(data)) {
+        for (const [genre, items] of Object.entries(genres)) {
+            processItems(items, category, genre);
+        }
+    }
+
+    console.log(`Подготовлено к отправке: ${payload.length} элементов.`);
+
+    // Отправляем всё это добро в Supabase в таблицу titles
+    const { data: insertedData, error } = await db
+        .from('titles')
+        .insert(payload);
+
+    if (error) {
+        console.error("Ошибка при переносе данных в Supabase:", error);
+    } else {
+        console.log("🎉 МИГРАЦИЯ УСПЕШНО ЗАВЕРШЕНА! Все данные в базе.");
+        alert(`Перенесено ${payload.length} тайтлов в базу данных Supabase!`);
+    }
+}
+
+// Запускаем миграцию автоматически через 2 секунды после загрузки страницы
+setTimeout(() => {
+    // Проверяем, вошел ли пользователь (миграция сработает только если ты залогинен)
+    if (currentUser) {
+        migrateDataToSupabase();
+    } else {
+        console.log("Для миграции войдите в аккаунт на сайте.");
+    }
+}, 2000);
