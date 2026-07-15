@@ -126,11 +126,12 @@ function subscribeToChanges() {
 
 // Логика авто-обновления экрана без перезагрузки
 // Живое обновление интерфейса без перезагрузки страницы
+// Умное живое обновление интерфейса без принудительного сброса на главную
 async function updateUIOnLiveChange() {
-    // 1. Сначала подтягиваем самые свежие данные из базы
+    // Подтягиваем свежие данные из базы
     await loadCatalogFromDB();
 
-    // 2. Ищем кнопку "Просмотрено" на экране и обновляем на ней счетчик
+    // 1. Обновляем счетчик на кнопке "Просмотрено" (если мы на главной)
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
         if (btn.textContent.includes("Просмотрено")) {
@@ -138,7 +139,7 @@ async function updateUIOnLiveChange() {
         }
     });
 
-    // 3. Обновляем иконки звездочек (★ / ☆) у текущих элементов на экране
+    // 2. Обновляем иконки звездочек (★ / ☆) у текущих элементов на экране
     let rows = document.querySelectorAll(".item-row");
     rows.forEach(row => {
         let itemDiv = row.querySelector(".item");
@@ -146,7 +147,16 @@ async function updateUIOnLiveChange() {
         
         if (itemDiv && watchBtn) {
             let itemText = itemDiv.textContent.trim();
-            if (watchedTitles.has(itemText)) {
+            
+            // Восстанавливаем оригинальный текст с годом для проверки в watchedTitles
+            // (так как в "Секретах" мы год убирали при отрисовке)
+            const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
+            let lookupText = itemText;
+            if (isSecret && !itemText.includes("(2026)")) {
+                lookupText = itemText + " (2026)";
+            }
+
+            if (watchedTitles.has(lookupText)) {
                 watchBtn.classList.add("watched");
                 watchBtn.textContent = "★";
             } else {
