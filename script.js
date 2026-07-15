@@ -655,7 +655,7 @@ async function showHome() {
     }
 
     let wishlistBtn = document.createElement("button");
-    wishlistBtn.className = "btn-pink-style";
+    wishlistBtn.className = "btn-pink-style btn-wishlist"; // Добавили класс btn-wishlist
     wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
     wishlistBtn.onclick = () => {
         const list = Array.from(wishlistTitles);
@@ -666,7 +666,7 @@ async function showHome() {
 
     // Кнопка "Просмотрено" на главной
     let watchedBtn = document.createElement("button");
-    watchedBtn.className = "btn-pink-style";
+    watchedBtn.className = "btn-pink-style btn-watched-list"; // Добавили класс btn-watched-list
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
     watchedBtn.onclick = () => {
         const list = Array.from(watchedTitles);
@@ -1353,6 +1353,7 @@ function initHeartsBackground() {
 initHeartsBackground();
 setupMusicAutoplay();
 
+// Создание тега стилей
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
@@ -1373,13 +1374,28 @@ style.textContent = `
         line-height: 1 !important;
     }
 
+    /* --- СТИЛЬ ДЛЯ ПРОСТЫХ БЕЛЫХ КНОПОК-ПЛАШЕК (Категории, жанры) --- */
+    button:not([class]) {
+        background-color: #ffffff !important;
+        color: #333333 !important;
+        border: 1px solid #e0e0e0 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04) !important;
+        transition: all 0.25s ease !important;
+    }
+    button:not([class]):hover {
+        background-color: #fcfcfc !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08) !important;
+    }
+
     /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (как "Трейлер на YouTube") --- */
     .btn-pink-style {
         background-color: #ffe3ec !important;
         color: #d81b60 !important;
         border: none !important;
         font-weight: 600 !important;
-        transition: background-color 0.2s ease, transform 0.1s ease;
+        transition: all 0.2s ease;
     }
     .btn-pink-style:hover {
         background-color: #ffd5e3 !important;
@@ -1436,26 +1452,56 @@ style.textContent = `
         }
     }
 
-    /* --- СТИЛЬ ЭЧПОЧМОНИ (ФИОЛЕТОВАЯ ТЕМА) --- */
+    /* =======================================================
+       💜 СТИЛЬ ЭЧПОЧМОНИ (ПОЛНОЕ ПРЕОБРАЖЕНИЕ ИНТЕРФЕЙСА) 💜
+       ======================================================= */
+       
+    /* 1. Глубокий, мягкий фиолетовый градиент для фона сайта */
     body.echpochmoni-mode {
-        background-color: #f6f0ff !important; /* Нежно-фиолетовый фон сайта */
+        background: linear-gradient(135deg, #f5edff 0%, #eae0f7 100%) !important;
+        background-attachment: fixed !important;
     }
     
-    /* Перекрашиваем вообще ВСЕ кнопки (включая дефолтные белые категории и жанры) в сиреневый цвет */
-    body.echpochmoni-mode button:not(.btn-cancel-gray) {
-        background-color: #ebd9fc !important; /* Сиреневые кнопки */
-        color: #673ab7 !important;            /* Насыщенный фиолетовый текст */
-    }
-    
-    body.echpochmoni-mode button:not(.btn-cancel-gray):hover {
-        background-color: #dfc2fc !important;
-    }
-    
-    body.echpochmoni-mode h1, body.echpochmoni-mode h2, body.echpochmoni-mode h3 {
+    /* 2. Превращение простых белых плашек в красивые фиолетовые карточки */
+    body.echpochmoni-mode button:not([class]) {
+        background-color: #f3e8ff !important;
         color: #512da8 !important;
+        border: 1px solid #dcd0f0 !important;
+        box-shadow: 0 3px 6px rgba(103, 58, 183, 0.08) !important;
+    }
+    body.echpochmoni-mode button:not([class]):hover {
+        background-color: #ebd9fc !important;
+        box-shadow: 0 5px 12px rgba(103, 58, 183, 0.15) !important;
+    }
+    
+    /* 3. Кнопка "Будем смотреть" (светло-лавандовый оттенок) */
+    body.echpochmoni-mode .btn-wishlist {
+        background-color: #e3d2ff !important; 
+        color: #4527a0 !important;
+        border: 1px solid #d1bdfc !important;
+    }
+    body.echpochmoni-mode .btn-wishlist:hover {
+        background-color: #d7c2fc !important;
+    }
+    
+    /* 4. Кнопка "Просмотрено" (более насыщенный, глубокий аметистовый) */
+    body.echpochmoni-mode .btn-watched-list {
+        background-color: #cbb2ff !important; 
+        color: #311b92 !important;
+        border: 1px solid #bba1fa !important;
+    }
+    body.echpochmoni-mode .btn-watched-list:hover {
+        background-color: #be9ffd !important;
+    }
+    
+    /* Дополнительные акценты */
+    body.echpochmoni-mode h1, body.echpochmoni-mode h2, body.echpochmoni-mode h3 {
+        color: #4a148c !important;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     }
     body.echpochmoni-mode hr {
-        border-top: 2px solid #7e57c2 !important;
+        border-top: 2px solid #b39ddb !important;
+        opacity: 0.7;
     }
 
     /* --- КРАСИВЫЙ ТУМБЛЕР (SWITCH) --- */
