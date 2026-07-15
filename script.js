@@ -935,23 +935,41 @@ async function toggleWatchState(title) {
     if (!currentUser) return;
 
     if (watchedTitles.has(title)) {
-        // Запись уже есть — удаляем её
+        // Локально сразу удаляем, чтобы интерфейс откликнулся мгновенно
+        watchedTitles.delete(title);
+        updateUIOnLiveChange();
+
+        // Отправляем запрос на удаление в БД (фильтруем по названию И по ID текущего юзера)
         const { error } = await db
             .from('watched_items')
             .delete()
-            .eq('title', title);
+            .eq('title', title)
+            .eq('user_id', currentUser.id);
 
-        if (error) console.error("Ошибка при удалении фильма:", error);
+        if (error) {
+            console.error("Ошибка при удалении фильма из БД:", error);
+            // Если в БД удалить не удалось, возвращаем обратно
+            watchedTitles.add(title);
+            updateUIOnLiveChange();
+        }
     } else {
-        // Записи нет — добавляем в базу
+        // Локально сразу добавляем для быстроты отклика
+        watchedTitles.add(title);
+        updateUIOnLiveChange();
+
+        // Добавляем в БД
         const { error } = await db
             .from('watched_items')
             .insert([{ user_id: currentUser.id, title: title }]);
 
-        if (error) console.error("Ошибка при добавлении фильма:", error);
+        if (error) {
+            console.error("Ошибка при добавлении фильма в БД:", error);
+            // Если в БД добавить не удалось, откатываем назад
+            watchedTitles.delete(title);
+            updateUIOnLiveChange();
+        }
     }
 }
-
 // Экран авторизации
 function showLoginScreen() {
     app.innerHTML = `
