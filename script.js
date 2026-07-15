@@ -286,16 +286,20 @@ async function showHome() {
 
         // Кнопка Музыки
         let musicBtn = document.createElement("button");
-        musicBtn.textContent = isMusicPlaying ? "🔊" : "🔇"; // Оставляем только иконку, чтобы было компактно
+        musicBtn.textContent = isMusicPlaying ? "🔊" : "🔇";
         
-        // Добавляем стили для компактности
-        musicBtn.style.padding = "5px 10px";
-        musicBtn.style.fontSize = "16px";
-        musicBtn.style.minWidth = "40px"; // Фиксированная ширина
+        // Стили для идеального круга
+        musicBtn.style.width = "40px";          // Ширина
+        musicBtn.style.height = "40px";         // Высота (такая же, как ширина)
+        musicBtn.style.padding = "0";           // Убираем отступы, чтобы иконка была по центру
+        musicBtn.style.borderRadius = "50%";    // Магия круга
+        musicBtn.style.display = "flex";        // Центрируем иконку внутри
+        musicBtn.style.justifyContent = "center";
+        musicBtn.style.alignItems = "center";
         musicBtn.style.cursor = "pointer";
         musicBtn.style.border = "1px solid #ccc";
-        musicBtn.style.borderRadius = "5px";
         musicBtn.style.background = "#f9f9f9";
+        musicBtn.style.fontSize = "18px";       // Размер иконки
 
         musicBtn.onclick = () => {
             const audio = document.getElementById("bgMusic");
