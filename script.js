@@ -820,8 +820,8 @@ const data = {
 // НАСТРОЙКА SUPABASE
 // ==========================================
 // Вставьте сюда ваши данные из Шага 5:
-const SUPABASE_URL = "https://ВАШ_ПРОЕКТ.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co/rest/v1/o";
+const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
 
 // Инициализация клиента Supabase
 const supabase = lib.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
