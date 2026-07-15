@@ -29,19 +29,7 @@ const data = {
             },
             "Кровь-С (2011)"
         ],
-        "Драма / Романтика": [
-            "Your Name",
-            "Toradora!",
-            "Clannad",
-            "Violet Evergarden",
-            "Anohana",
-            "Erased"
-        ],
-        "Sci-Fi / Киберпанк": [
-            "Steins;Gate",
-            "Psycho-Pass",
-            "Cowboy Bebop"
-        ],
+
         "Ghibli / Миядзаки": [
             "Навсикая из Долины ветров (1984)",
             "Небесный замок Лапута (1986)",
