@@ -287,24 +287,7 @@ async function showHome() {
         const createIconButton = (icon, onClick) => {
     let btn = document.createElement("button");
     btn.textContent = icon;
-    
-    // Принудительные стили с !important
-    btn.style.setProperty('width', '40px', 'important');
-    btn.style.setProperty('height', '40px', 'important');
-    btn.style.setProperty('padding', '0px', 'important'); // Убираем твой паддинг
-    btn.style.setProperty('margin', '0px', 'important');
-    btn.style.setProperty('border-radius', '50%', 'important'); // Теперь точно круг
-    
-    // Базовая настройка
-    btn.style.display = 'flex';
-    btn.style.justifyContent = 'center';
-    btn.style.alignItems = 'center';
-    btn.style.cursor = 'pointer';
-    btn.style.border = '1px solid #ccc';
-    btn.style.background = '#f9f9f9';
-    btn.style.fontSize = '16px';
-    btn.style.boxSizing = 'border-box';
-    
+    btn.className = "round-btn"; // Применяем наш "ядерный" класс
     btn.onclick = onClick;
     return btn;
 };
@@ -949,3 +932,23 @@ function setupMusicAutoplay() {
 
 // Запускаем настройку при загрузке страницы
 setupMusicAutoplay();
+const style = document.createElement('style');
+style.textContent = `
+    .round-btn {
+        width: 40px !important;
+        height: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        cursor: pointer !important;
+        border: 1px solid #ccc !important;
+        background: #f9f9f9 !important;
+        font-size: 18px !important;
+        box-sizing: border-box !important;
+        line-height: 1 !important;
+    }
+`;
+document.head.appendChild(style);
