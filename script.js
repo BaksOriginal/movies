@@ -259,13 +259,32 @@ function showLoginScreen() {
 async function showHome() {
     startTransitionLock();
     history = [];
-    currentCategoryName = null; // Сбрасываем текущую категорию на главной
+    currentCategoryName = null;
     await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
     if (nav) nav.remove();
 
     app.innerHTML = "";
+
+    // Функция для создания круглой кнопки (размещаем её внутри или снаружи showHome)
+    const createIconButton = (icon, onClick) => {
+        let btn = document.createElement("button");
+        btn.textContent = icon;
+        btn.style.cssText = `
+            width: 40px !important; height: 40px !important;
+            min-width: 40px !important; min-height: 40px !important;
+            padding: 0 !important; margin: 0 !important;
+            border-radius: 50% !important; display: flex !important;
+            justify-content: center !important; align-items: center !important;
+            cursor: pointer !important; border: 1px solid #ccc !important;
+            background: #f9f9f9 !important; font-size: 16px !important;
+            box-sizing: border-box !important; overflow: visible !important;
+            line-height: 1 !important; flex-shrink: 0 !important;
+        `;
+        btn.onclick = onClick;
+        return btn;
+    };
 
     if (currentUser) {
         let header = document.createElement("div");
@@ -275,73 +294,25 @@ async function showHome() {
         header.style.alignItems = "center";
         header.style.marginBottom = "15px";
 
-        // Левая часть: Email
         header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${currentUser.email}</span>`;
         
-        // Правая часть: Контейнер для кнопок
         let controls = document.createElement("div");
         controls.style.display = "flex";
+        controls.style.alignItems = "center";
         controls.style.gap = "10px";
 
-        // --- Функция для создания кнопок-кругляшей ---
-        const createIconButton = (icon, onClick) => {
-    let btn = document.createElement("button");
-    btn.textContent = icon;
-    
-    btn.style.cssText = `
-        width: 40px !important;
-        height: 40px !important;
-        min-width: 40px !important;
-        min-height: 40px !important;
-        
-        padding: 0 !important;
-        margin: 0 !important;
-        border-radius: 50% !important;
-        
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        
-        cursor: pointer !important;
-        border: 1px solid #ccc !important;
-        background: #f9f9f9 !important;
-        
-        /* Уменьшаем шрифт, чтобы эмодзи гарантированно влезли */
-        font-size: 16px !important; 
-        
-        box-sizing: border-box !important;
-        /* Убираем hidden, чтобы не резало, если чуть вылезет */
-        overflow: visible !important; 
-        line-height: 1 !important;
-    `;
-    
-    btn.onclick = onClick;
-    return btn;
-};
-
-        // Кнопка Музыки
+        // Кнопки
         let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
             const audio = document.getElementById("bgMusic");
-            if (audio.paused) {
-                audio.play();
-                isMusicPlaying = true;
-                localStorage.setItem("musicEnabled", "true");
-                musicBtn.textContent = "🔊";
-            } else {
-                audio.pause();
-                isMusicPlaying = false;
-                localStorage.setItem("musicEnabled", "false");
-                musicBtn.textContent = "🔇";
-            }
+            if (audio.paused) { audio.play(); isMusicPlaying = true; localStorage.setItem("musicEnabled", "true"); musicBtn.textContent = "🔊"; }
+            else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
         });
 
-        // Кнопка Выйти
-        let logoutBtn = createIconButton("🚪", () => db.auth.signOut());
+        let logoutBtn = createIconButton("❌", () => db.auth.signOut());
 
         controls.appendChild(musicBtn);
         controls.appendChild(logoutBtn);
         header.appendChild(controls);
-        
         app.appendChild(header);
     }
 
@@ -357,17 +328,23 @@ async function showHome() {
         addBtn.style.color = "#0d47a1";
         addBtn.style.marginBottom = "20px";
         addBtn.onclick = () => showAddEditModal();
+        
+        // Разделитель
+        let separator = document.createElement("div");
+        separator.style.width = "1px";
+        separator.style.height = "24px";
+        separator.style.borderRadius = "1px";
+        separator.style.background = "#ccc";
+        separator.style.margin = "0 10px";
+        
         app.appendChild(addBtn);
+        app.appendChild(separator); // Палочка между кнопкой "Добавить" и списком категорий
     }
 
     for (let key in dbData) {
         let button = document.createElement("button");
         button.textContent = key;
-        // При клике на категорию запоминаем её название
-        button.onclick = () => {
-            currentCategoryName = key;
-            openData(dbData[key], true);
-        };
+        button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
     }
 
@@ -380,6 +357,7 @@ async function showHome() {
         openData(list, true, "🎬 Просмотрено");
     };
     app.appendChild(watchedBtn);
+
     let footer = document.createElement("p");
     footer.style.textAlign = "center";
     footer.style.marginTop = "40px";
@@ -867,6 +845,12 @@ function showRandomTitleModal(titleText) {
 
 // Функция, реагирующая на тряску
 function onPhoneShake() {
+    // --- Добавляем защиту от секретных категорий ---
+    if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒"))) {
+        return; // Если это секрет, просто выходим и ничего не делаем
+    }
+    // -----------------------------------------------
+
     const now = Date.now();
     if (now - lastShakeTime < SHAKE_TIMEOUT) return; 
 
