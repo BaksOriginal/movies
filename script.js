@@ -479,7 +479,7 @@ async function showHome() {
 
         let searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.placeholder = "Поиск фильма, жанра или серии...";
+        searchInput.placeholder = "Поиск по названию или жанру...";
         searchInput.style.cssText = `
             flex-grow: 1;
             padding: 10px;
