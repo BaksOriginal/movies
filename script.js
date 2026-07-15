@@ -1356,46 +1356,37 @@ setupMusicAutoplay();
 // Финальный блок CSS с исправленными приоритетами
 const style = document.createElement('style');
 style.textContent = `
-    /* --- БАЗОВЫЙ РЕЖИМ (Светлый) --- */
-    /* Обычные плашки остаются белыми */
-    button:not(.btn-pink-style):not(.btn-cancel-gray) {
-        background-color: #ffffff !important;
-        color: #333333 !important;
-        border: 1px solid #e0e0e0 !important;
+    /* 1. БАЗОВЫЙ СТИЛЬ (Работает всегда) */
+    .btn-main {
+        background-color: #ffffff;
+        color: #333;
+        border: 1px solid #ddd;
+        padding: 10px 20px;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: 0.2s;
     }
 
-    /* --- РЕЖИМ ЭЧПОЧМОНИ (Фиолетовый) --- */
+    /* 2. ТЕМА ЭЧПОЧМОНИ (Включается только при наличии класса у body) */
     body.echpochmoni-mode {
-        background: linear-gradient(135deg, #f5edff 0%, #eae0f7 100%) !important;
+        background: linear-gradient(135deg, #f5edff, #eae0f7) !important;
     }
 
-    /* 1. ПРИНУДИТЕЛЬНО перекрашиваем ВСЕ кнопки, когда активен режим */
-    body.echpochmoni-mode button {
+    /* Красим ВСЕ кнопки в фиолетовый, если включен режим */
+    body.echpochmoni-mode .btn-main {
         background-color: #f3e8ff !important;
         color: #512da8 !important;
-        border: 1px solid #dcd0f0 !important;
+        border-color: #dcd0f0 !important;
     }
 
-    /* 2. Исправляем кнопки списков (чтобы они были одинаково стильными) */
-    body.echpochmoni-mode .btn-pink-style {
-        background-color: #cbb2ff !important; 
+    /* Разделяем кнопки списков в режиме Эчпочмони */
+    body.echpochmoni-mode .btn-wishlist {
+        background-color: #e3d2ff !important;
+        color: #4527a0 !important;
+    }
+    body.echpochmoni-mode .btn-watched-list {
+        background-color: #cbb2ff !important;
         color: #311b92 !important;
-        font-weight: 600 !important;
-        border: none !important;
-    }
-
-    /* 3. Плашки с названиями фильмов (теперь тоже будут фиолетовыми) */
-    body.echpochmoni-mode .item-row, 
-    body.echpochmoni-mode .movie-title-card {
-        background-color: #f3e8ff !important;
-        color: #512da8 !important;
-        border: 1px solid #dcd0f0 !important;
-    }
-
-    /* Эффекты наведения для режима Эчпочмони */
-    body.echpochmoni-mode button:hover {
-        background-color: #ebd9fc !important;
-        box-shadow: 0 4px 8px rgba(103, 58, 183, 0.2) !important;
     }
 `;
 document.head.appendChild(style);
