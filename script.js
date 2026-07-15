@@ -387,6 +387,7 @@ function performCatalogSearch(query) {
 }
 
 // Главная страница
+// Главная страница
 async function showHome() {
     startTransitionLock();
     history = [];
@@ -460,14 +461,14 @@ async function showHome() {
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
         
-        // Сплиттер HR
-        let hr = document.createElement("hr");
-        hr.style.border = "0";
-        hr.style.borderTop = "2px solid #9b4f70"; 
-        hr.style.margin = "15px 0";
-        app.appendChild(hr);
+        // Первый сплиттер HR (после кнопки "Добавить")
+        let hr1 = document.createElement("hr");
+        hr1.style.border = "0";
+        hr1.style.borderTop = "2px solid #9b4f70"; 
+        hr1.style.margin = "15px 0";
+        app.appendChild(hr1);
 
-        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ (Ниже hr, выше кнопок категорий)
+        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ (Ниже первого hr, выше кнопок категорий)
         let searchContainer = document.createElement("div");
         searchContainer.style.cssText = `
             display: flex;
@@ -524,14 +525,30 @@ async function showHome() {
         searchContainer.appendChild(searchInput);
         searchContainer.appendChild(searchSubmitBtn);
         app.appendChild(searchContainer);
+
+        // ВТОРОЙ СПЛИТТЕР HR (Новый! После поиска, перед категориями)
+        let hrAfterSearch = document.createElement("hr");
+        hrAfterSearch.style.border = "0";
+        hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
+        hrAfterSearch.style.margin = "15px 0 20px 0";
+        app.appendChild(hrAfterSearch);
     }
 
-    // Рендерим кнопки категорий (включая Аниме)
+    // Рендерим кнопки категорий
     for (let key in dbData) {
         let button = document.createElement("button");
         button.textContent = key;
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
+
+        // ТРЕТИЙ СПЛИТТЕР HR (Новый! После категории "Секрет")
+        if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) {
+            let hrAfterSecret = document.createElement("hr");
+            hrAfterSecret.style.border = "0";
+            hrAfterSecret.style.borderTop = "2px solid #9b4f70"; 
+            hrAfterSecret.style.margin = "15px 0";
+            app.appendChild(hrAfterSecret);
+        }
     }
 
     let watchedBtn = document.createElement("button");
