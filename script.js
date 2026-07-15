@@ -328,6 +328,7 @@ function showHome() {
 // Отрисовка строки элемента с интерактивом
 // Отрисовка строки элемента (тайтла)
 // Отрисовка строки элемента (тайтла) с умным зажатием без фантомных кликов
+// Отрисовка строки элемента (тайтла) с умным зажатием без фантомных кликов
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
@@ -335,9 +336,24 @@ function renderItemRow(itemText, container) {
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
     
-    const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
+    // --- ПРОВЕРКА НА СЕКРЕТНОСТЬ ---
+    // 1. Проверяем по конкретным текстам (на всякий случай)
+    let isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
+    
+    // 2. И проверяем по названию текущей категории в истории
+    if (history.length > 0) {
+        const currentCategoryData = history[history.length - 1];
+        // Ищем в dbData категорию, которая совпадает с текущим экраном
+        for (let catName in dbData) {
+            if (dbData[catName] === currentCategoryData && (catName.includes("Секрет") || catName.includes("🔒") || catName.includes("❤️"))) {
+                isSecret = true;
+                break;
+            }
+        }
+    }
 
     if (isSecret) {
+        // Убираем год в конце (любые четыре цифры в скобках)
         itemDiv.textContent = itemText.replace(/\s*\(\d{4}\)$/, "");
     } else {
         itemDiv.textContent = itemText;
@@ -416,6 +432,7 @@ function renderItemRow(itemText, container) {
     
     row.appendChild(itemDiv);
 
+    // Звёздочку рисуем только для НЕ секретных тайтлов
     if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
