@@ -1,7 +1,6 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
-let isEchpochmoniActive = false;
 
 // Включаем временную блокировку кликов на 350мс
 function startTransitionLock() {
@@ -75,100 +74,23 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = document.getElementById("app");
 let currentUser = null;
 let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
-let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
 let history = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
-// Вспомогательная функция для включения/выключения класса темы на body
-function applyEchpochmoniTheme(active) {
-    if (active) {
-        document.body.classList.add("echpochmoni-mode");
-    } else {
-        document.body.classList.remove("echpochmoni-mode");
-    }
-}
-
-// ==========================================
-// РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
-// ==========================================
-function saveSessionBackup(session) {
-    if (session) {
-        const data = JSON.stringify({
-            access_token: session.access_token,
-            refresh_token: session.refresh_token
-        });
-        document.cookie = "sb_session_backup=" + encodeURIComponent(data) + "; max-age=31536000; path=/; SameSite=Lax; Secure";
-    } else {
-        document.cookie = "sb_session_backup=; max-age=0; path=/; SameSite=Lax; Secure";
-    }
-}
-
-async function tryRestoreSession() {
-    try {
-        const matches = document.cookie.match(new RegExp("(?:^|; )" + "sb_session_backup".replace(/([\.$?*|{}\(\)\[\]\\\/\+^])/g, '\\$1') + "=([^;]*)"));
-        if (matches) {
-            const backupData = JSON.parse(decodeURIComponent(matches[1]));
-            if (backupData && backupData.refresh_token) {
-                console.log("Найдена резервная сессия, восстанавливаем...");
-                const { data, error } = await db.auth.setSession({
-                    access_token: backupData.access_token,
-                    refresh_token: backupData.refresh_token
-                });
-                if (!error && data.session) {
-                    currentUser = data.session.user;
-                    saveSessionBackup(data.session);
-                    return true;
-                }
-            }
-        }
-    } catch (e) {
-        console.error("Не удалось восстановить сессию из бэкапа:", e);
-    }
-    return false;
-}
-
-// Флаг, который покажет, загрузилось ли приложение в первый раз
-let isAppInitialized = false;
-
 // Слушатель событий авторизации
-db.auth.onAuthStateChange(async (event, session) => {
+db.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
-        saveSessionBackup(session); // Бэкапим сессию
-        
-        // Восстанавливаем скин из памяти аккаунта
-        isEchpochmoniActive = localStorage.getItem("echpochmoni_mode_" + currentUser.id) === "true";
-        applyEchpochmoniTheme(isEchpochmoniActive);
-        
-        // Загружаем списки просмотренного и вишлиста параллельно
-        Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]).then(() => {
+        loadWatchedFromDB().then(() => {
             subscribeToChanges(); 
-            
-            if (!isAppInitialized) {
-                isAppInitialized = true;
-                showHome();
-            } else {
-                refreshCurrentScreen();
-            }
+            showHome();
         });
     } else {
-        // Пробуем восстановить из бэкапа перед тем как выкинуть
-        const restored = await tryRestoreSession();
-        if (restored) return;
-
         currentUser = null;
         watchedTitles.clear();
-        wishlistTitles.clear();
-        isAppInitialized = false;
-        saveSessionBackup(null);
-        
-        // Сбрасываем скин при выходе из аккаунта
-        isEchpochmoniActive = false;
-        applyEchpochmoniTheme(false);
-        
         if (realtimeChannel) {
             db.removeChannel(realtimeChannel);
             realtimeChannel = null;
@@ -177,26 +99,20 @@ db.auth.onAuthStateChange(async (event, session) => {
     }
 });
 
-// Загрузка просмотренных тайтлов
+// Загрузка просмотренных тайтлов из общей базы данных
 async function loadWatchedFromDB() {
     if (!currentUser) return;
-    const { data, error } = await db.from('watched_items').select('title');
+    
+    const { data: dbData, error } = await db
+        .from('watched_items')
+        .select('title');
+
     if (error) {
         console.error("Ошибка при загрузке списка просмотренного:", error);
         return;
     }
-    watchedTitles = new Set(data.map(item => item.title));
-}
 
-// Загрузка вишлиста
-async function loadWishlistFromDB() {
-    if (!currentUser) return;
-    const { data, error } = await db.from('wishlist_items').select('title');
-    if (error) {
-        console.error("Ошибка при загрузке вишлиста:", error);
-        return;
-    }
-    wishlistTitles = new Set(data.map(item => item.title));
+    watchedTitles = new Set(dbData.map(item => item.title));
 }
 
 // Подписка на изменения базы данных в реальном времени (Websockets)
@@ -205,34 +121,44 @@ function subscribeToChanges() {
 
     realtimeChannel = db
         .channel('schema-db-changes')
-        // Следим за просмотренными
         .on(
             'postgres_changes',
-            { event: '*', schema: 'public', table: 'watched_items' },
-            () => { updateUIOnLiveChange(); }
-        )
-        // Следим за вишлистом
-        .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'wishlist_items' },
-            () => { updateUIOnLiveChange(); }
+            {
+                event: '*', 
+                schema: 'public',
+                table: 'watched_items'
+            },
+            (payload) => {
+                console.log('Изменение получено в реальном времени:', payload);
+                
+                let stateChanged = false;
+                if (payload.eventType === 'INSERT') {
+                    if (!watchedTitles.has(payload.new.title)) {
+                        watchedTitles.add(payload.new.title);
+                        stateChanged = true;
+                    }
+                } else if (payload.eventType === 'DELETE') {
+                    stateChanged = true;
+                }
+
+                // Обновляем интерфейс на лету только при реальных изменениях
+                if (stateChanged) {
+                    updateUIOnLiveChange();
+                }
+            }
         )
         .subscribe();
 }
 
-// Живое обновление интерфейса
+// Живое обновление интерфейса без принудительного сброса на главную
 async function updateUIOnLiveChange() {
     await loadCatalogFromDB();
-    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]);
 
-    // 1. Обновляем счетчики на кнопках главного экрана
+    // 1. Обновляем счетчик на кнопке "Просмотрено"
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
         if (btn.textContent.includes("Просмотрено")) {
             btn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
-        }
-        if (btn.textContent.includes("Будем смотреть")) {
-            btn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
         }
     });
 
@@ -251,26 +177,22 @@ async function updateUIOnLiveChange() {
                 lookupText = itemText + " (2026)";
             }
 
-            // Очищаем классы перед переназначением
-            watchBtn.className = "btn-watch";
-
             if (watchedTitles.has(lookupText)) {
                 watchBtn.classList.add("watched");
                 watchBtn.textContent = "★";
-            } else if (wishlistTitles.has(lookupText)) {
-                watchBtn.classList.add("wishlist-active");
-                watchBtn.textContent = "★";
             } else {
+                watchBtn.classList.remove("watched");
                 watchBtn.textContent = "☆";
             }
         }
     });
 }
 
-// Мягкое обновление текущего экрана
+// МЯГКОЕ ОБНОВЛЕНИЕ ТЕКУЩЕГО ЭКРАНА (без выброса на "Домой")
 async function refreshCurrentScreen() {
     await loadCatalogFromDB();
     if (history.length > 0) {
+        // Перерисовываем ту ветку, на которой сейчас находится пользователь
         let currentActiveData = history[history.length - 1];
         openData(currentActiveData, false); 
     } else {
@@ -278,78 +200,39 @@ async function refreshCurrentScreen() {
     }
 }
 
-// =======================================================
-// ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ ИЛИ СНЯТИЕ)
-// =======================================================
-async function handleStarClick(title) {
+// Добавление или удаление отметки "просмотрено"
+async function toggleWatchState(title) {
     if (!currentUser) return;
 
-    // Если фильм уже в одной из категорий — повторный клик просто убирает отметку
     if (watchedTitles.has(title)) {
         watchedTitles.delete(title);
         updateUIOnLiveChange();
-        await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
-        return;
-    }
 
-    if (wishlistTitles.has(title)) {
-        wishlistTitles.delete(title);
-        updateUIOnLiveChange();
-        await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
-        return;
-    }
+        const { error } = await db
+            .from('watched_items')
+            .delete()
+            .eq('title', title)
+            .eq('user_id', currentUser.id);
 
-    // Если фильм чистый — открываем красивое быстрое меню
-    showStarChoiceModal(title);
-}
-
-// Модальное окно выбора категории для звёздочки
-function showStarChoiceModal(title) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.id = "starChoiceModal";
-
-    overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Куда добавить?</h3>
-            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>
-                <button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>
-                <button id="choiceCancel" class="btn-cancel-gray">Отмена</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(overlay);
-
-    document.getElementById("choiceWish").onclick = async () => {
-        overlay.remove();
-        wishlistTitles.add(title);
-        updateUIOnLiveChange();
-        const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
         if (error) {
-            wishlistTitles.delete(title);
+            console.error("Ошибка при удалении фильма из БД:", error);
+            watchedTitles.add(title);
             updateUIOnLiveChange();
-            console.error("Ошибка при сохранении в вишлист:", error);
         }
-    };
-
-    document.getElementById("choiceWatch").onclick = async () => {
-        overlay.remove();
+    } else {
         watchedTitles.add(title);
         updateUIOnLiveChange();
-        const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
+
+        const { error } = await db
+            .from('watched_items')
+            .insert([{ user_id: currentUser.id, title: title }]);
+
         if (error) {
+            console.error("Ошибка при добавлении фильма в БД:", error);
             watchedTitles.delete(title);
             updateUIOnLiveChange();
-            console.error("Ошибка при сохранении в просмотренное:", error);
         }
-    };
-
-    document.getElementById("choiceCancel").onclick = () => {
-        overlay.remove();
-    };
+    }
 }
 
 // Экран авторизации
@@ -365,6 +248,8 @@ function showLoginScreen() {
 
     document.getElementById("loginForm").onsubmit = async (e) => {
         e.preventDefault();
+        
+        // Запускаем отслеживание акселерометра (пользователь кликнул, браузер разрешит)
         startShakeDetection();
 
         const username = document.getElementById("loginUsername").value.trim().toLowerCase();
@@ -391,6 +276,8 @@ function showLoginScreen() {
 // =======================================================
 // ЛОГИКА ПОИСКА (ЛЕВЕНШТЕЙН / НЕЧЕТКИЙ ПОИСК)
 // =======================================================
+
+// Вычисление расстояния Левенштейна между двумя строками
 function getLevenshteinDistance(a, b) {
     const tmp = [];
     let i, j, alen = a.length, blen = b.length, cost;
@@ -407,13 +294,16 @@ function getLevenshteinDistance(a, b) {
     return tmp[alen][blen];
 }
 
+// Функция нечеткого поиска по каталогу
 function performCatalogSearch(query) {
     const searchStr = query.toLowerCase().trim();
     if (!searchStr) return;
 
     const results = [];
     
+    // Проходимся по всей структуре dbData
     for (let catKey in dbData) {
+        // Исключаем любые секретные категории из поиска
         if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) {
             continue;
         }
@@ -425,6 +315,7 @@ function performCatalogSearch(query) {
             const processTitle = (fullTitle, franchiseName = null) => {
                 const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
                 
+                // 1. Точное/Прямое вхождение
                 if (cleanTitle.includes(searchStr) || 
                     (franchiseName && franchiseName.toLowerCase().includes(searchStr)) ||
                     genreKey.toLowerCase().includes(searchStr)) {
@@ -432,6 +323,7 @@ function performCatalogSearch(query) {
                     return;
                 }
 
+                // 2. Нечеткий поиск (допускаем опечатки)
                 const queryWords = searchStr.split(/\s+/);
                 const titleWords = cleanTitle.split(/\s+/);
 
@@ -447,6 +339,8 @@ function performCatalogSearch(query) {
                         }
                     });
 
+                    // Порог для опечаток:
+                    // до 4 символов — 1 ошибка, длиннее 4 символов — 2 ошибки
                     const maxAllowedErrors = qw.length <= 4 ? 1 : 2;
 
                     if (bestWordDist <= maxAllowedErrors) {
@@ -476,6 +370,7 @@ function performCatalogSearch(query) {
         }
     }
 
+    // Сортируем: сначала точные, затем по возрастанию ошибок
     results.sort((a, b) => a.score - b.score);
 
     const uniqueResults = [];
@@ -555,6 +450,7 @@ async function showHome() {
     app.appendChild(title);
 
     if (currentUser) {
+        // Кнопка "Добавить"
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
@@ -564,14 +460,14 @@ async function showHome() {
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
         
-        // Первый сплиттер HR (после "Добавить")
+        // Сплиттер HR
         let hr = document.createElement("hr");
         hr.style.border = "0";
         hr.style.borderTop = "2px solid #9b4f70"; 
         hr.style.margin = "15px 0";
         app.appendChild(hr);
 
-        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
+        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ (Ниже hr, выше кнопок категорий)
         let searchContainer = document.createElement("div");
         searchContainer.style.cssText = `
             display: flex;
@@ -628,46 +524,19 @@ async function showHome() {
         searchContainer.appendChild(searchInput);
         searchContainer.appendChild(searchSubmitBtn);
         app.appendChild(searchContainer);
-
-        // Второй сплиттер HR (после Поиска)
-        let hrAfterSearch = document.createElement("hr");
-        hrAfterSearch.style.border = "0";
-        hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
-        hrAfterSearch.style.margin = "15px 0 20px 0";
-        app.appendChild(hrAfterSearch);
     }
 
-    // Рендерим кнопки категорий
+    // Рендерим кнопки категорий (включая Аниме)
     for (let key in dbData) {
         let button = document.createElement("button");
         button.textContent = key;
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
-
-        // Третий сплиттер HR (после категории "Секрет")
-        if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) {
-            let hrAfterSecret = document.createElement("hr");
-            hrAfterSecret.style.border = "0";
-            hrAfterSecret.style.borderTop = "2px solid #9b4f70"; 
-            hrAfterSecret.style.margin = "15px 0";
-            app.appendChild(hrAfterSecret);
-        }
     }
 
-    let wishlistBtn = document.createElement("button");
-    wishlistBtn.className = "btn-pink-style btn-wishlist"; // Добавили класс btn-wishlist
-    wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-    wishlistBtn.onclick = () => {
-        const list = Array.from(wishlistTitles);
-        currentCategoryName = "🍿 Будем смотреть";
-        openData(list, true, "🍿 Будем смотреть");
-    };
-    app.appendChild(wishlistBtn);
-
-    // Кнопка "Просмотрено" на главной
     let watchedBtn = document.createElement("button");
-    watchedBtn.className = "btn-pink-style btn-watched-list"; // Добавили класс btn-watched-list
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
+    watchedBtn.style.background = "#ffe3ec";
     watchedBtn.onclick = () => {
         const list = Array.from(watchedTitles);
         currentCategoryName = "🎬 Просмотрено";
@@ -769,19 +638,13 @@ function renderItemRow(itemText, container) {
     if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
-        
-        // Установка правильного состояния звездочки на старте
         if (watchedTitles.has(itemText)) {
             watchBtn.classList.add("watched");
-            watchBtn.textContent = "★";
-        } else if (wishlistTitles.has(itemText)) {
-            watchBtn.classList.add("wishlist-active");
             watchBtn.textContent = "★";
         } else {
             watchBtn.textContent = "☆";
         }
-        
-        watchBtn.onclick = () => handleStarClick(itemText);
+        watchBtn.onclick = () => toggleWatchState(itemText);
         row.appendChild(watchBtn);
     }
 
@@ -800,24 +663,16 @@ function showActionMenu(itemText) {
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
-                <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
-                <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
-                <button class="btn-cancel-gray" id="actCancel">Отмена</button>
+            <div class="action-buttons">
+                <button class="btn-action-edit" id="actEdit">✏️ Редактировать</button>
+                <button class="btn-action-delete" id="actDelete">❌ Удалить из базы</button>
+                <button class="btn-action-cancel" id="actCancel">Отмена</button>
             </div>
         </div>
     `;
 
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
-
-    // Логика кнопки трейлера
-    document.getElementById("actTrailer").onclick = () => {
-        overlay.remove();
-        const query = encodeURIComponent(itemText + " трейлер");
-        window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
-    };
 
     document.getElementById("actEdit").onclick = () => {
         overlay.remove();
@@ -849,47 +704,6 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(title);
     }
 
-    // --- НАДЕЖНОЕ ДОБАВЛЕНИЕ ТУМБЛЕРА ДЛЯ СЕКРЕТНОЙ КАТЕГОРИИ ---
-    const isSecretCategory = (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️"))) || 
-                             (customTitle && (customTitle.includes("Секрет") || customTitle.includes("🔒") || customTitle.includes("❤️")));
-
-    if (isSecretCategory && currentUser) {
-        let toggleBlock = document.createElement("div");
-        toggleBlock.style.cssText = `
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: ${isEchpochmoniActive ? "#ebd9fc" : "#ffe3ec"};
-            padding: 12px 16px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            transition: background-color 0.3s ease;
-        `;
-
-        toggleBlock.innerHTML = `
-            <span style="font-weight: 600; font-size: 15px; color: ${isEchpochmoniActive ? "#512da8" : "#d81b60"};">
-                😈 Стиль Эчпочмони
-            </span>
-            <label class="switch-toggle" style="position: relative; display: inline-block; width: 46px; height: 24px;">
-                <input type="checkbox" id="echpochmoniSwitch" style="opacity: 0; width: 0; height: 0;" ${isEchpochmoniActive ? "checked" : ""}>
-                <span class="slider-toggle" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px;"></span>
-            </label>
-        `;
-
-        app.appendChild(toggleBlock);
-
-        toggleBlock.querySelector("#echpochmoniSwitch").onchange = (e) => {
-            isEchpochmoniActive = e.target.checked;
-            
-            localStorage.setItem("echpochmoni_mode_" + currentUser.id, isEchpochmoniActive);
-            applyEchpochmoniTheme(isEchpochmoniActive);
-
-            toggleBlock.style.background = isEchpochmoniActive ? "#ebd9fc" : "#ffe3ec";
-            toggleBlock.querySelector("span").style.color = isEchpochmoniActive ? "#512da8" : "#d81b60";
-        };
-    }
-    // -----------------------------------------------------------
-
     if (Array.isArray(content)) {
         content.forEach(item => {
             if (typeof item === "string") {
@@ -897,7 +711,7 @@ function openData(content, saveHistory = true, customTitle = null) {
             } 
             else if (typeof item === "object" && item !== null) {
                 for (let franchiseName in item) {
-                    let button = document.createElement("button"); // Возвращаем дефолтный белый стиль
+                    let button = document.createElement("button");
                     button.textContent = franchiseName;
                     button.onclick = () => openData(item[franchiseName], true);
                     app.appendChild(button);
@@ -908,7 +722,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     else if (typeof content === "object" && content !== null) {
         for (let key in content) {
             let value = content[key];
-            let button = document.createElement("button"); // Возвращаем дефолтный белый стиль
+            let button = document.createElement("button");
             button.textContent = key;
             button.onclick = () => openData(value, true);
             app.appendChild(button);
@@ -963,10 +777,12 @@ function showAddEditModal(existingItem = null) {
     overlay.className = "modal-overlay";
     overlay.id = "addEditModal";
 
+    // УБИРАЕМ КАТЕГОРИЮ "СЕКРЕТ" ИЗ ДОСТУПНЫХ ДЛЯ ДОБАВЛЕНИЯ
     const categories = Object.keys(dbData).filter(cat => {
         return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
     });
     
+    // Собираем все уникальные жанры для автодополнения (по всему разрешенному каталогу)
     const existingGenres = new Set();
     for (let catKey in dbData) {
         if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) continue;
@@ -1006,7 +822,7 @@ function showAddEditModal(existingItem = null) {
                 <label>Франшиза (Если это часть серии, необязательно)</label>
                 <input type="text" id="mFranchise" placeholder="Например: Крик" list="franchisesList">
                 <datalist id="franchisesList">
-                </datalist>
+                    </datalist>
 
                 <div class="modal-buttons">
                     <button type="submit" class="btn-save">Сохранить</button>
@@ -1023,6 +839,7 @@ function showAddEditModal(existingItem = null) {
     const mFranchise = document.getElementById("mFranchise");
     const franchisesList = document.getElementById("franchisesList");
 
+    // Функция динамического обновления списка франшиз на основе выбранных категории и жанра
     function updateFranchisesDatalist() {
         const selectedCategory = mCategory.value;
         const selectedGenre = mGenre.value.trim();
@@ -1130,7 +947,6 @@ async function handleDeleteClick(itemText) {
 
     if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
         
-        // Удаляем из просмотренных
         const { error: watchedError } = await db
             .from("watched_items")
             .delete()
@@ -1138,16 +954,6 @@ async function handleDeleteClick(itemText) {
 
         if (watchedError) {
             console.error("Не удалось удалить из просмотренных:", watchedError.message);
-        }
-
-        // Удаляем из вишлиста
-        const { error: wishlistError } = await db
-            .from("wishlist_items")
-            .delete()
-            .eq("title", itemText);
-
-        if (wishlistError) {
-            console.error("Не удалось удалить из списка 'Будем смотреть':", wishlistError.message);
         }
 
         const { error } = await db
@@ -1310,69 +1116,25 @@ function setupMusicAutoplay() {
     document.addEventListener("click", playHandler);
 }
 
-// Генератор бесконечных нежных сердечек/демонов на заднем фоне
-function initHeartsBackground() {
-    if (document.querySelector('.hearts-background')) return;
-
-    const container = document.createElement('div');
-    container.className = 'hearts-background';
-    document.body.appendChild(container);
-
-function spawnHeart() {
-    const container = document.querySelector('.hearts-background');
-    if (!container) return;
-
-    const heart = document.createElement('div');
-    heart.className = 'floating-heart';
-    heart.innerHTML = '❤️'; // или '😈', если хочешь демонов
-
-    // Случайная позиция по ширине (от 0 до 100%)
-    const startX = Math.random() * 100;
-    // Случайная задержка и длительность для плавности
-    const duration = 4 + Math.random() * 5; 
-    const swayX = (Math.random() - 0.5) * 100; // легкое покачивание
-
-    heart.style.left = startX + 'vw';
-    heart.style.setProperty('--sway-x', swayX + 'px');
-    heart.style.setProperty('--rotate-deg', (Math.random() * 360) + 'deg');
-    heart.style.animationDuration = duration + 's';
-
-    container.appendChild(heart);
-
-    setTimeout(() => {
-        heart.remove();
-    }, duration * 1000);
-}
-
-    spawnHeart();
-    setInterval(spawnHeart, 900);
-}
-
-// Запуск фоновой магии
-initHeartsBackground();
 setupMusicAutoplay();
-
 const style = document.createElement('style');
 style.textContent = `
-    /* БАЗОВЫЙ ВИД: ничего не трогаем, пусть всё остается как было */
-
-    /* ЭЧПОЧМОНИ: применяем стили только если есть класс у body */
-    body.echpochmoni-mode {
-        background: linear-gradient(135deg, #f5edff, #eae0f7) !important;
-    }
-
-    /* Красим все кнопки категорий (они у тебя создаются через createElement("button")) */
-    body.echpochmoni-mode button {
-        background-color: #f3e8ff !important;
-        color: #512da8 !important;
-        border: 1px solid #dcd0f0 !important;
-    }
-
-    /* Отдельно красим кнопки "Будем смотреть" и "Просмотрено" (если у них есть класс btn-pink-style) */
-    body.echpochmoni-mode .btn-pink-style {
-        background-color: #cbb2ff !important;
-        color: #311b92 !important;
-        border: none !important;
+    .round-btn {
+        overflow: hidden;
+        width: 40px !important;
+        height: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        cursor: pointer !important;
+        border: 1px solid #ccc !important;
+        background: #f9f9f9 !important;
+        font-size: 18px !important;
+        box-sizing: border-box !important;
+        line-height: 1 !important;
     }
 `;
 document.head.appendChild(style);
