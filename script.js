@@ -77,12 +77,18 @@ let history = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
 // Слушатель событий авторизации
+// Слушатель событий авторизации с предварительной загрузкой каталога
 db.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
-        loadWatchedFromDB().then(() => {
+        
+        // Качаем параллельно: и список просмотренного, и сам каталог фильмов
+        Promise.all([
+            loadWatchedFromDB(),
+            loadCatalogFromDB() // Качаем каталог один раз при старте!
+        ]).then(() => {
             subscribeToChanges(); 
-            showHome();
+            showHome(); // Теперь запускается мгновенно
         });
     } else {
         currentUser = null;
@@ -265,10 +271,10 @@ function showLoginScreen() {
 
 // Главная страница
 // Главная страница с динамической загрузкой категорий из Supabase
-async function showHome() {
+// Главная страница — теперь работает МГНОВЕННО без запросов в сеть
+function showHome() {
     startTransitionLock();
     history = [];
-    await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
     if (nav) nav.remove();
@@ -290,7 +296,7 @@ async function showHome() {
     title.textContent = "Время Кино!";
     app.appendChild(title);
 
-    // НОВАЯ КНОПКА: Добавить тайтл (только для авторизованных)
+    // Кнопка: Добавить тайтл (только для авторизованных)
     if (currentUser) {
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
@@ -321,6 +327,7 @@ async function showHome() {
 
 // Отрисовка строки элемента с интерактивом
 // Отрисовка строки элемента (тайтла)
+// Отрисовка строки элемента (тайтла) с умным зажатием без фантомных кликов
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
@@ -328,7 +335,6 @@ function renderItemRow(itemText, container) {
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
     
-    // Проверяем на "Секрет"
     const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
 
     if (isSecret) {
@@ -336,24 +342,32 @@ function renderItemRow(itemText, container) {
     } else {
         itemDiv.textContent = itemText;
         itemDiv.style.cursor = "pointer";
+        itemDiv.style.userSelect = "none"; // Запрещаем выделение текста при зажатии
+        itemDiv.style.webkitUserSelect = "none";
         
-        // --- ЛОГИКА ЗАЖАТИЯ (LONG PRESS) ---
         let pressTimer = null;
-        
-        // Функция, которая срабатывает при начале нажатия
+        let isMoving = false; // Флаг, чтобы отличать скролл от зажатия
+        let startX = 0, startY = 0;
+
+        // Начало нажатия
         const startPress = (e) => {
-            // Предотвращаем стандартное поведение (выделение текста на телефонах)
-            if (e.type === 'touchstart') {
-                e.preventDefault(); 
-            }
+            isMoving = false;
             
-            // Запускаем таймер на 700 миллисекунд (можно поменять на 500, если нужно быстрее)
+            // Запоминаем начальную точку тача (для проверки скролла)
+            if (e.type === 'touchstart') {
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+            }
+
+            // Запускаем таймер зажатия на 700мс
             pressTimer = setTimeout(() => {
-                showActionMenu(itemText);
+                if (!isMoving) {
+                    showActionMenu(itemText);
+                }
             }, 700);
         };
 
-        // Функция, которая отменяет таймер, если палец/мышка отпущены раньше времени
+        // Отмена таймера (если отпустили раньше времени)
         const cancelPress = () => {
             if (pressTimer !== null) {
                 clearTimeout(pressTimer);
@@ -361,20 +375,47 @@ function renderItemRow(itemText, container) {
             }
         };
 
-        // Слушатели для ПК (мышь)
+        // Проверка движения пальца (если сдвинули больше чем на 10px — это скролл, а не зажатие)
+        const movePress = (e) => {
+            if (e.type === 'touchmove') {
+                let diffX = Math.abs(e.touches[0].clientX - startX);
+                let diffY = Math.abs(e.touches[0].clientY - startY);
+                if (diffX > 10 || diffY > 10) {
+                    isMoving = true;
+                    cancelPress();
+                }
+            }
+        };
+
+        // Защита от фантомных кликов
+        const preventPhantomClick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        };
+
+        // Слушатели для ПК
         itemDiv.addEventListener("mousedown", startPress);
         itemDiv.addEventListener("mouseup", cancelPress);
         itemDiv.addEventListener("mouseleave", cancelPress);
+        itemDiv.addEventListener("click", (e) => {
+            e.preventDefault();
+        });
 
-        // Слушатели для телефонов (тач)
-        itemDiv.addEventListener("touchstart", startPress, { passive: false });
-        itemDiv.addEventListener("touchend", cancelPress);
+        // Слушатели для мобилок (тач)
+        itemDiv.addEventListener("touchstart", startPress, { passive: true });
+        itemDiv.addEventListener("touchmove", movePress, { passive: true });
+        itemDiv.addEventListener("touchend", (e) => {
+            cancelPress();
+            if (isMoving) return;
+            if (pressTimer === null) {
+                preventPhantomClick(e);
+            }
+        }, { passive: false });
         itemDiv.addEventListener("touchcancel", cancelPress);
     }
     
     row.appendChild(itemDiv);
 
-    // Оставляем только аккуратную звёздочку
     if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
