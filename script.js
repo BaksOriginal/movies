@@ -669,6 +669,7 @@ function renderItemRow(itemText, container) {
 }
 
 // Всплывающее меню выбора действия
+// Всплывающее меню выбора действия
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -681,8 +682,9 @@ function showActionMenu(itemText) {
             <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons">
-                <button class="btn-action-edit" id="actEdit">✏️ Редактировать</button>
-                <button class="btn-action-delete" id="actDelete">❌ Удалить из базы</button>
+                <button class="btn-action-trailer" id="actTrailer" style="background: #ffebee !important; color: #c62828 !important; margin-bottom: 8px;">🎬 Трейлер на YouTube</button>
+                <button class="btn-action-edit" id="actEdit" style="margin-bottom: 8px;">✏️ Редактировать</button>
+                <button class="btn-action-delete" id="actDelete" style="margin-bottom: 8px;">❌ Удалить из базы</button>
                 <button class="btn-action-cancel" id="actCancel">Отмена</button>
             </div>
         </div>
@@ -690,6 +692,22 @@ function showActionMenu(itemText) {
 
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
+
+    // Логика перехода на YouTube
+    document.getElementById("actTrailer").onclick = () => {
+        overlay.remove();
+        
+        // Очищаем название от года в скобках, чтобы поиск на YouTube был точнее
+        // Например: "Крик 7 (2026)" превратится в "Крик 7"
+        const cleanTitle = itemText.replace(/\s*\(\d{4}\)$/, "").trim();
+        
+        // Формируем поисковый запрос для YouTube
+        const searchQuery = encodeURIComponent(`${cleanTitle} фильм трейлер`);
+        const youtubeUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
+        
+        // Открываем YouTube в новой вкладке браузера
+        window.open(youtubeUrl, '_blank');
+    };
 
     document.getElementById("actEdit").onclick = () => {
         overlay.remove();
