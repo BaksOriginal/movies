@@ -1353,7 +1353,6 @@ function initHeartsBackground() {
 initHeartsBackground();
 setupMusicAutoplay();
 
-// Создание тега стилей
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
@@ -1441,13 +1440,17 @@ style.textContent = `
     body.echpochmoni-mode {
         background-color: #f6f0ff !important; /* Нежно-фиолетовый фон сайта */
     }
-    body.echpochmoni-mode .btn-pink-style {
+    
+    /* Перекрашиваем вообще ВСЕ кнопки (включая дефолтные белые категории и жанры) в сиреневый цвет */
+    body.echpochmoni-mode button:not(.btn-cancel-gray) {
         background-color: #ebd9fc !important; /* Сиреневые кнопки */
         color: #673ab7 !important;            /* Насыщенный фиолетовый текст */
     }
-    body.echpochmoni-mode .btn-pink-style:hover {
+    
+    body.echpochmoni-mode button:not(.btn-cancel-gray):hover {
         background-color: #dfc2fc !important;
     }
+    
     body.echpochmoni-mode h1, body.echpochmoni-mode h2, body.echpochmoni-mode h3 {
         color: #512da8 !important;
     }
