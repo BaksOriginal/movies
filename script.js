@@ -1249,7 +1249,53 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
+// Генератор бесконечных нежных сердечек на заднем фоне
+function initHeartsBackground() {
+    // Если контейнер уже почему-то существует, не создаем его заново
+    if (document.querySelector('.hearts-background')) return;
 
+    const container = document.createElement('div');
+    container.className = 'hearts-background';
+    document.body.appendChild(container);
+
+    function spawnHeart() {
+        const heart = document.createElement('div');
+        heart.className = 'floating-heart';
+        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
+
+        // Рандомизируем параметры для живого и естественного эффекта
+        const size = Math.random() * 18 + 12; // Размер от 12px до 30px
+        const startLeft = Math.random() * 100; // Позиция по горизонтали (в %)
+        const duration = Math.random() * 12 + 10; // Скорость подъема от 10 до 22 секунд (очень плавно)
+        const swayX = (Math.random() * 120 - 60) + 'px'; // Амплитуда покачивания влево/вправо
+        const rotateDeg = (Math.random() * 360) + 'deg'; // Случайный угол вращения
+
+        // Применяем стили
+        heart.style.fontSize = `${size}px`;
+        heart.style.left = `${startLeft}%`;
+        heart.style.animationDuration = `${duration}s`;
+        
+        // Передаем переменные покачивания во floatUp анимацию
+        heart.style.setProperty('--sway-x', swayX);
+        heart.style.setProperty('--rotate-deg', rotateDeg);
+
+        container.appendChild(heart);
+
+        // Самоликвидация элемента из DOM после того, как он улетел, чтобы не грузить браузер
+        setTimeout(() => {
+            heart.remove();
+        }, duration * 1000);
+    }
+
+    // Создаем первое сердечко сразу
+    spawnHeart();
+    
+    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
+    setInterval(spawnHeart, 900);
+}
+
+// Запускаем магию!
+initHeartsBackground();
 setupMusicAutoplay();
 
 const style = document.createElement('style');
@@ -1271,7 +1317,45 @@ style.textContent = `
         box-sizing: border-box !important;
         line-height: 1 !important;
     }
+    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
+    .hearts-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none; /* Клики проходят сквозь них */
+        z-index: -1;          /* Строго на заднем фоне */
+        overflow: hidden;
+    }
 
+    .floating-heart {
+        position: absolute;
+        bottom: -50px;        /* Появляются чуть ниже экрана */
+        color: #ff4081;       /* Малиново-розовый цвет */
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+        animation: floatUp linear forwards;
+    }
+
+    @keyframes floatUp {
+        0% {
+            transform: translateY(0) translateX(0) rotate(0deg);
+            opacity: 0;
+        }
+        10% {
+            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
+        }
+        90% {
+            opacity: 0.15;
+        }
+        100% {
+            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
+            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
+            opacity: 0;       /* Полностью растворяются вверху */
+        }
+    }
     /* Звёздочка для вишлиста (Красивый голубой) */
     .btn-watch.wishlist-active {
         color: #2196f3 !important;
