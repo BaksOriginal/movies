@@ -1318,32 +1318,31 @@ function initHeartsBackground() {
     container.className = 'hearts-background';
     document.body.appendChild(container);
 
-    function spawnHeart() {
-        const heart = document.createElement('div');
-        heart.className = 'floating-heart';
-        
-        // Если активирован режим Эчпочмони — запускаем чертят, иначе — сердечки
-        heart.innerHTML = isEchpochmoniActive ? '😈' : '❤️'; 
+function spawnHeart() {
+    const container = document.querySelector('.hearts-background');
+    if (!container) return;
 
-        const size = Math.random() * 18 + 12; 
-        const startLeft = Math.random() * 100; 
-        const duration = Math.random() * 12 + 10; 
-        const swayX = (Math.random() * 120 - 60) + 'px'; 
-        const rotateDeg = (Math.random() * 360) + 'deg'; 
+    const heart = document.createElement('div');
+    heart.className = 'floating-heart';
+    heart.innerHTML = '❤️'; // или '😈', если хочешь демонов
 
-        heart.style.fontSize = `${size}px`;
-        heart.style.left = `${startLeft}%`;
-        heart.style.animationDuration = `${duration}s`;
-        
-        heart.style.setProperty('--sway-x', swayX);
-        heart.style.setProperty('--rotate-deg', rotateDeg);
+    // Случайная позиция по ширине (от 0 до 100%)
+    const startX = Math.random() * 100;
+    // Случайная задержка и длительность для плавности
+    const duration = 4 + Math.random() * 5; 
+    const swayX = (Math.random() - 0.5) * 100; // легкое покачивание
 
-        container.appendChild(heart);
+    heart.style.left = startX + 'vw';
+    heart.style.setProperty('--sway-x', swayX + 'px');
+    heart.style.setProperty('--rotate-deg', (Math.random() * 360) + 'deg');
+    heart.style.animationDuration = duration + 's';
 
-        setTimeout(() => {
-            heart.remove();
-        }, duration * 1000);
-    }
+    container.appendChild(heart);
+
+    setTimeout(() => {
+        heart.remove();
+    }, duration * 1000);
+}
 
     spawnHeart();
     setInterval(spawnHeart, 900);
