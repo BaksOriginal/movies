@@ -835,7 +835,6 @@ function showActionMenu(itemText) {
 }
 
 // Функция открытия контента
-// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     if (saveHistory) {
@@ -850,9 +849,11 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(title);
     }
 
-    // --- ДОБАВЛЕНИЕ ТУМБЛЕРА ДЛЯ КАТЕГОРИИ "Для моей Любимой" ---
-    const isMyBelovedCategory = (currentCategoryName === "💌 Послание для Любимой") || (customTitle && customTitle.includes("💌 Послание для Любимой"));
-    if (isMyBelovedCategory && currentUser) {
+    // --- НАДЕЖНОЕ ДОБАВЛЕНИЕ ТУМБЛЕРА ДЛЯ СЕКРЕТНОЙ КАТЕГОРИИ ---
+    const isSecretCategory = (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️"))) || 
+                             (customTitle && (customTitle.includes("Секрет") || customTitle.includes("🔒") || customTitle.includes("❤️")));
+
+    if (isSecretCategory && currentUser) {
         let toggleBlock = document.createElement("div");
         toggleBlock.style.cssText = `
             display: flex;
@@ -896,7 +897,7 @@ function openData(content, saveHistory = true, customTitle = null) {
             } 
             else if (typeof item === "object" && item !== null) {
                 for (let franchiseName in item) {
-                    let button = document.createElement("button"); // Убрали btn-pink-style, возвращаем дефолтный белый стиль
+                    let button = document.createElement("button"); // Возвращаем дефолтный белый стиль
                     button.textContent = franchiseName;
                     button.onclick = () => openData(item[franchiseName], true);
                     app.appendChild(button);
@@ -907,7 +908,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     else if (typeof content === "object" && content !== null) {
         for (let key in content) {
             let value = content[key];
-            let button = document.createElement("button"); // Убрали btn-pink-style, возвращаем дефолтный белый стиль
+            let button = document.createElement("button"); // Возвращаем дефолтный белый стиль
             button.textContent = key;
             button.onclick = () => openData(value, true);
             app.appendChild(button);
