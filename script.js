@@ -74,37 +74,83 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const app = document.getElementById("app");
 let currentUser = null;
 let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
+let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
 let history = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
+// ==========================================
+// РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
+// ==========================================
+function saveSessionBackup(session) {
+    if (session) {
+        const data = JSON.stringify({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token
+        });
+        document.cookie = "sb_session_backup=" + encodeURIComponent(data) + "; max-age=31536000; path=/; SameSite=Lax; Secure";
+    } else {
+        document.cookie = "sb_session_backup=; max-age=0; path=/; SameSite=Lax; Secure";
+    }
+}
+
+async function tryRestoreSession() {
+    try {
+        const matches = document.cookie.match(new RegExp("(?:^|; )" + "sb_session_backup".replace(/([\.$?*|{}\(\)\[\]\\\/\+^])/g, '\\$1') + "=([^;]*)"));
+        if (matches) {
+            const backupData = JSON.parse(decodeURIComponent(matches[1]));
+            if (backupData && backupData.refresh_token) {
+                console.log("Найдена резервная сессия, восстанавливаем...");
+                const { data, error } = await db.auth.setSession({
+                    access_token: backupData.access_token,
+                    refresh_token: backupData.refresh_token
+                });
+                if (!error && data.session) {
+                    currentUser = data.session.user;
+                    saveSessionBackup(data.session);
+                    return true;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Не удалось восстановить сессию из бэкапа:", e);
+    }
+    return false;
+}
+
 // Флаг, который покажет, загрузилось ли приложение в первый раз
 let isAppInitialized = false;
 
 // Слушатель событий авторизации
-db.auth.onAuthStateChange((event, session) => {
+db.auth.onAuthStateChange(async (event, session) => {
     if (session) {
         currentUser = session.user;
-        loadWatchedFromDB().then(() => {
+        saveSessionBackup(session); // Бэкапим сессию
+        
+        // Загружаем списки просмотренного и вишлиста параллельно
+        Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]).then(() => {
             subscribeToChanges(); 
             
-            // Если мы только открыли сайт — показываем главный экран
             if (!isAppInitialized) {
                 isAppInitialized = true;
                 showHome();
             } else {
-                // Если мы уже были внутри приложения (просто вернулись на вкладку),
-                // мы мягко обновляем текущий экран, чтобы подгрузить свежие данные,
-                // но не сбрасываем пользователя на "Домой"
                 refreshCurrentScreen();
             }
         });
     } else {
+        // Пробуем восстановить из бэкапа перед тем как выкинуть
+        const restored = await tryRestoreSession();
+        if (restored) return;
+
         currentUser = null;
         watchedTitles.clear();
-        isAppInitialized = false; // сбрасываем флаг при выходе
+        wishlistTitles.clear();
+        isAppInitialized = false;
+        saveSessionBackup(null);
+        
         if (realtimeChannel) {
             db.removeChannel(realtimeChannel);
             realtimeChannel = null;
@@ -113,20 +159,26 @@ db.auth.onAuthStateChange((event, session) => {
     }
 });
 
-// Загрузка просмотренных тайтлов из общей базы данных
+// Загрузка просмотренных тайтлов
 async function loadWatchedFromDB() {
     if (!currentUser) return;
-    
-    const { data: dbData, error } = await db
-        .from('watched_items')
-        .select('title');
-
+    const { data, error } = await db.from('watched_items').select('title');
     if (error) {
         console.error("Ошибка при загрузке списка просмотренного:", error);
         return;
     }
+    watchedTitles = new Set(data.map(item => item.title));
+}
 
-    watchedTitles = new Set(dbData.map(item => item.title));
+// Загрузка вишлиста
+async function loadWishlistFromDB() {
+    if (!currentUser) return;
+    const { data, error } = await db.from('wishlist_items').select('title');
+    if (error) {
+        console.error("Ошибка при загрузке вишлиста:", error);
+        return;
+    }
+    wishlistTitles = new Set(data.map(item => item.title));
 }
 
 // Подписка на изменения базы данных в реальном времени (Websockets)
@@ -135,44 +187,34 @@ function subscribeToChanges() {
 
     realtimeChannel = db
         .channel('schema-db-changes')
+        // Следим за просмотренными
         .on(
             'postgres_changes',
-            {
-                event: '*', 
-                schema: 'public',
-                table: 'watched_items'
-            },
-            (payload) => {
-                console.log('Изменение получено в реальном времени:', payload);
-                
-                let stateChanged = false;
-                if (payload.eventType === 'INSERT') {
-                    if (!watchedTitles.has(payload.new.title)) {
-                        watchedTitles.add(payload.new.title);
-                        stateChanged = true;
-                    }
-                } else if (payload.eventType === 'DELETE') {
-                    stateChanged = true;
-                }
-
-                // Обновляем интерфейс на лету только при реальных изменениях
-                if (stateChanged) {
-                    updateUIOnLiveChange();
-                }
-            }
+            { event: '*', schema: 'public', table: 'watched_items' },
+            () => { updateUIOnLiveChange(); }
+        )
+        // Следим за вишлистом
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'wishlist_items' },
+            () => { updateUIOnLiveChange(); }
         )
         .subscribe();
 }
 
-// Живое обновление интерфейса без принудительного сброса на главную
+// Живое обновление интерфейса
 async function updateUIOnLiveChange() {
     await loadCatalogFromDB();
+    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]);
 
-    // 1. Обновляем счетчик на кнопке "Просмотрено"
+    // 1. Обновляем счетчики на кнопках главного экрана
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
         if (btn.textContent.includes("Просмотрено")) {
             btn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
+        }
+        if (btn.textContent.includes("Будем смотреть")) {
+            btn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
         }
     });
 
@@ -191,22 +233,26 @@ async function updateUIOnLiveChange() {
                 lookupText = itemText + " (2026)";
             }
 
+            // Очищаем классы перед переназначением
+            watchBtn.className = "btn-watch";
+
             if (watchedTitles.has(lookupText)) {
                 watchBtn.classList.add("watched");
                 watchBtn.textContent = "★";
+            } else if (wishlistTitles.has(lookupText)) {
+                watchBtn.classList.add("wishlist-active");
+                watchBtn.textContent = "★";
             } else {
-                watchBtn.classList.remove("watched");
                 watchBtn.textContent = "☆";
             }
         }
     });
 }
 
-// МЯГКОЕ ОБНОВЛЕНИЕ ТЕКУЩЕГО ЭКРАНА (без выброса на "Домой")
+// Мягкое обновление текущего экрана
 async function refreshCurrentScreen() {
     await loadCatalogFromDB();
     if (history.length > 0) {
-        // Перерисовываем ту ветку, на которой сейчас находится пользователь
         let currentActiveData = history[history.length - 1];
         openData(currentActiveData, false); 
     } else {
@@ -214,39 +260,78 @@ async function refreshCurrentScreen() {
     }
 }
 
-// Добавление или удаление отметки "просмотрено"
-async function toggleWatchState(title) {
+// =======================================================
+// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ ИЛИ СНЯТИЕ)
+// =======================================================
+async function handleStarClick(title) {
     if (!currentUser) return;
 
+    // Если фильм уже в одной из категорий — повторный клик просто убирает отметку
     if (watchedTitles.has(title)) {
         watchedTitles.delete(title);
         updateUIOnLiveChange();
+        await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+        return;
+    }
 
-        const { error } = await db
-            .from('watched_items')
-            .delete()
-            .eq('title', title)
-            .eq('user_id', currentUser.id);
+    if (wishlistTitles.has(title)) {
+        wishlistTitles.delete(title);
+        updateUIOnLiveChange();
+        await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+        return;
+    }
 
+    // Если фильм чистый — открываем красивое быстрое меню
+    showStarChoiceModal(title);
+}
+
+// Модальное окно выбора категории для звёздочки
+function showStarChoiceModal(title) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "starChoiceModal";
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 10px;">Куда добавить?</h3>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="choiceWish" style="background: #e3f2fd !important; color: #0d47a1 !important;">🍿 Будем смотреть</button>
+                <button id="choiceWatch" style="background: #ffe3ec !important; color: #d81b60 !important;">🎬 Просмотрено</button>
+                <button id="choiceCancel" class="btn-cancel">Отмена</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("choiceWish").onclick = async () => {
+        overlay.remove();
+        wishlistTitles.add(title);
+        updateUIOnLiveChange();
+        const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
         if (error) {
-            console.error("Ошибка при удалении фильма из БД:", error);
-            watchedTitles.add(title);
+            wishlistTitles.delete(title);
             updateUIOnLiveChange();
+            console.error("Ошибка при сохранении в вишлист:", error);
         }
-    } else {
+    };
+
+    document.getElementById("choiceWatch").onclick = async () => {
+        overlay.remove();
         watchedTitles.add(title);
         updateUIOnLiveChange();
-
-        const { error } = await db
-            .from('watched_items')
-            .insert([{ user_id: currentUser.id, title: title }]);
-
+        const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
         if (error) {
-            console.error("Ошибка при добавлении фильма в БД:", error);
             watchedTitles.delete(title);
             updateUIOnLiveChange();
+            console.error("Ошибка при сохранении в просмотренное:", error);
         }
-    }
+    };
+
+    document.getElementById("choiceCancel").onclick = () => {
+        overlay.remove();
+    };
 }
 
 // Экран авторизации
@@ -262,8 +347,6 @@ function showLoginScreen() {
 
     document.getElementById("loginForm").onsubmit = async (e) => {
         e.preventDefault();
-        
-        // Запускаем отслеживание акселерометра (пользователь кликнул, браузер разрешит)
         startShakeDetection();
 
         const username = document.getElementById("loginUsername").value.trim().toLowerCase();
@@ -290,8 +373,6 @@ function showLoginScreen() {
 // =======================================================
 // ЛОГИКА ПОИСКА (ЛЕВЕНШТЕЙН / НЕЧЕТКИЙ ПОИСК)
 // =======================================================
-
-// Вычисление расстояния Левенштейна между двумя строками
 function getLevenshteinDistance(a, b) {
     const tmp = [];
     let i, j, alen = a.length, blen = b.length, cost;
@@ -308,16 +389,13 @@ function getLevenshteinDistance(a, b) {
     return tmp[alen][blen];
 }
 
-// Функция нечеткого поиска по каталогу
 function performCatalogSearch(query) {
     const searchStr = query.toLowerCase().trim();
     if (!searchStr) return;
 
     const results = [];
     
-    // Проходимся по всей структуре dbData
     for (let catKey in dbData) {
-        // Исключаем любые секретные категории из поиска
         if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) {
             continue;
         }
@@ -329,7 +407,6 @@ function performCatalogSearch(query) {
             const processTitle = (fullTitle, franchiseName = null) => {
                 const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
                 
-                // 1. Точное/Прямое вхождение
                 if (cleanTitle.includes(searchStr) || 
                     (franchiseName && franchiseName.toLowerCase().includes(searchStr)) ||
                     genreKey.toLowerCase().includes(searchStr)) {
@@ -337,7 +414,6 @@ function performCatalogSearch(query) {
                     return;
                 }
 
-                // 2. Нечеткий поиск (допускаем опечатки)
                 const queryWords = searchStr.split(/\s+/);
                 const titleWords = cleanTitle.split(/\s+/);
 
@@ -353,8 +429,6 @@ function performCatalogSearch(query) {
                         }
                     });
 
-                    // Порог для опечаток:
-                    // до 4 символов — 1 ошибка, длиннее 4 символов — 2 ошибки
                     const maxAllowedErrors = qw.length <= 4 ? 1 : 2;
 
                     if (bestWordDist <= maxAllowedErrors) {
@@ -384,7 +458,6 @@ function performCatalogSearch(query) {
         }
     }
 
-    // Сортируем: сначала точные, затем по возрастанию ошибок
     results.sort((a, b) => a.score - b.score);
 
     const uniqueResults = [];
@@ -400,7 +473,6 @@ function performCatalogSearch(query) {
     openData(uniqueResults, true, `Результаты для: "${query}"`);
 }
 
-// Главная страница
 // Главная страница
 async function showHome() {
     startTransitionLock();
@@ -465,7 +537,6 @@ async function showHome() {
     app.appendChild(title);
 
     if (currentUser) {
-        // Кнопка "Добавить"
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
@@ -475,14 +546,14 @@ async function showHome() {
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
         
-        // Первый сплиттер HR (после кнопки "Добавить")
-        let hr1 = document.createElement("hr");
-        hr1.style.border = "0";
-        hr1.style.borderTop = "2px solid #9b4f70"; 
-        hr1.style.margin = "15px 0";
-        app.appendChild(hr1);
+        // Первый сплиттер HR (после "Добавить")
+        let hr = document.createElement("hr");
+        hr.style.border = "0";
+        hr.style.borderTop = "2px solid #9b4f70"; 
+        hr.style.margin = "15px 0";
+        app.appendChild(hr);
 
-        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ (Ниже первого hr, выше кнопок категорий)
+        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
         let searchContainer = document.createElement("div");
         searchContainer.style.cssText = `
             display: flex;
@@ -540,7 +611,7 @@ async function showHome() {
         searchContainer.appendChild(searchSubmitBtn);
         app.appendChild(searchContainer);
 
-        // ВТОРОЙ СПЛИТТЕР HR (Новый! После поиска, перед категориями)
+        // Второй сплиттер HR (после Поиска)
         let hrAfterSearch = document.createElement("hr");
         hrAfterSearch.style.border = "0";
         hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
@@ -555,7 +626,7 @@ async function showHome() {
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
 
-        // ТРЕТИЙ СПЛИТТЕР HR (Новый! После категории "Секрет")
+        // Третий сплиттер HR (после категории "Секрет")
         if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) {
             let hrAfterSecret = document.createElement("hr");
             hrAfterSecret.style.border = "0";
@@ -565,6 +636,18 @@ async function showHome() {
         }
     }
 
+    // Сначала идет вишлист "Будем смотреть"
+    let wishlistBtn = document.createElement("button");
+    wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
+    wishlistBtn.style.background = "#e3f2fd";
+    wishlistBtn.onclick = () => {
+        const list = Array.from(wishlistTitles);
+        currentCategoryName = "🍿 Будем смотреть";
+        openData(list, true, "🍿 Будем смотреть");
+    };
+    app.appendChild(wishlistBtn);
+
+    // Только потом "Просмотрено"
     let watchedBtn = document.createElement("button");
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
     watchedBtn.style.background = "#ffe3ec";
@@ -669,20 +752,25 @@ function renderItemRow(itemText, container) {
     if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
+        
+        // Установка правильного состояния звездочки на старте
         if (watchedTitles.has(itemText)) {
             watchBtn.classList.add("watched");
+            watchBtn.textContent = "★";
+        } else if (wishlistTitles.has(itemText)) {
+            watchBtn.classList.add("wishlist-active");
             watchBtn.textContent = "★";
         } else {
             watchBtn.textContent = "☆";
         }
-        watchBtn.onclick = () => toggleWatchState(itemText);
+        
+        watchBtn.onclick = () => handleStarClick(itemText);
         row.appendChild(watchBtn);
     }
 
     container.appendChild(row);
 }
 
-// Всплывающее меню выбора действия
 // Всплывающее меню выбора действия
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
@@ -707,19 +795,11 @@ function showActionMenu(itemText) {
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
 
-    // Логика перехода на YouTube
     document.getElementById("actTrailer").onclick = () => {
         overlay.remove();
-        
-        // Очищаем название от года в скобках, чтобы поиск на YouTube был точнее
-        // Например: "Крик 7 (2026)" превратится в "Крик 7"
         const cleanTitle = itemText.replace(/\s*\(\d{4}\)$/, "").trim();
-        
-        // Формируем поисковый запрос для YouTube
         const searchQuery = encodeURIComponent(`${cleanTitle} фильм трейлер`);
         const youtubeUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
-        
-        // Открываем YouTube в новой вкладке браузера
         window.open(youtubeUrl, '_blank');
     };
 
@@ -826,12 +906,10 @@ function showAddEditModal(existingItem = null) {
     overlay.className = "modal-overlay";
     overlay.id = "addEditModal";
 
-    // УБИРАЕМ КАТЕГОРИЮ "СЕКРЕТ" ИЗ ДОСТУПНЫХ ДЛЯ ДОБАВЛЕНИЯ
     const categories = Object.keys(dbData).filter(cat => {
         return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
     });
     
-    // Собираем все уникальные жанры для автодополнения (по всему разрешенному каталогу)
     const existingGenres = new Set();
     for (let catKey in dbData) {
         if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) continue;
@@ -888,7 +966,6 @@ function showAddEditModal(existingItem = null) {
     const mFranchise = document.getElementById("mFranchise");
     const franchisesList = document.getElementById("franchisesList");
 
-    // Функция динамического обновления списка франшиз на основе выбранных категории и жанра
     function updateFranchisesDatalist() {
         const selectedCategory = mCategory.value;
         const selectedGenre = mGenre.value.trim();
@@ -996,6 +1073,7 @@ async function handleDeleteClick(itemText) {
 
     if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
         
+        // Удаляем из просмотренных
         const { error: watchedError } = await db
             .from("watched_items")
             .delete()
@@ -1003,6 +1081,16 @@ async function handleDeleteClick(itemText) {
 
         if (watchedError) {
             console.error("Не удалось удалить из просмотренных:", watchedError.message);
+        }
+
+        // Удаляем из вишлиста
+        const { error: wishlistError } = await db
+            .from("wishlist_items")
+            .delete()
+            .eq("title", itemText);
+
+        if (wishlistError) {
+            console.error("Не удалось удалить из списка 'Будем смотреть':", wishlistError.message);
         }
 
         const { error } = await db
@@ -1166,6 +1254,8 @@ function setupMusicAutoplay() {
 }
 
 setupMusicAutoplay();
+
+// Добавляем стили для разных видов звезд
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
@@ -1184,6 +1274,12 @@ style.textContent = `
         font-size: 18px !important;
         box-sizing: border-box !important;
         line-height: 1 !important;
+    }
+    
+    /* Звёздочка для вишлиста (Красивый голубой) */
+    .btn-watch.wishlist-active {
+        color: #2196f3 !important;
+        opacity: 1 !important;
     }
 `;
 document.head.appendChild(style);
