@@ -1353,174 +1353,49 @@ function initHeartsBackground() {
 initHeartsBackground();
 setupMusicAutoplay();
 
-// Создание тега стилей
+// Финальный блок CSS с исправленными приоритетами
 const style = document.createElement('style');
 style.textContent = `
-    .round-btn {
-        overflow: hidden;
-        width: 40px !important;
-        height: 40px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border-radius: 50% !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        cursor: pointer !important;
-        border: 1px solid #ccc !important;
-        background: #f9f9f9 !important;
-        font-size: 18px !important;
-        box-sizing: border-box !important;
-        line-height: 1 !important;
-    }
-
-    /* --- СТИЛЬ ДЛЯ ПРОСТЫХ БЕЛЫХ КНОПОК-ПЛАШЕК (Категории, жанры) --- */
-    button:not([class]) {
+    /* --- БАЗОВЫЙ РЕЖИМ (Светлый) --- */
+    /* Обычные плашки остаются белыми */
+    button:not(.btn-pink-style):not(.btn-cancel-gray) {
         background-color: #ffffff !important;
         color: #333333 !important;
         border: 1px solid #e0e0e0 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04) !important;
-        transition: all 0.25s ease !important;
-    }
-    button:not([class]):hover {
-        background-color: #fcfcfc !important;
-        transform: translateY(-1px) !important;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08) !important;
     }
 
-    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (как "Трейлер на YouTube") --- */
-    .btn-pink-style {
-        background-color: #ffe3ec !important;
-        color: #d81b60 !important;
-        border: none !important;
-        font-weight: 600 !important;
-        transition: all 0.2s ease;
-    }
-    .btn-pink-style:hover {
-        background-color: #ffd5e3 !important;
-    }
-
-    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
-    .btn-cancel-gray {
-        background-color: #f0f0f0 !important;
-        color: #333333 !important;
-        border: none !important;
-        font-weight: 600 !important;
-        transition: background-color 0.2s ease;
-    }
-    .btn-cancel-gray:hover {
-        background-color: #e5e5e5 !important;
-    }
-
-    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ/ДЕМОНАМИ --- */
-    .hearts-background {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        pointer-events: none;
-        z-index: -1;
-        overflow: hidden;
-    }
-
-    .floating-heart {
-        position: absolute;
-        bottom: -50px;
-        color: #ff4081;
-        opacity: 0;
-        pointer-events: none;
-        user-select: none;
-        animation: floatUp linear forwards;
-    }
-
-    @keyframes floatUp {
-        0% {
-            transform: translateY(0) translateX(0) rotate(0deg);
-            opacity: 0;
-        }
-        10% {
-            opacity: 0.15;
-        }
-        90% {
-            opacity: 0.15;
-        }
-        100% {
-            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
-            opacity: 0;
-        }
-    }
-
-    /* =======================================================
-       💜 СТИЛЬ ЭЧПОЧМОНИ (ПОЛНОЕ ПРЕОБРАЖЕНИЕ ИНТЕРФЕЙСА) 💜
-       ======================================================= */
-       
-    /* 1. Глубокий, мягкий фиолетовый градиент для фона сайта */
+    /* --- РЕЖИМ ЭЧПОЧМОНИ (Фиолетовый) --- */
     body.echpochmoni-mode {
         background: linear-gradient(135deg, #f5edff 0%, #eae0f7 100%) !important;
-        background-attachment: fixed !important;
     }
-    
-    /* 2. Превращение простых белых плашек в красивые фиолетовые карточки */
-    body.echpochmoni-mode button:not([class]) {
+
+    /* 1. ПРИНУДИТЕЛЬНО перекрашиваем ВСЕ кнопки, когда активен режим */
+    body.echpochmoni-mode button {
         background-color: #f3e8ff !important;
         color: #512da8 !important;
         border: 1px solid #dcd0f0 !important;
-        box-shadow: 0 3px 6px rgba(103, 58, 183, 0.08) !important;
-    }
-    body.echpochmoni-mode button:not([class]):hover {
-        background-color: #ebd9fc !important;
-        box-shadow: 0 5px 12px rgba(103, 58, 183, 0.15) !important;
-    }
-    
-    /* 3. Кнопка "Будем смотреть" (светло-лавандовый оттенок) */
-    body.echpochmoni-mode .btn-wishlist {
-        background-color: #e3d2ff !important; 
-        color: #4527a0 !important;
-        border: 1px solid #d1bdfc !important;
-    }
-    body.echpochmoni-mode .btn-wishlist:hover {
-        background-color: #d7c2fc !important;
-    }
-    
-    /* 4. Кнопка "Просмотрено" (более насыщенный, глубокий аметистовый) */
-    body.echpochmoni-mode .btn-watched-list {
-        background-color: #cbb2ff !important; 
-        color: #311b92 !important;
-        border: 1px solid #bba1fa !important;
-    }
-    body.echpochmoni-mode .btn-watched-list:hover {
-        background-color: #be9ffd !important;
-    }
-    
-    /* Дополнительные акценты */
-    body.echpochmoni-mode h1, body.echpochmoni-mode h2, body.echpochmoni-mode h3 {
-        color: #4a148c !important;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-    }
-    body.echpochmoni-mode hr {
-        border-top: 2px solid #b39ddb !important;
-        opacity: 0.7;
     }
 
-    /* --- КРАСИВЫЙ ТУМБЛЕР (SWITCH) --- */
-    .switch-toggle input:checked + .slider-toggle {
-        background-color: #7e57c2 !important;
+    /* 2. Исправляем кнопки списков (чтобы они были одинаково стильными) */
+    body.echpochmoni-mode .btn-pink-style {
+        background-color: #cbb2ff !important; 
+        color: #311b92 !important;
+        font-weight: 600 !important;
+        border: none !important;
     }
-    .slider-toggle:before {
-        position: absolute;
-        content: "";
-        height: 18px;
-        width: 18px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        transition: .4s;
-        border-radius: 50%;
+
+    /* 3. Плашки с названиями фильмов (теперь тоже будут фиолетовыми) */
+    body.echpochmoni-mode .item-row, 
+    body.echpochmoni-mode .movie-title-card {
+        background-color: #f3e8ff !important;
+        color: #512da8 !important;
+        border: 1px solid #dcd0f0 !important;
     }
-    .switch-toggle input:checked + .slider-toggle:before {
-        transform: translateX(22px);
+
+    /* Эффекты наведения для режима Эчпочмони */
+    body.echpochmoni-mode button:hover {
+        background-color: #ebd9fc !important;
+        box-shadow: 0 4px 8px rgba(103, 58, 183, 0.2) !important;
     }
 `;
 document.head.appendChild(style);
