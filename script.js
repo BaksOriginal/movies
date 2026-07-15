@@ -935,6 +935,7 @@ setupMusicAutoplay();
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
+        overflow: hidden;
         width: 40px !important;
         height: 40px !important;
         padding: 0 !important;
