@@ -1,6 +1,7 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
+let isEchpochmoniActive = false;
 
 // Включаем временную блокировку кликов на 350мс
 function startTransitionLock() {
@@ -129,6 +130,11 @@ db.auth.onAuthStateChange(async (event, session) => {
         currentUser = session.user;
         saveSessionBackup(session); // Бэкапим сессию
         
+        // --- НОВОЕ: Восстанавливаем скин из памяти аккаунта ---
+        isEchpochmoniActive = localStorage.getItem("echpochmoni_mode_" + currentUser.id) === "true";
+        applyEchpochmoniTheme(isEchpochmoniActive);
+        // -----------------------------------------------------
+        
         // Загружаем списки просмотренного и вишлиста параллельно
         Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]).then(() => {
             subscribeToChanges(); 
@@ -150,6 +156,11 @@ db.auth.onAuthStateChange(async (event, session) => {
         wishlistTitles.clear();
         isAppInitialized = false;
         saveSessionBackup(null);
+        
+        // --- НОВОЕ: Сбрасываем скин при выходе из аккаунта ---
+        isEchpochmoniActive = false;
+        applyEchpochmoniTheme(false);
+        // -----------------------------------------------------
         
         if (realtimeChannel) {
             db.removeChannel(realtimeChannel);
@@ -816,6 +827,7 @@ function showActionMenu(itemText) {
     };
 }
 
+// Функция открытия контента
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     if (saveHistory) {
@@ -830,6 +842,48 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(title);
     }
 
+    // --- ДОБАВЛЕНИЕ ТУМБЛЕНА ДЛЯ КАТЕГОРИИ "Для моей Любимой" ---
+    const isMyBelovedCategory = (currentCategoryName === "Для моей Любимой") || (customTitle && customTitle.includes("Для моей Любимой"));
+    if (isMyBelovedCategory && currentUser) {
+        let toggleBlock = document.createElement("div");
+        toggleBlock.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: ${isEchpochmoniActive ? "#ebd9fc" : "#ffe3ec"};
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            transition: background-color 0.3s ease;
+        `;
+
+        toggleBlock.innerHTML = `
+            <span style="font-weight: 600; font-size: 15px; color: ${isEchpochmoniActive ? "#512da8" : "#d81b60"};">
+                😈 Стиль Эчпочмони
+            </span>
+            <label class="switch-toggle" style="position: relative; display: inline-block; width: 46px; height: 24px;">
+                <input type="checkbox" id="echpochmoniSwitch" style="opacity: 0; width: 0; height: 0;" ${isEchpochmoniActive ? "checked" : ""}>
+                <span class="slider-toggle" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px;"></span>
+            </label>
+        `;
+
+        app.appendChild(toggleBlock);
+
+        // Вешаем событие изменения состояния тумблера
+        toggleBlock.querySelector("#echpochmoniSwitch").onchange = (e) => {
+            isEchpochmoniActive = e.target.checked;
+            
+            // Сохраняем индивидуально под текущий аккаунт
+            localStorage.setItem("echpochmoni_mode_" + currentUser.id, isEchpochmoniActive);
+            applyEchpochmoniTheme(isEchpochmoniActive);
+
+            // Мягко меняем цвет самого блока тумблера на лету
+            toggleBlock.style.background = isEchpochmoniActive ? "#ebd9fc" : "#ffe3ec";
+            toggleBlock.querySelector("span").style.color = isEchpochmoniActive ? "#512da8" : "#d81b60";
+        };
+    }
+    // -----------------------------------------------------------
+
     if (Array.isArray(content)) {
         content.forEach(item => {
             if (typeof item === "string") {
@@ -838,6 +892,7 @@ function openData(content, saveHistory = true, customTitle = null) {
             else if (typeof item === "object" && item !== null) {
                 for (let franchiseName in item) {
                     let button = document.createElement("button");
+                    button.className = "btn-pink-style"; // Применяем наш эталонный стиль к кнопкам подкатегорий
                     button.textContent = franchiseName;
                     button.onclick = () => openData(item[franchiseName], true);
                     app.appendChild(button);
@@ -849,6 +904,7 @@ function openData(content, saveHistory = true, customTitle = null) {
         for (let key in content) {
             let value = content[key];
             let button = document.createElement("button");
+            button.className = "btn-pink-style"; // Применяем наш эталонный стиль к кнопкам подкатегорий
             button.textContent = key;
             button.onclick = () => openData(value, true);
             app.appendChild(button);
@@ -1249,9 +1305,8 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
-// Генератор бесконечных нежных сердечек на заднем фоне
+// Генератор бесконечных нежных сердечек/демонов на заднем фоне
 function initHeartsBackground() {
-    // Если контейнер уже почему-то существует, не создаем его заново
     if (document.querySelector('.hearts-background')) return;
 
     const container = document.createElement('div');
@@ -1261,40 +1316,35 @@ function initHeartsBackground() {
     function spawnHeart() {
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
-        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
+        
+        // Если активирован режим Эчпочмони — запускаем чертят, иначе — сердечки
+        heart.innerHTML = isEchpochmoniActive ? '😈' : '❤️'; 
 
-        // Рандомизируем параметры для живого и естественного эффекта
-        const size = Math.random() * 18 + 12; // Размер от 12px до 30px
-        const startLeft = Math.random() * 100; // Позиция по горизонтали (в %)
-        const duration = Math.random() * 12 + 10; // Скорость подъема от 10 до 22 секунд (очень плавно)
-        const swayX = (Math.random() * 120 - 60) + 'px'; // Амплитуда покачивания влево/вправо
-        const rotateDeg = (Math.random() * 360) + 'deg'; // Случайный угол вращения
+        const size = Math.random() * 18 + 12; 
+        const startLeft = Math.random() * 100; 
+        const duration = Math.random() * 12 + 10; 
+        const swayX = (Math.random() * 120 - 60) + 'px'; 
+        const rotateDeg = (Math.random() * 360) + 'deg'; 
 
-        // Применяем стили
         heart.style.fontSize = `${size}px`;
         heart.style.left = `${startLeft}%`;
         heart.style.animationDuration = `${duration}s`;
         
-        // Передаем переменные покачивания во floatUp анимацию
         heart.style.setProperty('--sway-x', swayX);
         heart.style.setProperty('--rotate-deg', rotateDeg);
 
         container.appendChild(heart);
 
-        // Самоликвидация элемента из DOM после того, как он улетел, чтобы не грузить браузер
         setTimeout(() => {
             heart.remove();
         }, duration * 1000);
     }
 
-    // Создаем первое сердечко сразу
     spawnHeart();
-    
-    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
     setInterval(spawnHeart, 900);
 }
 
-// Запускаем магию!
+// Запуск фоновой магии
 initHeartsBackground();
 setupMusicAutoplay();
 
@@ -1317,52 +1367,8 @@ style.textContent = `
         box-sizing: border-box !important;
         line-height: 1 !important;
     }
-    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
-    .hearts-background {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        pointer-events: none; /* Клики проходят сквозь них */
-        z-index: -1;          /* Строго на заднем фоне */
-        overflow: hidden;
-    }
 
-    .floating-heart {
-        position: absolute;
-        bottom: -50px;        /* Появляются чуть ниже экрана */
-        color: #ff4081;       /* Малиново-розовый цвет */
-        opacity: 0;
-        pointer-events: none;
-        user-select: none;
-        animation: floatUp linear forwards;
-    }
-
-    @keyframes floatUp {
-        0% {
-            transform: translateY(0) translateX(0) rotate(0deg);
-            opacity: 0;
-        }
-        10% {
-            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
-        }
-        90% {
-            opacity: 0.15;
-        }
-        100% {
-            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
-            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
-            opacity: 0;       /* Полностью растворяются вверху */
-        }
-    }
-    /* Звёздочка для вишлиста (Красивый голубой) */
-    .btn-watch.wishlist-active {
-        color: #2196f3 !important;
-        opacity: 1 !important;
-    }
-
-    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
+    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (как "Трейлер на YouTube") --- */
     .btn-pink-style {
         background-color: #ffe3ec !important;
         color: #d81b60 !important;
@@ -1384,6 +1390,82 @@ style.textContent = `
     }
     .btn-cancel-gray:hover {
         background-color: #e5e5e5 !important;
+    }
+
+    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ/ДЕМОНАМИ --- */
+    .hearts-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        z-index: -1;
+        overflow: hidden;
+    }
+
+    .floating-heart {
+        position: absolute;
+        bottom: -50px;
+        color: #ff4081;
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+        animation: floatUp linear forwards;
+    }
+
+    @keyframes floatUp {
+        0% {
+            transform: translateY(0) translateX(0) rotate(0deg);
+            opacity: 0;
+        }
+        10% {
+            opacity: 0.15;
+        }
+        90% {
+            opacity: 0.15;
+        }
+        100% {
+            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
+            opacity: 0;
+        }
+    }
+
+    /* --- СТИЛЬ ЭЧПОЧМОНИ (ФИОЛЕТОВАЯ ТЕМА) --- */
+    body.echpochmoni-mode {
+        background-color: #f6f0ff !important; /* Нежно-фиолетовый фон сайта */
+    }
+    body.echpochmoni-mode .btn-pink-style {
+        background-color: #ebd9fc !important; /* Сиреневые кнопки */
+        color: #673ab7 !important;            /* Насыщенный фиолетовый текст */
+    }
+    body.echpochmoni-mode .btn-pink-style:hover {
+        background-color: #dfc2fc !important;
+    }
+    body.echpochmoni-mode h1, body.echpochmoni-mode h2, body.echpochmoni-mode h3 {
+        color: #512da8 !important;
+    }
+    body.echpochmoni-mode hr {
+        border-top: 2px solid #7e57c2 !important;
+    }
+
+    /* --- КРАСИВЫЙ ТУМБЛЕР (SWITCH) --- */
+    .switch-toggle input:checked + .slider-toggle {
+        background-color: #7e57c2 !important;
+    }
+    .slider-toggle:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+    .switch-toggle input:checked + .slider-toggle:before {
+        transform: translateX(22px);
     }
 `;
 document.head.appendChild(style);
