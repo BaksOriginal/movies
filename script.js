@@ -971,24 +971,41 @@ async function toggleWatchState(title) {
     }
 }
 // Экран авторизации
+// Экран авторизации с подменой никнеймов на почты
 function showLoginScreen() {
     app.innerHTML = `
-        <h1>Кто зашел?</h1>
+        <h1>Авторизация</h1>
         <form class="login-form" id="loginForm">
-            <input type="email" id="loginEmail" placeholder="Ваша почта" required autocomplete="email">
-            <input type="password" id="loginPassword" placeholder="Ваш пароль" required autocomplete="current-password">
+            <input type="text" id="loginUsername" placeholder="Имя" required autocomplete="username">
+            <input type="password" id="loginPassword" placeholder="Пароль" required autocomplete="current-password">
             <button type="submit">Войти</button>
         </form>
     `;
 
     document.getElementById("loginForm").onsubmit = async (e) => {
         e.preventDefault();
-        const email = document.getElementById("loginEmail").value;
+        
+        // Получаем введенный никнейм и приводим к нижнему регистру, чтобы не зависеть от опечаток (Asmoday или asmoday)
+        const username = document.getElementById("loginUsername").value.trim().toLowerCase();
         const password = document.getElementById("loginPassword").value;
 
+        let email = "";
+
+        // Карта сопоставления никнеймов и реальных почт
+        if (username === "myakish") {
+            email = "nowyouseemeinvi@gmail.com";
+        } else if (username === "asmoday") {
+            email = "unknownqsrll@gmail.com";
+        } else {
+            // Если введен неизвестный никнейм, пробуем отправить его как есть (на случай, если захотите войти по обычной почте)
+            email = username;
+        }
+
+        // Выполняем вход в Supabase
         const { error } = await db.auth.signInWithPassword({ email, password });
         if (error) {
-            alert("Ошибка входа: " + error.message);
+            alert("Ошибка входа: неверный никнейм или пароль.");
+            console.error("Ошибка авторизации:", error.message);
         }
     };
 }
@@ -1017,7 +1034,7 @@ function showHome() {
     }
 
     let title = document.createElement("h1");
-    title.textContent = "Что сегодня посмотрим?";
+    title.textContent = "Время Кино!";
     app.appendChild(title);
 
     // Вывод обычных категорий из объекта data
