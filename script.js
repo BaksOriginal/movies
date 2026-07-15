@@ -273,6 +273,119 @@ function showLoginScreen() {
     };
 }
 
+// =======================================================
+// ЛОГИКА ПОИСКА (ЛЕВЕНШТЕЙН / НЕЧЕТКИЙ ПОИСК)
+// =======================================================
+
+// Вычисление расстояния Левенштейна между двумя строками
+function getLevenshteinDistance(a, b) {
+    const tmp = [];
+    let i, j, alen = a.length, blen = b.length, cost;
+    if (alen === 0) return blen;
+    if (blen === 0) return alen;
+    for (i = 0; i <= alen; i++) tmp[i] = [i];
+    for (j = 0; j <= blen; j++) tmp[0][j] = j;
+    for (i = 1; i <= alen; i++) {
+        for (j = 1; j <= blen; j++) {
+            cost = (a[i - 1] === b[j - 1]) ? 0 : 1;
+            tmp[i][j] = Math.min(tmp[i - 1][j] + 1, tmp[i][j - 1] + 1, tmp[i - 1][j - 1] + cost);
+        }
+    }
+    return tmp[alen][blen];
+}
+
+// Функция нечеткого поиска по каталогу
+function performCatalogSearch(query) {
+    const searchStr = query.toLowerCase().trim();
+    if (!searchStr) return;
+
+    const results = [];
+    
+    // Проходимся по всей структуре dbData
+    for (let catKey in dbData) {
+        // Исключаем любые секретные категории из поиска
+        if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) {
+            continue;
+        }
+
+        const categoryData = dbData[catKey];
+        for (let genreKey in categoryData) {
+            const listOrObj = categoryData[genreKey];
+
+            const processTitle = (fullTitle, franchiseName = null) => {
+                const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
+                
+                // 1. Точное/Прямое вхождение
+                if (cleanTitle.includes(searchStr) || 
+                    (franchiseName && franchiseName.toLowerCase().includes(searchStr)) ||
+                    genreKey.toLowerCase().includes(searchStr)) {
+                    results.push({ title: fullTitle, score: 0 });
+                    return;
+                }
+
+                // 2. Нечеткий поиск (допускаем опечатки)
+                const queryWords = searchStr.split(/\s+/);
+                const titleWords = cleanTitle.split(/\s+/);
+
+                let totalDistance = 0;
+                let matchesCount = 0;
+
+                queryWords.forEach(qw => {
+                    let bestWordDist = 999;
+                    titleWords.forEach(tw => {
+                        const dist = getLevenshteinDistance(qw, tw);
+                        if (dist < bestWordDist) {
+                            bestWordDist = dist;
+                        }
+                    });
+
+                    // Порог для опечаток:
+                    // до 4 символов — 1 ошибка, длиннее 4 символов — 2 ошибки
+                    const maxAllowedErrors = qw.length <= 4 ? 1 : 2;
+
+                    if (bestWordDist <= maxAllowedErrors) {
+                        totalDistance += bestWordDist;
+                        matchesCount++;
+                    }
+                });
+
+                if (matchesCount === queryWords.length) {
+                    results.push({ title: fullTitle, score: totalDistance + 1 });
+                }
+            };
+
+            if (Array.isArray(listOrObj)) {
+                listOrObj.forEach(item => {
+                    if (typeof item === 'string') {
+                        processTitle(item);
+                    } else if (typeof item === 'object' && item !== null) {
+                        for (let franchiseName in item) {
+                            item[franchiseName].forEach(subTitle => {
+                                processTitle(subTitle, franchiseName);
+                            });
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    // Сортируем: сначала точные, затем по возрастанию ошибок
+    results.sort((a, b) => a.score - b.score);
+
+    const uniqueResults = [];
+    const seen = new Set();
+    results.forEach(r => {
+        if (!seen.has(r.title)) {
+            seen.add(r.title);
+            uniqueResults.push(r.title);
+        }
+    });
+
+    currentCategoryName = "🔍 Результаты поиска";
+    openData(uniqueResults, true, `Результаты для: "${query}"`);
+}
+
 // Главная страница
 async function showHome() {
     startTransitionLock();
@@ -337,6 +450,7 @@ async function showHome() {
     app.appendChild(title);
 
     if (currentUser) {
+        // Кнопка "Добавить"
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
@@ -346,13 +460,73 @@ async function showHome() {
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
         
+        // Сплиттер HR
         let hr = document.createElement("hr");
         hr.style.border = "0";
         hr.style.borderTop = "2px solid #9b4f70"; 
         hr.style.margin = "15px 0";
         app.appendChild(hr);
+
+        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ (Ниже hr, выше кнопок категорий)
+        let searchContainer = document.createElement("div");
+        searchContainer.style.cssText = `
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            width: 100%;
+            box-sizing: border-box;
+        `;
+
+        let searchInput = document.createElement("input");
+        searchInput.type = "text";
+        searchInput.placeholder = "Поиск фильма, жанра или серии...";
+        searchInput.style.cssText = `
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 14px;
+            box-sizing: border-box;
+        `;
+
+        let searchSubmitBtn = document.createElement("button");
+        searchSubmitBtn.textContent = "🔍";
+        searchSubmitBtn.style.cssText = `
+            width: 42px !important;
+            height: 42px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border-radius: 8px !important;
+            background: #e3f2fd !important;
+            border: 1px solid #bbdefb !important;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-shrink: 0;
+        `;
+
+        const doSearch = () => {
+            const q = searchInput.value;
+            if (q.trim()) {
+                performCatalogSearch(q);
+            }
+        };
+
+        searchSubmitBtn.onclick = doSearch;
+        searchInput.onkeydown = (e) => {
+            if (e.key === "Enter") {
+                doSearch();
+            }
+        };
+
+        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(searchSubmitBtn);
+        app.appendChild(searchContainer);
     }
 
+    // Рендерим кнопки категорий (включая Аниме)
     for (let key in dbData) {
         let button = document.createElement("button");
         button.textContent = key;
@@ -603,11 +777,16 @@ function showAddEditModal(existingItem = null) {
     overlay.className = "modal-overlay";
     overlay.id = "addEditModal";
 
-    const categories = Object.keys(dbData);
+    // УБИРАЕМ КАТЕГОРИЮ "СЕКРЕТ" ИЗ ДОСТУПНЫХ ДЛЯ ДОБАВЛЕНИЯ
+    const categories = Object.keys(dbData).filter(cat => {
+        return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
+    });
     
-    // Собираем все уникальные жанры для автодополнения (по всему каталогу)
+    // Собираем все уникальные жанры для автодополнения (по всему разрешенному каталогу)
     const existingGenres = new Set();
     for (let catKey in dbData) {
+        if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) continue;
+        
         const categoryData = dbData[catKey];
         if (typeof categoryData === "object" && !Array.isArray(categoryData)) {
             for (let genreKey in categoryData) {
@@ -665,17 +844,14 @@ function showAddEditModal(existingItem = null) {
         const selectedCategory = mCategory.value;
         const selectedGenre = mGenre.value.trim();
 
-        // Сюда соберем только локальные франшизы
         const localFranchises = new Set();
 
         if (dbData[selectedCategory] && dbData[selectedCategory][selectedGenre]) {
             const listOrObj = dbData[selectedCategory][selectedGenre];
             
-            // Пробегаемся по содержимому выбранного жанра
             if (Array.isArray(listOrObj)) {
                 listOrObj.forEach(item => {
                     if (typeof item === 'object' && item !== null) {
-                        // Это объект франшизы вида { "Крик": [...] }
                         Object.keys(item).forEach(franchiseName => {
                             localFranchises.add(franchiseName);
                         });
@@ -684,14 +860,12 @@ function showAddEditModal(existingItem = null) {
             }
         }
 
-        // Очищаем и заново генерируем <option> теги внутри datalist франшиз
         franchisesList.innerHTML = Array.from(localFranchises)
             .sort()
             .map(f => `<option value="${f}">`)
             .join("");
     }
 
-    // Слушаем изменения категории и жанра на лету
     mCategory.addEventListener("change", updateFranchisesDatalist);
     mGenre.addEventListener("input", updateFranchisesDatalist);
 
@@ -703,7 +877,6 @@ function showAddEditModal(existingItem = null) {
         mFranchise.value = existingItem.franchise || "";
     }
 
-    // Первоначальный запуск обновления франшиз (чтобы при открытии уже отфильтровалось по умолчанию)
     updateFranchisesDatalist();
 
     document.getElementById("mCancel").onclick = () => overlay.remove();
