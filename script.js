@@ -845,38 +845,34 @@ function showRandomTitleModal(titleText) {
 
 // Функция, реагирующая на тряску
 function onPhoneShake() {
-    // --- Добавляем защиту от секретных категорий ---
+    // 1. Проверка на "Секрет"
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒"))) {
-        return; // Если это секрет, просто выходим и ничего не делаем
+        return;
     }
-    // -----------------------------------------------
+
+    // --- ДОБАВЛЯЕМ ВИБРАЦИЮ ---
+    if (navigator.vibrate) {
+        // [200, 100, 200] означает: 
+        // 200мс вибрируем, 100мс пауза, 200мс вибрируем
+        navigator.vibrate([200, 100, 200]); 
+    }
+    // --------------------------
 
     const now = Date.now();
     if (now - lastShakeTime < SHAKE_TIMEOUT) return; 
 
-    // Если мы на главном экране (категория не выбрана) или уже открыто окно рандома — игнорируем тряску
     if (!currentCategoryName || isShakeModalOpen) return;
 
-    // Слегка вибрируем телефон (работает на Android)
-    if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]); 
-    }
-
-    // Собираем все фильмы из открытой в данный момент ветки истории
     const currentDataBranch = history[history.length - 1];
     if (!currentDataBranch) return;
 
     const allCategoryTitles = getAllTitlesFromCategory(currentDataBranch);
-
     if (allCategoryTitles.length === 0) return;
 
     lastShakeTime = now;
-
-    // Выбираем случайный тайтл
     const randomIndex = Math.floor(Math.random() * allCategoryTitles.length);
     const chosenTitle = allCategoryTitles[randomIndex];
 
-    // Показываем модалку счастливчика
     showRandomTitleModal(chosenTitle);
 }
 
