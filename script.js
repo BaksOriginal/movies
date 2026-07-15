@@ -334,7 +334,7 @@ async function showHome() {
         // Горизонтальный разделитель
         let hr = document.createElement("hr");
         hr.style.border = "0";
-        hr.style.borderTop = "1px solid #ccc"; // Тонкая серая линия
+        hr.style.borderTop = "2px solid #9b4f70"; 
         hr.style.margin = "15px 0"; // Отступы сверху и снизу
         app.appendChild(hr);
     }
