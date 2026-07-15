@@ -823,8 +823,7 @@ const data = {
 const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co/rest/v1/o";
 const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
 
-// Инициализация клиента Supabase
-const supabase = lib.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = lib.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
 let currentUser = null;
@@ -833,7 +832,7 @@ let history = [];
 let realtimeChannel = null; // Вебсокет для realtime-обновлений
 
 // Слушатель событий авторизации (срабатывает при загрузке страницы и логине/выходе)
-supabase.auth.onAuthStateChange((event, session) => {
+supabaseClient.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
         // Сначала загружаем текущий список из базы, затем подписываемся на изменения и открываем сайт
@@ -845,7 +844,7 @@ supabase.auth.onAuthStateChange((event, session) => {
         currentUser = null;
         watchedTitles.clear();
         if (realtimeChannel) {
-            supabase.removeChannel(realtimeChannel);
+            supabaseClient.removeChannel(realtimeChannel);
             realtimeChannel = null;
         }
         showLoginScreen();
@@ -856,7 +855,7 @@ supabase.auth.onAuthStateChange((event, session) => {
 async function loadWatchedFromDB() {
     if (!currentUser) return;
     
-    const { data: dbData, error } = await supabase
+    const { data: dbData, error } = await supabaseClient
         .from('watched_items')
         .select('title');
 
@@ -872,7 +871,7 @@ async function loadWatchedFromDB() {
 function subscribeToChanges() {
     if (realtimeChannel) return; 
 
-    realtimeChannel = supabase
+    realtimeChannel = supabaseClient
         .channel('schema-db-changes')
         .on(
             'postgres_changes',
@@ -938,7 +937,7 @@ async function toggleWatchState(title) {
 
     if (watchedTitles.has(title)) {
         // Запись существует -> удаляем из общей базы
-        const { error } = await supabase
+        const { error } = await supabaseClient
             .from('watched_items')
             .delete()
             .eq('title', title);
@@ -946,7 +945,7 @@ async function toggleWatchState(title) {
         if (error) console.error("Ошибка при удалении фильма:", error);
     } else {
         // Записи нет -> добавляем в общую базу
-        const { error } = await supabase
+        const { error } = await supabaseClient
             .from('watched_items')
             .insert([{ user_id: currentUser.id, title: title }]);
 
@@ -971,7 +970,7 @@ function showLoginScreen() {
         const email = document.getElementById("loginEmail").value;
         const password = document.getElementById("loginPassword").value;
 
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (error) {
             alert("Ошибка входа: " + error.message);
         }
@@ -998,7 +997,7 @@ function showHome() {
             <button class="btn-logout" id="logoutBtn">Выйти</button>
         `;
         app.appendChild(header);
-        document.getElementById("logoutBtn").onclick = () => supabase.auth.signOut();
+        document.getElementById("logoutBtn").onclick = () => supabaseClient.auth.signOut();
     }
 
     let title = document.createElement("h1");
