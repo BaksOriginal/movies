@@ -771,7 +771,6 @@ function renderItemRow(itemText, container) {
 }
 
 // Всплывающее меню выбора действия
-// Всплывающее меню выбора действия
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -784,6 +783,7 @@ function showActionMenu(itemText) {
             <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
                 <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
                 <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
                 <button class="btn-cancel-gray" id="actCancel">Отмена</button>
@@ -793,6 +793,13 @@ function showActionMenu(itemText) {
 
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
+
+    // Логика кнопки трейлера
+    document.getElementById("actTrailer").onclick = () => {
+        overlay.remove();
+        const query = encodeURIComponent(itemText + " трейлер");
+        window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
+    };
 
     document.getElementById("actEdit").onclick = () => {
         overlay.remove();
