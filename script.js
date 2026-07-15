@@ -270,38 +270,40 @@ async function showHome() {
     if (currentUser) {
         let header = document.createElement("div");
         header.className = "user-header";
-        // Добавляем flex-стили прямо здесь, чтобы элементы встали в ряд
         header.style.display = "flex";
         header.style.justifyContent = "space-between";
         header.style.alignItems = "center";
         header.style.marginBottom = "15px";
 
         // Левая часть: Email
-        header.innerHTML = `<span id="userEmailSpan">Аккаунт: ${currentUser.email}</span>`;
+        header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${currentUser.email}</span>`;
         
-        // Правая часть: Контейнер для кнопок (чтобы они были рядом)
+        // Правая часть: Контейнер для кнопок
         let controls = document.createElement("div");
         controls.style.display = "flex";
         controls.style.gap = "10px";
 
-        // Кнопка Музыки
-        let musicBtn = document.createElement("button");
-        musicBtn.textContent = isMusicPlaying ? "🔊" : "🔇";
-        
-        // Стили для идеального круга
-        musicBtn.style.width = "40px";          // Ширина
-        musicBtn.style.height = "40px";         // Высота (такая же, как ширина)
-        musicBtn.style.padding = "0";           // Убираем отступы, чтобы иконка была по центру
-        musicBtn.style.borderRadius = "50%";    // Магия круга
-        musicBtn.style.display = "flex";        // Центрируем иконку внутри
-        musicBtn.style.justifyContent = "center";
-        musicBtn.style.alignItems = "center";
-        musicBtn.style.cursor = "pointer";
-        musicBtn.style.border = "1px solid #ccc";
-        musicBtn.style.background = "#f9f9f9";
-        musicBtn.style.fontSize = "18px";       // Размер иконки
+        // --- Функция для создания кнопок-кругляшей ---
+        const createIconButton = (icon, onClick) => {
+            let btn = document.createElement("button");
+            btn.textContent = icon;
+            btn.style.width = "40px";
+            btn.style.height = "40px";
+            btn.style.padding = "0";
+            btn.style.borderRadius = "50%";
+            btn.style.display = "flex";
+            btn.style.justifyContent = "center";
+            btn.style.alignItems = "center";
+            btn.style.cursor = "pointer";
+            btn.style.border = "1px solid #ccc";
+            btn.style.background = "#f9f9f9";
+            btn.style.fontSize = "18px";
+            btn.onclick = onClick;
+            return btn;
+        };
 
-        musicBtn.onclick = () => {
+        // Кнопка Музыки
+        let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
             const audio = document.getElementById("bgMusic");
             if (audio.paused) {
                 audio.play();
@@ -314,13 +316,10 @@ async function showHome() {
                 localStorage.setItem("musicEnabled", "false");
                 musicBtn.textContent = "🔇";
             }
-        };
+        });
 
         // Кнопка Выйти
-        let logoutBtn = document.createElement("button");
-        logoutBtn.className = "btn-logout";
-        logoutBtn.textContent = "Выйти";
-        logoutBtn.onclick = () => db.auth.signOut();
+        let logoutBtn = createIconButton("🚪", () => db.auth.signOut());
 
         controls.appendChild(musicBtn);
         controls.appendChild(logoutBtn);
