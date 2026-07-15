@@ -80,17 +80,31 @@ let realtimeChannel = null; // Канал для мгновенных обнов
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
+// Флаг, который покажет, загрузилось ли приложение в первый раз
+let isAppInitialized = false;
+
 // Слушатель событий авторизации
 db.auth.onAuthStateChange((event, session) => {
     if (session) {
         currentUser = session.user;
         loadWatchedFromDB().then(() => {
             subscribeToChanges(); 
-            showHome();
+            
+            // Если мы только открыли сайт — показываем главный экран
+            if (!isAppInitialized) {
+                isAppInitialized = true;
+                showHome();
+            } else {
+                // Если мы уже были внутри приложения (просто вернулись на вкладку),
+                // мы мягко обновляем текущий экран, чтобы подгрузить свежие данные,
+                // но не сбрасываем пользователя на "Домой"
+                refreshCurrentScreen();
+            }
         });
     } else {
         currentUser = null;
         watchedTitles.clear();
+        isAppInitialized = false; // сбрасываем флаг при выходе
         if (realtimeChannel) {
             db.removeChannel(realtimeChannel);
             realtimeChannel = null;
