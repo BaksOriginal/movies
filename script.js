@@ -1353,40 +1353,27 @@ function initHeartsBackground() {
 initHeartsBackground();
 setupMusicAutoplay();
 
-// Финальный блок CSS с исправленными приоритетами
 const style = document.createElement('style');
 style.textContent = `
-    /* 1. БАЗОВЫЙ СТИЛЬ (Работает всегда) */
-    .btn-main {
-        background-color: #ffffff;
-        color: #333;
-        border: 1px solid #ddd;
-        padding: 10px 20px;
-        border-radius: 12px;
-        cursor: pointer;
-        transition: 0.2s;
-    }
+    /* БАЗОВЫЙ ВИД: ничего не трогаем, пусть всё остается как было */
 
-    /* 2. ТЕМА ЭЧПОЧМОНИ (Включается только при наличии класса у body) */
+    /* ЭЧПОЧМОНИ: применяем стили только если есть класс у body */
     body.echpochmoni-mode {
         background: linear-gradient(135deg, #f5edff, #eae0f7) !important;
     }
 
-    /* Красим ВСЕ кнопки в фиолетовый, если включен режим */
-    body.echpochmoni-mode .btn-main {
+    /* Красим все кнопки категорий (они у тебя создаются через createElement("button")) */
+    body.echpochmoni-mode button {
         background-color: #f3e8ff !important;
         color: #512da8 !important;
-        border-color: #dcd0f0 !important;
+        border: 1px solid #dcd0f0 !important;
     }
 
-    /* Разделяем кнопки списков в режиме Эчпочмони */
-    body.echpochmoni-mode .btn-wishlist {
-        background-color: #e3d2ff !important;
-        color: #4527a0 !important;
-    }
-    body.echpochmoni-mode .btn-watched-list {
+    /* Отдельно красим кнопки "Будем смотреть" и "Просмотрено" (если у них есть класс btn-pink-style) */
+    body.echpochmoni-mode .btn-pink-style {
         background-color: #cbb2ff !important;
         color: #311b92 !important;
+        border: none !important;
     }
 `;
 document.head.appendChild(style);
