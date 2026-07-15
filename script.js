@@ -285,7 +285,6 @@ async function handleStarClick(title) {
     showStarChoiceModal(title);
 }
 
-// Модальное окно выбора категории для звёздочки
 function showStarChoiceModal(title) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -296,8 +295,8 @@ function showStarChoiceModal(title) {
             <h3 style="margin-bottom: 10px;">Куда добавить?</h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="choiceWish" style="background: #e3f2fd !important; color: #0d47a1 !important;">🍿 Будем смотреть</button>
-                <button id="choiceWatch" style="background: #ffe3ec !important; color: #d81b60 !important;">🎬 Просмотрено</button>
+                <button id="choiceWish" class="btn-wishlist-style">🍿 Будем смотреть</button>
+                <button id="choiceWatch" class="btn-watched-style">🎬 Просмотрено</button>
                 <button id="choiceCancel" class="btn-cancel">Отмена</button>
             </div>
         </div>
@@ -638,8 +637,8 @@ async function showHome() {
 
     // Сначала идет вишлист "Будем смотреть"
     let wishlistBtn = document.createElement("button");
+    wishlistBtn.className = "btn-wishlist-style"; // Наш новый единый класс
     wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-    wishlistBtn.style.background = "#e3f2fd";
     wishlistBtn.onclick = () => {
         const list = Array.from(wishlistTitles);
         currentCategoryName = "🍿 Будем смотреть";
@@ -649,8 +648,8 @@ async function showHome() {
 
     // Только потом "Просмотрено"
     let watchedBtn = document.createElement("button");
+    watchedBtn.className = "btn-watched-style"; // Наш новый единый класс
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
-    watchedBtn.style.background = "#ffe3ec";
     watchedBtn.onclick = () => {
         const list = Array.from(watchedTitles);
         currentCategoryName = "🎬 Просмотрено";
@@ -1255,7 +1254,6 @@ function setupMusicAutoplay() {
 
 setupMusicAutoplay();
 
-// Добавляем стили для разных видов звезд
 const style = document.createElement('style');
 style.textContent = `
     .round-btn {
@@ -1280,6 +1278,38 @@ style.textContent = `
     .btn-watch.wishlist-active {
         color: #2196f3 !important;
         opacity: 1 !important;
+    }
+
+    /* --- ЕДИНЫЙ СТИЛЬ КНОПОК ВИШЛИСТА И ПРОСМОТРЕННОГО --- */
+    
+    /* Кнопка "Будем смотреть" (Синяя тема) */
+    .btn-wishlist-style {
+        background-color: #2196f3 !important;
+        color: #ffffff !important;
+        border: none !important;
+        transition: background-color 0.2s ease;
+    }
+    .btn-wishlist-style:hover {
+        background-color: #1976d2 !important;
+    }
+
+    /* Кнопка "Просмотрено" (Розовая/Малиновая тема) */
+    .btn-watched-style {
+        background-color: #e91e63 !important;
+        color: #ffffff !important;
+        border: none !important;
+        transition: background-color 0.2s ease;
+    }
+    .btn-watched-style:hover {
+        background-color: #c2185b !important;
+    }
+
+    /* Общие корректировки для кнопок в модалке */
+    .modal-content .action-buttons button {
+        font-weight: 600 !important;
+        padding: 12px 20px !important;
+        border-radius: 8px !important;
+        font-size: 15px !important;
     }
 `;
 document.head.appendChild(style);
