@@ -427,3 +427,72 @@ button:nth-child(6){
     box-shadow: none !important;
     transform: none !important;
 }
+/* Стили для модального окна добавления/редактирования */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    padding: 25px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    color: #333;
+}
+.modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+    color: #222;
+}
+.modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.modal-form label {
+    font-size: 14px;
+    font-weight: bold;
+    color: #555;
+}
+.modal-form input, .modal-form select {
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+.modal-buttons button {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+}
+.btn-save { background: #4CAF50; color: white; }
+.btn-cancel { background: #f44336; color: white; }
+
+/* Кнопочки редактирования и удаления в строке фильма */
+.btn-edit, .btn-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 5px;
+    margin-left: 5px;
+    transition: transform 0.1s;
+}
+.btn-edit:hover { transform: scale(1.2); }
+.btn-delete:hover { transform: scale(1.2); }
