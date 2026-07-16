@@ -1967,21 +1967,6 @@ function showAddEditModal(existingItem = null) {
         return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
     });
     
-    const existingGenres = new Set();
-    for (let catKey in dbData) {
-        if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) continue;
-        
-        const categoryData = dbData[catKey];
-        if (typeof categoryData === "object" && !Array.isArray(categoryData)) {
-            for (let genreKey in categoryData) {
-                existingGenres.add(genreKey);
-            }
-        }
-    }
-
-    const sortedGenres = Array.from(existingGenres).sort();
-    const genreOptions = sortedGenres.map(g => `<option value="${g}">`).join("");
-    
     overlay.innerHTML = `
         <div class="modal-content">
             <h3>${existingItem ? "Редактировать" : "Добавить фильм/серию"}</h3>
@@ -2000,7 +1985,6 @@ function showAddEditModal(existingItem = null) {
                 <label>Жанр (Выберите или напишите свой)</label>
                 <input type="text" id="mGenre" required placeholder="Например: Ужасы" list="genresList">
                 <datalist id="genresList">
-                    ${genreOptions}
                 </datalist>
 
                 <label>Франшиза (Если это часть серии, необязательно)</label>
@@ -2022,6 +2006,25 @@ function showAddEditModal(existingItem = null) {
     const mGenre = document.getElementById("mGenre");
     const mFranchise = document.getElementById("mFranchise");
     const franchisesList = document.getElementById("franchisesList");
+
+    const genresList = document.getElementById("genresList");
+
+    function updateGenresDatalist() {
+        const selectedCategory = mCategory.value;
+        const localGenres = new Set();
+
+        const categoryData = dbData[selectedCategory];
+        if (categoryData && typeof categoryData === "object" && !Array.isArray(categoryData)) {
+            for (let genreKey in categoryData) {
+                localGenres.add(genreKey);
+            }
+        }
+
+        genresList.innerHTML = Array.from(localGenres)
+            .sort()
+            .map(g => `<option value="${g}">`)
+            .join("");
+    }
 
     function updateFranchisesDatalist() {
         const selectedCategory = mCategory.value;
@@ -2049,7 +2052,11 @@ function showAddEditModal(existingItem = null) {
             .join("");
     }
 
-    mCategory.addEventListener("change", updateFranchisesDatalist);
+    mCategory.addEventListener("change", () => {
+        updateGenresDatalist();
+        mGenre.value = "";
+        updateFranchisesDatalist();
+    });
     mGenre.addEventListener("input", updateFranchisesDatalist);
 
     if (existingItem) {
@@ -2060,6 +2067,7 @@ function showAddEditModal(existingItem = null) {
         mFranchise.value = existingItem.franchise || "";
     }
 
+    updateGenresDatalist();
     updateFranchisesDatalist();
 
     document.getElementById("mCancel").onclick = () => overlay.remove();
