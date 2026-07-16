@@ -511,6 +511,32 @@ button:nth-child(6){
     width: 100%;
 }
 
+/* Виджет из 10 кликабельных звёзд для оценки */
+.rating-stars {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 5px 0;
+}
+
+.rating-star {
+    font-size: 30px;
+    line-height: 1;
+    color: #e0d0d8;
+    cursor: pointer;
+    transition: color 0.15s ease, transform 0.1s ease;
+    user-select: none;
+}
+
+.rating-star:hover {
+    transform: scale(1.15);
+}
+
+.rating-star.filled {
+    color: #f0a500;
+}
+
 /* Кнопочки редактирования и удаления в строке фильма */
 .btn-edit, .btn-delete {
     background: none;

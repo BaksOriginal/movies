@@ -320,72 +320,95 @@ async function refreshCurrentScreen() {
 }
 
 // =======================================================
-// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ ИЛИ СНЯТИЕ)
+// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ, ОЦЕНКА ИЛИ СНЯТИЕ)
 // =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
-
-    // Если фильм уже в одной из категорий — повторный клик просто убирает отметку
-    if (watchedTitles.has(title)) {
-        watchedTitles.delete(title);
-        updateUIOnLiveChange();
-        await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
-        return;
-    }
-
-    if (wishlistTitles.has(title)) {
-        wishlistTitles.delete(title);
-        updateUIOnLiveChange();
-        await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
-        return;
-    }
-
-    // Если фильм чистый — открываем красивое быстрое меню
     showStarChoiceModal(title);
 }
 
-// Модальное окно выбора категории для звёздочки
+// Модальное окно выбора действия для звёздочки
 function showStarChoiceModal(title) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "starChoiceModal";
 
+    const isWatched = watchedTitles.has(title);
+    const isWishlisted = wishlistTitles.has(title);
+
+    let optionsHtml = "";
+    if (isWatched) {
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного</button>`;
+    } else if (isWishlisted) {
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
+    } else {
+        optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
+        optionsHtml += `<button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>`;
+    }
+    optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
+    optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
+
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Куда добавить?</h3>
+            <h3 style="margin-bottom: 10px;">Действие</h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>
-                <button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>
-                <button id="choiceCancel" class="btn-cancel-gray">Отмена</button>
+                ${optionsHtml}
             </div>
         </div>
     `;
 
     document.body.appendChild(overlay);
 
-    document.getElementById("choiceWish").onclick = async () => {
-        overlay.remove();
-        wishlistTitles.add(title);
-        updateUIOnLiveChange();
-        const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
-        if (error) {
-            wishlistTitles.delete(title);
-            updateUIOnLiveChange();
-            console.error("Ошибка при сохранении в вишлист:", error);
-        }
-    };
+    const removeBtn = document.getElementById("choiceRemove");
+    if (removeBtn) {
+        removeBtn.onclick = async () => {
+            overlay.remove();
+            if (isWatched) {
+                watchedTitles.delete(title);
+                updateUIOnLiveChange();
+                await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            } else if (isWishlisted) {
+                wishlistTitles.delete(title);
+                updateUIOnLiveChange();
+                await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            }
+        };
+    }
 
-    document.getElementById("choiceWatch").onclick = async () => {
-        overlay.remove();
-        watchedTitles.add(title);
-        updateUIOnLiveChange();
-        const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
-        if (error) {
-            watchedTitles.delete(title);
+    const wishBtn = document.getElementById("choiceWish");
+    if (wishBtn) {
+        wishBtn.onclick = async () => {
+            overlay.remove();
+            wishlistTitles.add(title);
             updateUIOnLiveChange();
-            console.error("Ошибка при сохранении в просмотренное:", error);
-        }
+            const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
+            if (error) {
+                wishlistTitles.delete(title);
+                updateUIOnLiveChange();
+                console.error("Ошибка при сохранении в вишлист:", error);
+            }
+        };
+    }
+
+    const watchBtnEl = document.getElementById("choiceWatch");
+    if (watchBtnEl) {
+        watchBtnEl.onclick = async () => {
+            overlay.remove();
+            watchedTitles.add(title);
+            updateUIOnLiveChange();
+            const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
+            if (error) {
+                watchedTitles.delete(title);
+                updateUIOnLiveChange();
+                console.error("Ошибка при сохранении в просмотренное:", error);
+            }
+        };
+    }
+
+    document.getElementById("choiceRate").onclick = () => {
+        overlay.remove();
+        showRatingModal(title);
     };
 
     document.getElementById("choiceCancel").onclick = () => {
@@ -855,7 +878,6 @@ function showActionMenu(itemText) {
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
-                <button class="btn-pink-style" id="actRate">⭐ Оценить</button>
                 <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
                 <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
                 <button class="btn-cancel-gray" id="actCancel">Отмена</button>
@@ -878,11 +900,6 @@ function showActionMenu(itemText) {
         handleEditClick(itemText);
     };
 
-    document.getElementById("actRate").onclick = () => {
-        overlay.remove();
-        showRatingModal(itemText);
-    };
-
     document.getElementById("actDelete").onclick = () => {
         overlay.remove();
         handleDeleteClick(itemText);
@@ -893,66 +910,86 @@ function showActionMenu(itemText) {
     };
 }
 
-// Модальное окно выставления/изменения/удаления оценки
+// Модальное окно выставления/изменения/удаления оценки (10 кликабельных звёзд)
 function showRatingModal(itemText) {
     if (!currentUser) return;
 
     const myUsername = getUsernameFromEmail(currentUser.email);
     const existing = (ratingsData[itemText] || []).find(r => r.userId === currentUser.id);
+    const currentScore = existing ? existing.score : 0;
 
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "ratingModal";
 
+    let starsHtml = "";
+    for (let i = 1; i <= 10; i++) {
+        starsHtml += `<span class="rating-star${i <= currentScore ? " filled" : ""}" data-value="${i}">★</span>`;
+    }
+
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;">Оценка (${myUsername})</h3>
-            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
-            <div class="modal-form">
-                <label>Ваша оценка (1-10)</label>
-                <input type="number" id="ratingInput" min="1" max="10" step="1" value="${existing ? existing.score : 8}">
-                <div class="modal-buttons">
-                    <button type="button" class="btn-save" id="ratingSave">Сохранить</button>
-                    <button type="button" class="btn-cancel" id="ratingCancel">Отмена</button>
-                </div>
-                ${existing ? '<div class="action-buttons"><button type="button" class="btn-action-delete" id="ratingDelete">🗑️ Удалить мою оценку</button></div>' : ''}
+            <p style="color: #666; margin-bottom: 15px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <div class="rating-stars" id="ratingStars">${starsHtml}</div>
+            <p id="ratingValueLabel" style="color: #9b4f70; font-weight: bold; margin: 10px 0 20px; min-height: 18px;">${currentScore > 0 ? currentScore + "/10" : ""}</p>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                ${existing ? '<button id="ratingDelete" class="btn-action-delete">🗑️ Удалить мою оценку</button>' : ''}
+                <button id="ratingCancel" class="btn-action-cancel">Закрыть</button>
             </div>
         </div>
     `;
 
     document.body.appendChild(overlay);
 
-    document.getElementById("ratingCancel").onclick = () => overlay.remove();
+    const starsContainer = document.getElementById("ratingStars");
+    const valueLabel = document.getElementById("ratingValueLabel");
+    const starEls = Array.from(starsContainer.querySelectorAll(".rating-star"));
 
-    document.getElementById("ratingSave").onclick = async () => {
-        const raw = document.getElementById("ratingInput").value;
-        const val = parseInt(raw, 10);
+    function paintStars(value) {
+        starEls.forEach(el => {
+            const v = parseInt(el.dataset.value, 10);
+            el.classList.toggle("filled", v <= value);
+        });
+    }
 
-        if (isNaN(val) || val < 1 || val > 10) {
-            alert("Пожалуйста, введите оценку от 1 до 10.");
-            return;
-        }
+    starEls.forEach(el => {
+        const v = parseInt(el.dataset.value, 10);
 
-        overlay.remove();
+        el.addEventListener("mouseenter", () => {
+            paintStars(v);
+            valueLabel.textContent = v + "/10";
+        });
 
-        const { error } = await db.from('ratings').upsert(
-            {
-                title: itemText,
-                user_id: currentUser.id,
-                username: myUsername,
-                score: val,
-                updated_at: new Date().toISOString()
-            },
-            { onConflict: 'title,user_id' }
-        );
+        el.addEventListener("click", async () => {
+            const { error } = await db.from('ratings').upsert(
+                {
+                    title: itemText,
+                    user_id: currentUser.id,
+                    username: myUsername,
+                    score: v,
+                    updated_at: new Date().toISOString()
+                },
+                { onConflict: 'title,user_id' }
+            );
 
-        if (error) {
-            console.error("Ошибка при сохранении оценки:", error);
-            alert("Не удалось сохранить оценку.");
-        } else {
+            if (error) {
+                console.error("Ошибка при сохранении оценки:", error);
+                alert("Не удалось сохранить оценку.");
+                return;
+            }
+
+            overlay.remove();
             refreshRatingsUI();
-        }
-    };
+        });
+    });
+
+    starsContainer.addEventListener("mouseleave", () => {
+        paintStars(currentScore);
+        valueLabel.textContent = currentScore > 0 ? currentScore + "/10" : "";
+    });
+
+    document.getElementById("ratingCancel").onclick = () => overlay.remove();
 
     if (existing) {
         document.getElementById("ratingDelete").onclick = async () => {
