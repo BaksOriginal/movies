@@ -266,16 +266,17 @@ async function refreshCurrentScreen() {
 async function handleStarClick(title) {
     if (!currentUser) return;
 
-    // Если фильм уже оценен (есть в просмотренном или вишлисте) — открываем меню управления оценкой
+    // Если фильм уже в одной из категорий — повторный клик предлагает УБРАТЬ оценку через модалку
     if (watchedTitles.has(title) || wishlistTitles.has(title)) {
         showRemoveRatingModal(title);
         return;
     }
 
-    // Если фильм чистый — открываем меню добавления
+    // Если фильм чистый — открываем красивое быстрое меню добавления
     showStarChoiceModal(title);
 }
 
+// Модальное окно для СНЯТИЯ / УДАЛЕНИЯ оценки
 function showRemoveRatingModal(title) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -283,11 +284,11 @@ function showRemoveRatingModal(title) {
 
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Убрать этот фильм из списков?</h3>
+            <h3 style="margin-bottom: 10px;">Удалить из списков?</h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="confirmRemove" class="btn-pink-style" style="background-color: #ffebee !important; color: #c62828 !important;">❌ Да, убрать оценку</button>
-                <button id="cancelRemove" class="btn-cancel-gray">Оставить как есть</button>
+                <button id="confirmRemove" class="btn-pink-style" style="background-color: #ffebee !important; color: #c62828 !important; border: 1px solid #ffcdd2 !important; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer;">❌ Убрать оценку</button>
+                <button id="cancelRemove" class="btn-cancel-gray" style="background-color: #f5f5f5; border: 1px solid #ccc; padding: 12px; border-radius: 8px; cursor: pointer;">Оставить в списке</button>
             </div>
         </div>
     `;
@@ -297,12 +298,13 @@ function showRemoveRatingModal(title) {
     document.getElementById("confirmRemove").onclick = async () => {
         overlay.remove();
         
-        // Локально удаляем из обоих списков
+        // Локально вычищаем из списков на клиенте для мгновенного отклика UI
         watchedTitles.delete(title);
         wishlistTitles.delete(title);
-        
-        // Обновляем UI на клиенте мгновенно
-        await updateUIOnLiveChange();
+        if (userRatings[title]) {
+            delete userRatings[title];
+        }
+        updateUIOnLiveChange();
 
         // Удаляем из базы данных Supabase
         await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
@@ -566,8 +568,7 @@ function performCatalogSearch(query) {
         }
     }
 
-    // Вместо полного перерисовывания всего экрана через showHome,
-    // мы обновляем только список фильмов, не трогая фокус в инпуте!
+    // Рендерим результаты. Второй параметр false предотвращает бесконечное забивание истории назад/вперед
     openData(results, false); 
 }
 
@@ -1071,7 +1072,9 @@ function showActionMenu(itemText) {
 }
 
 function openData(content, saveHistory = true, customTitle = null) {
-    const currentSearchVal = document.getElementById("searchInputEl")?.value || "";
+    // Сохраняем текст, который пользователь ввёл прямо сейчас, чтобы он не стирался
+    const currentSearchText = document.getElementById("searchInputEl")?.value || "";
+
     startTransitionLock();
     if (saveHistory) {
         history.push(content);
@@ -1079,38 +1082,120 @@ function openData(content, saveHistory = true, customTitle = null) {
 
     app.innerHTML = "";
 
+    // Если мы находимся в режиме результатов поиска, рисуем поле поиска и фильтров сверху результатов
+    if (currentCategoryName === "🔍 Результаты поиска") {
+        let searchContainer = document.createElement("div");
+        searchContainer.style.cssText = `
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            width: 100%;
+            box-sizing: border-box;
+        `;
+
+        let searchInput = document.createElement("input");
+        searchInput.type = "text";
+        searchInput.id = "searchInputEl";
+        searchInput.value = currentSearchText; // Возвращаем введённый текст на место
+        searchInput.placeholder = "Поиск по названию или жанру...";
+        searchInput.style.cssText = `
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 14px;
+            box-sizing: border-box;
+        `;
+
+        // Умный мгновенный поиск
+        const triggerSearch = () => {
+            const q = searchInput.value;
+            if (q.trim() || filterCategory || filterGenre || filterYear || filterMinRating || filterHasRating !== "all") {
+                performCatalogSearch(q);
+            } else {
+                showHome();
+            }
+        };
+
+        searchInput.oninput = triggerSearch;
+
+        // Кнопка-лупа
+        let searchSubmitBtn = document.createElement("button");
+        searchSubmitBtn.textContent = "🔍";
+        searchSubmitBtn.style.cssText = `
+            width: 42px !important; height: 42px !important;
+            border-radius: 8px !important; background: #e3f2fd !important;
+            border: 1px solid #bbdefb !important; cursor: pointer;
+            font-size: 16px; display: flex; justify-content: center; align-items: center;
+            flex-shrink: 0; box-sizing: border-box;
+        `;
+        searchSubmitBtn.onclick = triggerSearch;
+
+        // Кнопка-шестерёнка
+        let filterBtn = document.createElement("button");
+        filterBtn.textContent = "⚙️";
+        filterBtn.style.cssText = `
+            width: 42px !important; height: 42px !important;
+            border-radius: 8px !important; background: #e3f2fd !important;
+            border: 1px solid #bbdefb !important; cursor: pointer;
+            font-size: 16px; display: flex; justify-content: center; align-items: center;
+            flex-shrink: 0; box-sizing: border-box;
+        `;
+        filterBtn.onclick = () => {
+            // При нажатии на шестерёнку возвращаем на главный экран и открываем панель фильтров
+            showHome();
+            setTimeout(() => {
+                const panel = document.getElementById("filterPanelEl");
+                if (panel) panel.style.display = "flex";
+            }, 50);
+        };
+
+        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(searchSubmitBtn);
+        searchContainer.appendChild(filterBtn);
+        app.appendChild(searchContainer);
+
+        // Возвращаем фокус ввода в конец текстового поля
+        setTimeout(() => {
+            const inp = document.getElementById("searchInputEl");
+            if (inp) {
+                inp.focus();
+                inp.setSelectionRange(inp.value.length, inp.value.length);
+            }
+        }, 10);
+    }
+
     if (customTitle) {
         let title = document.createElement("h1");
         title.textContent = customTitle;
         app.appendChild(title);
     }
 
-    if (Array.isArray(content)) {
-        content.forEach(item => {
-            if (typeof item === "string") {
-                renderItemRow(item, app);
-            } 
-            else if (typeof item === "object" && item !== null) {
-                for (let franchiseName in item) {
-                    let button = document.createElement("button");
-                    button.textContent = franchiseName;
-                    button.onclick = () => openData(item[franchiseName], true);
-                    app.appendChild(button);
-                }
-            }
-        });
-    }
-    else if (typeof content === "object" && content !== null) {
-        for (let key in content) {
-            let value = content[key];
-            let button = document.createElement("button");
-            button.textContent = key;
-            button.onclick = () => openData(value, true);
-            app.appendChild(button);
-        }
+    if (currentCategoryName) {
+        let categoryHeader = document.createElement("h2");
+        categoryHeader.textContent = currentCategoryName;
+        categoryHeader.style.color = "#9b4f70";
+        categoryHeader.style.marginBottom = "15px";
+        app.appendChild(categoryHeader);
     }
 
-    addNavigation();
+    let listContainer = document.createElement("div");
+    listContainer.className = "catalog-list";
+
+    if (content.length === 0) {
+        let noResults = document.createElement("p");
+        noResults.textContent = "Ничего не найдено 😢";
+        noResults.style.color = "#888";
+        noResults.style.marginTop = "20px";
+        listContainer.appendChild(noResults);
+    } else {
+        content.forEach(item => {
+            let card = createMovieCard(item);
+            listContainer.appendChild(card);
+        });
+    }
+
+    app.appendChild(listContainer);
 }
 
 // Навигационная панель Назад/Домой
