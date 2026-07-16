@@ -148,13 +148,21 @@ db.auth.onAuthStateChange(async (event, session) => {
     if (session) {
         currentUser = session.user;
         saveSessionBackup(session); // Бэкапим сессию
+
+        // Важно: помечаем инициализацию начатой СРАЗУ, синхронно, а не после
+        // загрузки данных. Иначе при первой загрузке страницы Supabase иногда
+        // присылает два события авторизации подряд (например INITIAL_SESSION
+        // и SIGNED_IN), и пока флаг ещё не выставлен, второе событие успевает
+        // запустить showHome() повторно — из-за этого один раз "моргает"
+        // при самом первом открытии страницы.
+        const wasAlreadyInitialized = isAppInitialized;
+        isAppInitialized = true;
         
         // Загружаем списки просмотренного и вишлиста параллельно
         Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]).then(() => {
             subscribeToChanges(); 
             
-            if (!isAppInitialized) {
-                isAppInitialized = true;
+            if (!wasAlreadyInitialized) {
                 showHome();
             } else {
                 refreshCurrentScreen();
