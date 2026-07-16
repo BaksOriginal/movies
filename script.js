@@ -6,7 +6,7 @@ let titleCreatedAt = {}; // "Название (год)" -> дата добавл
 // ==========================================
 // Получите бесплатный ключ на https://www.themoviedb.org/settings/api
 // и вставьте его сюда вместо заглушки.
-const TMDB_API_KEY = "ВСТАВЬТЕ_СВОЙ_TMDB_API_KEY";
+const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
