@@ -719,6 +719,9 @@ async function showHome() {
 
         // ПОИСК И ФИЛЬТРЫ
         // ПОИСК И ФИЛЬТРЫ (ШЕСТЕРЕНКА)
+        // ==========================================
+        // БЛОК ПОИСКА И ФИЛЬТРОВ (ШЕСТЕРЕНКА)
+        // ==========================================
         let searchContainer = document.createElement("div");
         searchContainer.style.cssText = `
             display: flex;
@@ -730,7 +733,7 @@ async function showHome() {
 
         let searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.id = "searchInputEl"; // Добавим ID, чтобы не терять фокус
+        searchInput.id = "searchInputEl"; // Индификатор для сохранения фокуса
         searchInput.placeholder = "Поиск по названию или жанру...";
         searchInput.style.cssText = `
             flex-grow: 1;
@@ -747,15 +750,15 @@ async function showHome() {
             if (q.trim()) {
                 performCatalogSearch(q);
             } else {
-                // Если поле очистили — возвращаем главный экран
+                // Если строку стерли полностью, возвращаем обычный главный экран
                 showHome();
             }
         };
 
-        // Запуск поиска при каждом вводе символа (БЕЗ блокировки инпута)
+        // Живой поиск при вводе текста без блокировки ввода!
         searchInput.oninput = triggerSearch;
 
-        // Кнопка Поиска (круглая с лупой, как шестеренка)
+        // Кнопка поиска (лупа)
         let searchSubmitBtn = document.createElement("button");
         searchSubmitBtn.textContent = "🔍";
         searchSubmitBtn.style.cssText = `
@@ -776,7 +779,7 @@ async function showHome() {
         `;
         searchSubmitBtn.onclick = triggerSearch;
 
-        // Кнопка Настроек/Фильтров (Шестеренка ⚙️ с абсолютно таким же стилем)
+        // Кнопка фильтров (шестеренка), оформленная 1-в-1 как лупа
         let filterBtn = document.createElement("button");
         filterBtn.textContent = "⚙️";
         filterBtn.style.cssText = `
@@ -795,14 +798,18 @@ async function showHome() {
             flex-shrink: 0;
             box-sizing: border-box;
         `;
-        // Сюда можно повесить функцию открытия твоих фильтров, если они появятся
+        
+        // Обработчик для шестеренки
         filterBtn.onclick = () => {
-            alert("Фильтры будут открываться здесь!");
+            // Если у тебя будет функция открытия панели фильтров, пропиши ее вызов здесь.
+            // Сейчас просто оставим заглушку или сброс строки поиска.
+            searchInput.value = "";
+            showHome();
         };
 
         searchContainer.appendChild(searchInput);
         searchContainer.appendChild(searchSubmitBtn);
-        searchContainer.appendChild(filterBtn); // Добавляем шестеренку в контейнер рядом с лупой
+        searchContainer.appendChild(filterBtn);
         app.appendChild(searchContainer);
 
         // Контейнер панели фильтров (скрыт по умолчанию)
