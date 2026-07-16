@@ -223,6 +223,48 @@ db.auth.onAuthStateChange(async (event, session) => {
     }
 });
 
+// ==========================================
+// СТРАХОВКА ОТ ПУСТОЙ СТРАНИЦЫ
+// ==========================================
+// Обычно onAuthStateChange сам вызывает showHome() или showLoginScreen()
+// при загрузке страницы. Но если у Supabase не получается обновить
+// протухший refresh-токен (см. ошибку 400 на .../auth/v1/token в консоли),
+// в части случаев событие авторизации не приходит вообще — и страница
+// остаётся пустой навсегда, потому что её просто некому отрисовать.
+// Явно запрашиваем сессию сами и, если через 2 секунды приложение всё
+// ещё не проинициализировано, принудительно показываем экран входа.
+(async function bootstrapAuthWatchdog() {
+    try {
+        const { data, error } = await db.auth.getSession();
+        if (error) {
+            console.error("Ошибка получения сессии при загрузке:", error);
+        }
+        if (!data || !data.session) {
+            // Сессии нет — пробуем восстановиться из резервной копии,
+            // а если не выйдет, showLoginScreen() внутри onAuthStateChange
+            // должен был сработать сам. На всякий случай подстрахуемся ниже.
+        }
+    } catch (e) {
+        console.error("Критическая ошибка при получении сессии:", e);
+    }
+
+    setTimeout(() => {
+        if (!isAppInitialized && app && !app.innerHTML.trim()) {
+            console.warn("Событие авторизации не пришло вовремя — показываем экран входа принудительно.");
+            showLoginScreen();
+        }
+    }, 2000);
+})();
+
+// Ловим необработанные ошибки (например, из фонового обновления токена),
+// чтобы они не оставляли страницу пустой без объяснений
+window.addEventListener("unhandledrejection", (event) => {
+    console.error("Необработанная ошибка:", event.reason);
+    if (!isAppInitialized && app && !app.innerHTML.trim()) {
+        showLoginScreen();
+    }
+});
+
 // Загрузка просмотренных тайтлов
 async function loadWatchedFromDB() {
     if (!currentUser) return;
