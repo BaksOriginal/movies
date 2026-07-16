@@ -533,3 +533,71 @@ button:nth-child(6){
 .btn-action-cancel:hover {
     background: #e0e0e0;
 }
+/* Панель фильтров поиска */
+.filter-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: white;
+    padding: 15px;
+    border-radius: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(180,80,120,0.1);
+    text-align: left;
+}
+
+.filter-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.filter-row select, .filter-row input {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 12px;
+    border: 1px solid #ffdce5;
+    border-radius: 10px;
+    font-size: 14px;
+    outline: none;
+}
+
+/* Блок отображения оценок под фильмом */
+.item-ratings-info {
+    font-size: 12px;
+    color: #888;
+    margin-top: -8px;
+    margin-bottom: 12px;
+    padding-left: 20px;
+    text-align: left;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.user-rating-badge {
+    background: #ffe3ec;
+    color: #9b4f70;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: bold;
+}
+
+/* Стили для выбора оценки в модалке */
+.rating-stars-input {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    margin: 15px 0;
+    font-size: 30px;
+    cursor: pointer;
+}
+
+.rating-star {
+    color: #ccc;
+    transition: color 0.1s;
+}
+
+.rating-star.active {
+    color: #ffb400;
+}
