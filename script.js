@@ -265,7 +265,53 @@ async function refreshCurrentScreen() {
 // =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
+
+    // Если фильм уже оценен (есть в просмотренном или вишлисте) — открываем меню управления оценкой
+    if (watchedTitles.has(title) || wishlistTitles.has(title)) {
+        showRemoveRatingModal(title);
+        return;
+    }
+
+    // Если фильм чистый — открываем меню добавления
     showStarChoiceModal(title);
+}
+
+function showRemoveRatingModal(title) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "removeRatingModal";
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 10px;">Убрать этот фильм из списков?</h3>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="confirmRemove" class="btn-pink-style" style="background-color: #ffebee !important; color: #c62828 !important;">❌ Да, убрать оценку</button>
+                <button id="cancelRemove" class="btn-cancel-gray">Оставить как есть</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("confirmRemove").onclick = async () => {
+        overlay.remove();
+        
+        // Локально удаляем из обоих списков
+        watchedTitles.delete(title);
+        wishlistTitles.delete(title);
+        
+        // Обновляем UI на клиенте мгновенно
+        await updateUIOnLiveChange();
+
+        // Удаляем из базы данных Supabase
+        await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+        await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+    };
+
+    document.getElementById("cancelRemove").onclick = () => {
+        overlay.remove();
+    };
 }
 
 // Модальное окно выбора категории для звёздочки (с добавлением Оценки)
@@ -672,6 +718,7 @@ async function showHome() {
         app.appendChild(hr);
 
         // ПОИСК И ФИЛЬТРЫ
+        // ПОИСК И ФИЛЬТРЫ (ШЕСТЕРЕНКА)
         let searchContainer = document.createElement("div");
         searchContainer.style.cssText = `
             display: flex;
@@ -683,8 +730,8 @@ async function showHome() {
 
         let searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.id = "mainSearchInput";
-        searchInput.placeholder = "Поиск по названию...";
+        searchInput.id = "searchInputEl"; // Добавим ID, чтобы не терять фокус
+        searchInput.placeholder = "Поиск по названию или жанру...";
         searchInput.style.cssText = `
             flex-grow: 1;
             padding: 10px;
@@ -694,6 +741,21 @@ async function showHome() {
             box-sizing: border-box;
         `;
 
+        // Функция мгновенного поиска
+        const triggerSearch = () => {
+            const q = searchInput.value;
+            if (q.trim()) {
+                performCatalogSearch(q);
+            } else {
+                // Если поле очистили — возвращаем главный экран
+                showHome();
+            }
+        };
+
+        // Запуск поиска при каждом вводе символа (БЕЗ блокировки инпута)
+        searchInput.oninput = triggerSearch;
+
+        // Кнопка Поиска (круглая с лупой, как шестеренка)
         let searchSubmitBtn = document.createElement("button");
         searchSubmitBtn.textContent = "🔍";
         searchSubmitBtn.style.cssText = `
@@ -710,39 +772,37 @@ async function showHome() {
             justify-content: center;
             align-items: center;
             flex-shrink: 0;
+            box-sizing: border-box;
         `;
+        searchSubmitBtn.onclick = triggerSearch;
 
-        let filterToggleBtn = document.createElement("button");
-        filterToggleBtn.textContent = "⚙️ Фильтры";
-        filterToggleBtn.style.cssText = `
-            width: auto !important;
-            min-height: auto !important;
+        // Кнопка Настроек/Фильтров (Шестеренка ⚙️ с абсолютно таким же стилем)
+        let filterBtn = document.createElement("button");
+        filterBtn.textContent = "⚙️";
+        filterBtn.style.cssText = `
+            width: 42px !important;
             height: 42px !important;
-            padding: 0 10px !important;
+            padding: 0 !important;
             margin: 0 !important;
             border-radius: 8px !important;
-            background: #ffe3ec !important;
-            color: #d81b60 !important;
-            font-size: 13px !important;
-            font-weight: bold;
+            background: #e3f2fd !important;
+            border: 1px solid #bbdefb !important;
             cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-shrink: 0;
+            box-sizing: border-box;
         `;
-
-        const doSearch = () => {
-            const q = searchInput.value;
-            performCatalogSearch(q);
-        };
-
-        searchSubmitBtn.onclick = doSearch;
-        searchInput.onkeydown = (e) => {
-            if (e.key === "Enter") {
-                doSearch();
-            }
+        // Сюда можно повесить функцию открытия твоих фильтров, если они появятся
+        filterBtn.onclick = () => {
+            alert("Фильтры будут открываться здесь!");
         };
 
         searchContainer.appendChild(searchInput);
         searchContainer.appendChild(searchSubmitBtn);
-        searchContainer.appendChild(filterToggleBtn);
+        searchContainer.appendChild(filterBtn); // Добавляем шестеренку в контейнер рядом с лупой
         app.appendChild(searchContainer);
 
         // Контейнер панели фильтров (скрыт по умолчанию)
@@ -1059,6 +1119,7 @@ function showActionMenu(itemText) {
 }
 
 function openData(content, saveHistory = true, customTitle = null) {
+    const currentSearchVal = document.getElementById("searchInputEl")?.value || "";
     startTransitionLock();
     if (saveHistory) {
         history.push(content);
