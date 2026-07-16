@@ -79,6 +79,13 @@ let ratingsData = {}; // Оценки: { "Название (год)": [{ usernam
 let history = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
+// Текущие фильтры поиска
+let searchFilters = { category: "", genre: "", year: "", hasRating: "", minStars: "" };
+
+// Состояние чата
+let chatMessages = [];
+let isChatScreenOpen = false;
+
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
@@ -150,6 +157,8 @@ db.auth.onAuthStateChange(async (event, session) => {
         watchedTitles.clear();
         wishlistTitles.clear();
         ratingsData = {};
+        chatMessages = [];
+        isChatScreenOpen = false;
         isAppInitialized = false;
         saveSessionBackup(null);
         
@@ -181,6 +190,11 @@ async function loadWishlistFromDB() {
         return;
     }
     wishlistTitles = new Set(data.map(item => item.title));
+}
+
+// Проверка: относится ли категория к "секретным" (исключаются из фильтров и поиска)
+function isSecretCategory(catKey) {
+    return catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️");
 }
 
 // Загрузка оценок (видны обе оценки — и Asmoday, и Myakish)
@@ -248,6 +262,12 @@ function subscribeToChanges() {
             'postgres_changes',
             { event: '*', schema: 'public', table: 'ratings' },
             () => { updateUIOnLiveChange(); }
+        )
+        // Следим за чатом (отдельно от каталога, поиск это не затрагивает)
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'chat_messages' },
+            () => { onChatRealtimeChange(); }
         )
         .subscribe();
 }
@@ -471,22 +491,108 @@ function getLevenshteinDistance(a, b) {
     return tmp[alen][blen];
 }
 
-function performCatalogSearch(query) {
-    const searchStr = query.toLowerCase().trim();
-    if (!searchStr) return;
+// Собирает доступные варианты для фильтров (категории/жанры/года), исключая "Секрет"
+function collectFilterOptions() {
+    const categories = [];
+    const genres = new Set();
+    const years = new Set();
+
+    const collectYear = (fullTitle) => {
+        const m = fullTitle.match(/\((\d{4})\)$/);
+        if (m) years.add(m[1]);
+    };
+
+    for (let catKey in dbData) {
+        if (isSecretCategory(catKey)) continue;
+        categories.push(catKey);
+
+        const categoryData = dbData[catKey];
+        for (let genreKey in categoryData) {
+            genres.add(genreKey);
+            const listOrObj = categoryData[genreKey];
+
+            if (Array.isArray(listOrObj)) {
+                listOrObj.forEach(item => {
+                    if (typeof item === 'string') {
+                        collectYear(item);
+                    } else if (typeof item === 'object' && item !== null) {
+                        for (let franchiseName in item) {
+                            item[franchiseName].forEach(t => collectYear(t));
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    return {
+        categories,
+        genres: Array.from(genres).sort(),
+        years: Array.from(years).sort((a, b) => b.localeCompare(a))
+    };
+}
+
+// Есть ли активные (не пустые) фильтры
+function hasActiveFilters(filters) {
+    return !!(filters.category || filters.genre || filters.year || filters.hasRating || filters.minStars);
+}
+
+// Короткое текстовое описание примененных фильтров (для заголовка результатов)
+function buildFilterSummary(filters) {
+    const parts = [];
+    if (filters.category) parts.push(filters.category);
+    if (filters.genre) parts.push(filters.genre);
+    if (filters.year) parts.push(filters.year);
+    if (filters.hasRating === "yes") parts.push("с оценкой");
+    if (filters.hasRating === "no") parts.push("без оценки");
+    if (filters.minStars) parts.push(`от ${filters.minStars}★`);
+    return parts.join(", ");
+}
+
+function performCatalogSearch(query, filters = {}) {
+    const searchStr = (query || "").toLowerCase().trim();
+    const hasQuery = searchStr.length > 0;
+
+    if (!hasQuery && !hasActiveFilters(filters)) return;
 
     const results = [];
     
     for (let catKey in dbData) {
-        if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) {
+        if (isSecretCategory(catKey)) {
             continue;
         }
+        if (filters.category && filters.category !== catKey) continue;
 
         const categoryData = dbData[catKey];
         for (let genreKey in categoryData) {
+            if (filters.genre && filters.genre !== genreKey) continue;
+
             const listOrObj = categoryData[genreKey];
 
             const processTitle = (fullTitle, franchiseName = null) => {
+                // Фильтр по году
+                if (filters.year) {
+                    const m = fullTitle.match(/\((\d{4})\)$/);
+                    const year = m ? m[1] : null;
+                    if (year !== filters.year) return;
+                }
+
+                // Фильтр по наличию/отсутствию оценки и по минимальному количеству звёзд
+                const ratings = ratingsData[fullTitle] || [];
+                if (filters.hasRating === "yes" && ratings.length === 0) return;
+                if (filters.hasRating === "no" && ratings.length > 0) return;
+                if (filters.minStars) {
+                    const minStarsNum = parseInt(filters.minStars, 10);
+                    const qualifies = ratings.some(r => r.score >= minStarsNum);
+                    if (!qualifies) return;
+                }
+
+                // Если текстового запроса нет — фильтров уже достаточно, добавляем как есть
+                if (!hasQuery) {
+                    results.push({ title: fullTitle, score: 0 });
+                    return;
+                }
+
                 const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
                 
                 if (cleanTitle.includes(searchStr) || 
@@ -551,13 +657,119 @@ function performCatalogSearch(query) {
         }
     });
 
+    const filterSummary = buildFilterSummary(filters);
+    let displayTitle;
+    if (hasQuery && filterSummary) {
+        displayTitle = `Результаты для: "${query}" (${filterSummary})`;
+    } else if (hasQuery) {
+        displayTitle = `Результаты для: "${query}"`;
+    } else {
+        displayTitle = `🔍 Фильтр: ${filterSummary}`;
+    }
+
     currentCategoryName = "🔍 Результаты поиска";
-    openData(uniqueResults, true, `Результаты для: "${query}"`);
+    openData(uniqueResults, true, displayTitle);
+}
+
+// Модальное окно фильтров поиска (кнопка-шестерёнка)
+function showFilterModal(onApply) {
+    const options = collectFilterOptions();
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "filterModal";
+
+    const categoryOptionsHtml = options.categories
+        .map(c => `<option value="${c}" ${searchFilters.category === c ? "selected" : ""}>${c}</option>`)
+        .join("");
+
+    const genreOptionsHtml = options.genres
+        .map(g => `<option value="${g}" ${searchFilters.genre === g ? "selected" : ""}>${g}</option>`)
+        .join("");
+
+    const yearOptionsHtml = options.years
+        .map(y => `<option value="${y}" ${searchFilters.year === y ? "selected" : ""}>${y}</option>`)
+        .join("");
+
+    let starOptionsHtml = "";
+    for (let i = 1; i <= 10; i++) {
+        starOptionsHtml += `<option value="${i}" ${searchFilters.minStars === String(i) ? "selected" : ""}>от ${i}★ и выше</option>`;
+    }
+
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <h3>⚙️ Фильтры поиска</h3>
+            <form class="modal-form" id="filterForm">
+                <label>Категория</label>
+                <select id="fCategory">
+                    <option value="">Все категории</option>
+                    ${categoryOptionsHtml}
+                </select>
+
+                <label>Жанр</label>
+                <select id="fGenre">
+                    <option value="">Все жанры</option>
+                    ${genreOptionsHtml}
+                </select>
+
+                <label>Год</label>
+                <select id="fYear">
+                    <option value="">Любой год</option>
+                    ${yearOptionsHtml}
+                </select>
+
+                <label>Оценка</label>
+                <select id="fHasRating">
+                    <option value="" ${searchFilters.hasRating === "" ? "selected" : ""}>Любая</option>
+                    <option value="yes" ${searchFilters.hasRating === "yes" ? "selected" : ""}>Есть оценка</option>
+                    <option value="no" ${searchFilters.hasRating === "no" ? "selected" : ""}>Нет оценки</option>
+                </select>
+
+                <label>Количество звёзд</label>
+                <select id="fMinStars">
+                    <option value="" ${searchFilters.minStars === "" ? "selected" : ""}>Любое</option>
+                    ${starOptionsHtml}
+                </select>
+
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-save">Применить</button>
+                    <button type="button" class="btn-cancel" id="fReset">Сбросить</button>
+                </div>
+            </form>
+            <div class="action-buttons" style="margin-top: 12px;">
+                <button type="button" class="btn-action-cancel" id="fClose">Закрыть</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("fClose").onclick = () => overlay.remove();
+
+    document.getElementById("fReset").onclick = () => {
+        searchFilters = { category: "", genre: "", year: "", hasRating: "", minStars: "" };
+        overlay.remove();
+        onApply();
+    };
+
+    document.getElementById("filterForm").onsubmit = (e) => {
+        e.preventDefault();
+        searchFilters = {
+            category: document.getElementById("fCategory").value,
+            genre: document.getElementById("fGenre").value,
+            year: document.getElementById("fYear").value,
+            hasRating: document.getElementById("fHasRating").value,
+            minStars: document.getElementById("fMinStars").value
+        };
+        overlay.remove();
+        onApply();
+    };
 }
 
 // Главная страница
 async function showHome() {
     startTransitionLock();
+    isChatScreenOpen = false;
     history = [];
     currentCategoryName = null;
     await loadCatalogFromDB();
@@ -675,12 +887,33 @@ async function showHome() {
             flex-shrink: 0;
         `;
 
+        let filterBtn = document.createElement("button");
+        filterBtn.id = "searchFilterBtn";
+        filterBtn.textContent = "⚙️";
+        filterBtn.style.cssText = `
+            width: 42px !important;
+            height: 42px !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border-radius: 8px !important;
+            background: ${hasActiveFilters(searchFilters) ? "#ffe3ec" : "#f5f5f5"} !important;
+            border: 1px solid ${hasActiveFilters(searchFilters) ? "#f48fb1" : "#ddd"} !important;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-shrink: 0;
+        `;
+
         const doSearch = () => {
             const q = searchInput.value;
-            if (q.trim()) {
-                performCatalogSearch(q);
+            if (q.trim() || hasActiveFilters(searchFilters)) {
+                performCatalogSearch(q, searchFilters);
             }
         };
+
+        filterBtn.onclick = () => showFilterModal(doSearch);
 
         searchSubmitBtn.onclick = doSearch;
         searchInput.onkeydown = (e) => {
@@ -691,6 +924,7 @@ async function showHome() {
 
         searchContainer.appendChild(searchInput);
         searchContainer.appendChild(searchSubmitBtn);
+        searchContainer.appendChild(filterBtn);
         app.appendChild(searchContainer);
 
         // Второй сплиттер HR (после Поиска)
@@ -738,6 +972,20 @@ async function showHome() {
         openData(list, true, "🎬 Просмотрено");
     };
     app.appendChild(watchedBtn);
+
+    if (currentUser) {
+        let hrBeforeChat = document.createElement("hr");
+        hrBeforeChat.style.border = "0";
+        hrBeforeChat.style.borderTop = "2px solid #9b4f70";
+        hrBeforeChat.style.margin = "20px 0";
+        app.appendChild(hrBeforeChat);
+
+        let chatBtn = document.createElement("button");
+        chatBtn.className = "btn-pink-style";
+        chatBtn.textContent = "💬 Чат";
+        chatBtn.onclick = () => showChatScreen();
+        app.appendChild(chatBtn);
+    }
 
     let footer = document.createElement("p");
     footer.style.textAlign = "center";
@@ -1011,6 +1259,7 @@ function showRatingModal(itemText) {
 
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
+    isChatScreenOpen = false;
     if (saveHistory) {
         history.push(content);
     }
@@ -1088,6 +1337,166 @@ function addNavigation() {
     } else {
         document.body.insertBefore(nav, app);
     }
+}
+
+// =======================================================
+// ЧАТ МЕЖДУ ПОЛЬЗОВАТЕЛЯМИ (полностью изолирован от поиска/каталога)
+// =======================================================
+
+// Загружает последние 150 сообщений из базы (в хронологическом порядке)
+async function loadChatMessages() {
+    const { data, error } = await db
+        .from('chat_messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(150);
+
+    if (error) {
+        console.error("Ошибка при загрузке чата:", error);
+        return;
+    }
+
+    chatMessages = data.reverse();
+}
+
+// Реалтайм-обработчик изменений в чате
+async function onChatRealtimeChange() {
+    await loadChatMessages();
+    if (isChatScreenOpen) {
+        renderChatMessages();
+    }
+}
+
+// Форматирует дату и время сообщения
+function formatChatTime(isoString) {
+    const d = new Date(isoString);
+    const datePart = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    const timePart = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    return `${datePart}, ${timePart}`;
+}
+
+// Отрисовка списка сообщений внутри открытого чата
+function renderChatMessages() {
+    const box = document.getElementById("chatBox");
+    if (!box) return;
+
+    box.innerHTML = "";
+
+    if (chatMessages.length === 0) {
+        let empty = document.createElement("p");
+        empty.style.cssText = "text-align:center;color:#999;margin-top:20px;font-size:14px;";
+        empty.textContent = "Сообщений пока нет. Напишите первым!";
+        box.appendChild(empty);
+    } else {
+        chatMessages.forEach(msg => {
+            let bubble = document.createElement("div");
+            const isMine = currentUser && msg.user_id === currentUser.id;
+            bubble.className = "chat-bubble " + (isMine ? "chat-bubble-mine" : "chat-bubble-theirs");
+
+            let meta = document.createElement("div");
+            meta.className = "chat-meta";
+            meta.textContent = `${msg.username} • ${formatChatTime(msg.created_at)}`;
+
+            let text = document.createElement("div");
+            text.className = "chat-text";
+            text.textContent = msg.message;
+
+            bubble.appendChild(meta);
+            bubble.appendChild(text);
+            box.appendChild(bubble);
+        });
+    }
+
+    box.scrollTop = box.scrollHeight;
+}
+
+// Экран чата (не связан с историей навигации каталога/поиска)
+async function showChatScreen() {
+    startTransitionLock();
+    isChatScreenOpen = true;
+    currentCategoryName = null;
+
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = "💬 Чат";
+    app.appendChild(title);
+
+    let chatBox = document.createElement("div");
+    chatBox.className = "chat-box";
+    chatBox.id = "chatBox";
+    app.appendChild(chatBox);
+
+    let inputRow = document.createElement("div");
+    inputRow.className = "chat-input-row";
+
+    let chatInput = document.createElement("input");
+    chatInput.type = "text";
+    chatInput.id = "chatInput";
+    chatInput.placeholder = "Написать сообщение...";
+    chatInput.autocomplete = "off";
+
+    let sendBtn = document.createElement("button");
+    sendBtn.id = "chatSendBtn";
+    sendBtn.textContent = "➤";
+
+    const sendMessage = async () => {
+        const text = chatInput.value.trim();
+        if (!text || !currentUser) return;
+
+        chatInput.value = "";
+        chatInput.focus();
+
+        const username = getUsernameFromEmail(currentUser.email);
+        const { error } = await db.from('chat_messages').insert([
+            { user_id: currentUser.id, username: username, message: text }
+        ]);
+
+        if (error) {
+            console.error("Ошибка при отправке сообщения:", error);
+            alert("Не удалось отправить сообщение.");
+        }
+    };
+
+    sendBtn.onclick = sendMessage;
+    chatInput.onkeydown = (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            sendMessage();
+        }
+    };
+
+    inputRow.appendChild(chatInput);
+    inputRow.appendChild(sendBtn);
+    app.appendChild(inputRow);
+
+    await loadChatMessages();
+    renderChatMessages();
+
+    // Собственная навигация чата — не трогает историю поиска/каталога
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+
+    let homeBtn = document.createElement("button");
+    homeBtn.textContent = "🏠 Домой";
+    homeBtn.onclick = () => {
+        isChatScreenOpen = false;
+        showHome();
+    };
+
+    nav.appendChild(homeBtn);
+
+    let container = document.querySelector(".container");
+    if (container) {
+        container.insertBefore(nav, container.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
+
+    chatInput.focus();
 }
 
 // Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ
