@@ -650,7 +650,18 @@ function buildSearchBar(prefillQuery = "") {
         }
     };
 
-    filterBtn.onclick = () => showFilterModal(doSearch);
+    // Применение/сброс фильтров в модалке больше НЕ запускает поиск сам по
+    // себе — только сохраняет выбор и подсвечивает кнопку ⚙️. Сам поиск
+    // (по тексту, по фильтрам, или по тому и другому вместе — это уже
+    // учтено внутри performCatalogSearch) запускается только кнопкой 🔍
+    // или клавишей Enter.
+    const refreshFilterButtonAppearance = () => {
+        const active = hasActiveFilters(searchFilters);
+        filterBtn.style.setProperty("background", active ? "#ffe3ec" : "#f5f5f5", "important");
+        filterBtn.style.setProperty("border", "1px solid " + (active ? "#f48fb1" : "#ddd"), "important");
+    };
+
+    filterBtn.onclick = () => showFilterModal(refreshFilterButtonAppearance);
 
     searchSubmitBtn.onclick = doSearch;
     searchInput.onkeydown = (e) => {
@@ -789,7 +800,7 @@ function performCatalogSearch(query, filters = {}) {
 }
 
 // Модальное окно фильтров поиска (кнопка-шестерёнка)
-function showFilterModal(onApply) {
+function showFilterModal(onFiltersChanged) {
     const options = collectFilterOptions();
 
     const overlay = document.createElement("div");
@@ -866,7 +877,7 @@ function showFilterModal(onApply) {
     document.getElementById("fReset").onclick = () => {
         searchFilters = { category: "", genre: "", year: "", hasRating: "", minStars: "" };
         overlay.remove();
-        onApply();
+        onFiltersChanged();
     };
 
     document.getElementById("filterForm").onsubmit = (e) => {
@@ -879,7 +890,7 @@ function showFilterModal(onApply) {
             minStars: document.getElementById("fMinStars").value
         };
         overlay.remove();
-        onApply();
+        onFiltersChanged();
     };
 }
 
