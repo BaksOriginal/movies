@@ -991,14 +991,29 @@ async function showHome() {
     }
 
     // Рендерим кнопки категорий
+    let secretDividerAdded = false;
     for (let key in dbData) {
+        // Разделитель ПЕРЕД секретной категорией (например между "Сериалы" и "Секрет")
+        const isSecretKey = key.includes("Секрет") || key.includes("🔒") || key.includes("❤️");
+        if (isSecretKey && !secretDividerAdded) {
+            let hrBeforeSecret = document.createElement("hr");
+            hrBeforeSecret.style.border = "0";
+            hrBeforeSecret.style.borderTop = "2px solid #9b4f70";
+            hrBeforeSecret.style.margin = "15px 0";
+            app.appendChild(hrBeforeSecret);
+            secretDividerAdded = true;
+        }
+
         let button = document.createElement("button");
         button.textContent = key;
+        if (isSecretKey) {
+            button.classList.add("btn-secret-gold");
+        }
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
 
         // Третий сплиттер HR (после категории "Секрет")
-        if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) {
+        if (isSecretKey) {
             let hrAfterSecret = document.createElement("hr");
             hrAfterSecret.style.border = "0";
             hrAfterSecret.style.borderTop = "2px solid #9b4f70"; 
@@ -1036,7 +1051,7 @@ async function showHome() {
         app.appendChild(hrBeforeChat);
 
         let chatBtn = document.createElement("button");
-        chatBtn.className = "btn-pink-style";
+        chatBtn.className = "btn-chat-purple";
         chatBtn.textContent = "💬 Чат";
         chatBtn.onclick = () => showChatScreen();
         app.appendChild(chatBtn);
