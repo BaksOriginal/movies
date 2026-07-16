@@ -6,7 +6,7 @@ let titleCreatedAt = {}; // "Название (год)" -> дата добавл
 // ==========================================
 // Получите бесплатный ключ на https://www.themoviedb.org/settings/api
 // и вставьте его сюда вместо заглушки.
-const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
+const TMDB_API_KEY = "ВСТАВЬТЕ_СВОЙ_TMDB_API_KEY";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
@@ -296,12 +296,26 @@ function getUsernameFromEmail(email) {
     return email || "Аноним";
 }
 
+// Считает среднюю оценку (среднее арифметическое) по тайтлу
+function getAverageRating(title) {
+    const ratings = ratingsData[title];
+    if (!ratings || ratings.length === 0) return null;
+    const sum = ratings.reduce((acc, r) => acc + r.score, 0);
+    const avg = sum / ratings.length;
+    // Показываем без .0, если оценка целая, иначе с одним знаком после запятой
+    return Number.isInteger(avg) ? String(avg) : avg.toFixed(1);
+}
+
 // Форматирует строку с оценками для отображения под тайтлом
 function formatRatings(title) {
     const ratings = ratingsData[title];
     if (!ratings || ratings.length === 0) return "";
     const sorted = [...ratings].sort((a, b) => a.username.localeCompare(b.username));
-    return "⭐ " + sorted.map(r => `${r.username}: ${r.score}/10`).join("   •   ");
+    let result = "⭐ " + sorted.map(r => `${r.username}: ${r.score}/10`).join("   •   ");
+    if (ratings.length > 1) {
+        result += `   •   Среднее ${getAverageRating(title)}`;
+    }
+    return result;
 }
 
 // Лёгкое обновление только блоков с оценками (без полной перерисовки экрана)
@@ -766,7 +780,8 @@ function performCatalogSearch(query, filters = {}) {
                 if (filters.hasRating === "no" && ratings.length > 0) return;
                 if (filters.minStars) {
                     const minStarsNum = parseInt(filters.minStars, 10);
-                    const qualifies = ratings.some(r => r.score >= minStarsNum);
+                    const avg = getAverageRating(fullTitle);
+                    const qualifies = avg !== null && parseFloat(avg) >= minStarsNum;
                     if (!qualifies) return;
                 }
 
