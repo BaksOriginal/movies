@@ -587,92 +587,31 @@ button:nth-child(6){
     background: #e0e0e0;
 }
 
-/* ===================================
-   ЧАТ МЕЖДУ ПОЛЬЗОВАТЕЛЯМИ
-   =================================== */
-.chat-box {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-height: 55vh;
-    overflow-y: auto;
-    padding: 10px 5px;
-    margin-bottom: 12px;
-    background: rgba(255,255,255,0.5);
-    border-radius: 18px;
+/* Нежно-золотая кнопка секретной категории */
+.btn-secret-gold {
+    background: linear-gradient(135deg, #fff3d6, #ffe9b3) !important;
+    color: #8a6a1f !important;
+    box-shadow: 0 6px 18px rgba(212, 175, 55, 0.25) !important;
 }
 
-.chat-bubble {
-    max-width: 78%;
-    padding: 10px 14px;
-    border-radius: 16px;
-    box-shadow: 0 4px 12px rgba(180,80,120,0.12);
-    text-align: left;
-    animation: fadeUp 0.25s ease both;
+.btn-secret-gold:hover {
+    background: linear-gradient(135deg, #ffe9b3, #ffdf99) !important;
 }
 
-.chat-bubble-mine {
-    align-self: flex-end;
-    background: #9b4f70;
-    color: white;
-    border-bottom-right-radius: 4px;
+.btn-secret-gold:active {
+    background: #ffdf99 !important;
 }
 
-.chat-bubble-theirs {
-    align-self: flex-start;
-    background: white;
-    color: #4a3040;
-    border-bottom-left-radius: 4px;
+/* Нежно-фиолетовая кнопка чата */
+.btn-chat-purple {
+    background: #ece0fa !important;
+    color: #6a3fa0 !important;
 }
 
-.chat-meta {
-    font-size: 11px;
-    opacity: 0.75;
-    margin-bottom: 4px;
-    font-weight: 600;
+.btn-chat-purple:hover {
+    background: #e0d0f7 !important;
 }
 
-.chat-text {
-    font-size: 15px;
-    word-break: break-word;
-    white-space: pre-wrap;
-}
-
-.chat-input-row {
-    display: flex;
-    gap: 8px;
-    width: 100%;
-}
-
-.chat-input-row input {
-    flex-grow: 1;
-    padding: 12px 14px;
-    border: 1px solid #ffdce5;
-    border-radius: 20px;
-    font-size: 15px;
-    outline: none;
-    color: #4a3040;
-}
-
-#chatSendBtn {
-    width: 46px !important;
-    height: 46px !important;
-    min-height: 46px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border-radius: 50% !important;
-    background: #9b4f70 !important;
-    color: white !important;
-    font-size: 18px !important;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    flex-shrink: 0;
-}
-
-/* ===================================
-   КНОПКА-ШЕСТЕРЁНКА И МОДАЛКА ФИЛЬТРОВ
-   =================================== */
-#searchFilterBtn:hover {
-    transform: translateY(-2px);
+.btn-chat-purple:active {
+    background: #d5bdf2 !important;
 }
