@@ -521,107 +521,55 @@ function getLevenshteinDistance(a, b) {
 }
 
 function performCatalogSearch(query) {
-    const searchStr = query.toLowerCase().trim();
-    const results = [];
+    currentCategoryName = "🔍 Результаты поиска";
     
-    for (let catKey in dbData) {
-        if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) {
-            continue;
-        }
+    let results = [];
+    const q = query.toLowerCase().trim();
 
-        // Фильтр по категории
-        if (filterCategory && catKey !== filterCategory) {
-            continue;
-        }
+    // Обходим дерево категорий и жанров из dbData
+    for (let cat in dbData) {
+        for (let gen in dbData[cat]) {
+            dbData[cat][gen].forEach(movie => {
+                // 1. Фильтр по поисковому тексту (название или жанр)
+                const matchesQuery = !q || 
+                    movie.title.toLowerCase().includes(q) || 
+                    gen.toLowerCase().includes(q);
 
-        const categoryData = dbData[catKey];
-        for (let genreKey in categoryData) {
-            // Фильтр по жанру
-            if (filterGenre && genreKey !== filterGenre) {
-                continue;
-            }
+                // 2. Фильтр по Категории
+                const matchesCategory = !filterCategory || cat === filterCategory;
 
-            const listOrObj = categoryData[genreKey];
+                // 3. Фильтр по Жанру
+                const matchesGenre = !filterGenre || gen === filterGenre;
 
-            const processTitle = (fullTitle, franchiseName = null) => {
-                const matchYear = fullTitle.match(/\((\d{4})\)$/);
-                const itemYear = matchYear ? matchYear[1] : "";
+                // 4. Фильтр по Году
+                const matchesYear = !filterYear || (movie.year && movie.year.toString() === filterYear);
 
-                // Фильтр по году
-                if (filterYear && itemYear !== filterYear) {
-                    return;
+                // Получаем оценку текущего авторизованного пользователя
+                const hasUserRating = watchedTitles.has(movie.title);
+                const userRatingVal = userRatings[movie.title] || 0;
+
+                // 5. Фильтр по наличию оценки
+                let matchesHasRating = true;
+                if (filterHasRating === "rated") {
+                    matchesHasRating = hasUserRating;
+                } else if (filterHasRating === "unrated") {
+                    matchesHasRating = !hasUserRating;
                 }
 
-                // Расчет оценок
-                const itemRatings = allRatings.filter(r => r.title === fullTitle);
-                const hasRatings = itemRatings.length > 0;
-                const avgRating = hasRatings ? (itemRatings.reduce((sum, r) => sum + r.rating, 0) / itemRatings.length) : 0;
+                // 6. Фильтр по минимальной оценке
+                const matchesMinRating = !filterMinRating || (hasUserRating && userRatingVal >= parseInt(filterMinRating));
 
-                // Фильтр "Есть ли оценка"
-                if (filterHasRating === "yes" && !hasRatings) return;
-                if (filterHasRating === "no" && hasRatings) return;
-
-                // Фильтр "Минимальная оценка"
-                if (filterMinRating && avgRating < parseFloat(filterMinRating)) return;
-
-                // Если поисковой запрос пустой, но применены фильтры — выводим все совпавшие
-                if (!searchStr) {
-                    results.push({ title: fullTitle, score: 0 });
-                    return;
+                if (matchesQuery && matchesCategory && matchesGenre && matchesYear && matchesHasRating && matchesMinRating) {
+                    results.push(movie);
                 }
-
-                const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
-                
-                if (cleanTitle.includes(searchStr) || 
-                    (franchiseName && franchiseName.toLowerCase().includes(searchStr)) ||
-                    genreKey.toLowerCase().includes(searchStr)) {
-                    results.push({ title: fullTitle, score: 0 });
-                    return;
-                }
-
-                const queryWords = searchStr.split(/\s+/);
-                const titleWords = cleanTitle.split(/\s+/);
-
-                let totalDistance = 0;
-                let matchesCount = 0;
-
-                queryWords.forEach(qw => {
-                    let bestWordDist = 999;
-                    titleWords.forEach(tw => {
-                        const dist = getLevenshteinDistance(qw, tw);
-                        if (dist < bestWordDist) {
-                            bestWordDist = dist;
-                        }
-                    });
-
-                    const maxAllowedErrors = qw.length <= 4 ? 1 : 2;
-
-                    if (bestWordDist <= maxAllowedErrors) {
-                        totalDistance += bestWordDist;
-                        matchesCount++;
-                    }
-                });
-
-                if (matchesCount === queryWords.length) {
-                    results.push({ title: fullTitle, score: totalDistance + 1 });
-                }
-            };
-
-            if (Array.isArray(listOrObj)) {
-                listOrObj.forEach(item => {
-                    if (typeof item === 'string') {
-                        processTitle(item);
-                    } else if (typeof item === 'object' && item !== null) {
-                        for (let franchiseName in item) {
-                            item[franchiseName].forEach(subTitle => {
-                                processTitle(subTitle, franchiseName);
-                            });
-                        }
-                    }
-                });
-            }
+            });
         }
     }
+
+    // Вместо полного перерисовывания всего экрана через showHome,
+    // мы обновляем только список фильмов, не трогая фокус в инпуте!
+    openData(results, false); 
+}
 
     results.sort((a, b) => a.score - b.score);
 
@@ -744,13 +692,11 @@ async function showHome() {
             box-sizing: border-box;
         `;
 
-        // Функция мгновенного поиска
         const triggerSearch = () => {
             const q = searchInput.value;
-            if (q.trim()) {
+            if (q.trim() || filterCategory || filterGenre || filterYear || filterMinRating || filterHasRating !== "all") {
                 performCatalogSearch(q);
             } else {
-                // Если строку стерли полностью, возвращаем обычный главный экран
                 showHome();
             }
         };
