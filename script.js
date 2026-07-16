@@ -85,6 +85,7 @@ let searchFilters = { category: "", genre: "", year: "", hasRating: "", minStars
 // Состояние чата
 let chatMessages = [];
 let isChatScreenOpen = false;
+let chatPollInterval = null;
 
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
@@ -770,6 +771,10 @@ function showFilterModal(onApply) {
 async function showHome() {
     startTransitionLock();
     isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
     history = [];
     currentCategoryName = null;
     await loadCatalogFromDB();
@@ -1260,6 +1265,10 @@ function showRatingModal(itemText) {
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
     if (saveHistory) {
         history.push(content);
     }
@@ -1451,13 +1460,22 @@ async function showChatScreen() {
         chatInput.focus();
 
         const username = getUsernameFromEmail(currentUser.email);
-        const { error } = await db.from('chat_messages').insert([
-            { user_id: currentUser.id, username: username, message: text }
-        ]);
+        const { data, error } = await db.from('chat_messages')
+            .insert([{ user_id: currentUser.id, username: username, message: text }])
+            .select()
+            .single();
 
         if (error) {
             console.error("Ошибка при отправке сообщения:", error);
             alert("Не удалось отправить сообщение.");
+            return;
+        }
+
+        // Показываем сообщение сразу же, не дожидаясь realtime-события
+        if (data) {
+            chatMessages.push(data);
+            if (chatMessages.length > 150) chatMessages.shift();
+            renderChatMessages();
         }
     };
 
@@ -1476,6 +1494,14 @@ async function showChatScreen() {
     await loadChatMessages();
     renderChatMessages();
 
+    // Подстраховка на случай проблем с realtime: обновляем чат каждые 4 секунды
+    if (chatPollInterval) clearInterval(chatPollInterval);
+    chatPollInterval = setInterval(async () => {
+        if (!isChatScreenOpen) return;
+        await loadChatMessages();
+        renderChatMessages();
+    }, 4000);
+
     // Собственная навигация чата — не трогает историю поиска/каталога
     let nav = document.createElement("div");
     nav.className = "navigation";
@@ -1484,6 +1510,10 @@ async function showChatScreen() {
     homeBtn.textContent = "🏠 Домой";
     homeBtn.onclick = () => {
         isChatScreenOpen = false;
+        if (chatPollInterval) {
+            clearInterval(chatPollInterval);
+            chatPollInterval = null;
+        }
         showHome();
     };
 
