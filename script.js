@@ -575,285 +575,241 @@ function performCatalogSearch(query) {
 // Главная страница
 async function showHome() {
     startTransitionLock();
-    history = [];
-    currentCategoryName = null;
-    await loadCatalogFromDB();
-    
-    let nav = document.querySelector(".navigation");
-    if (nav) nav.remove();
+    currentCategoryName = "";
+    history = [null];
 
     app.innerHTML = "";
 
-    const createIconButton = (icon, onClick) => {
-        let btn = document.createElement("button");
-        btn.textContent = icon;
-        btn.style.cssText = `
-            width: 40px !important; height: 40px !important;
-            min-width: 40px !important; min-height: 40px !important;
-            padding: 0 !important; margin: 0 !important;
-            border-radius: 50% !important; display: flex !important;
-            justify-content: center !important; align-items: center !important;
-            cursor: pointer !important; border: 1px solid #ccc !important;
-            background: #f9f9f9 !important; font-size: 16px !important;
-            box-sizing: border-box !important; overflow: visible !important;
-            line-height: 1 !important; flex-shrink: 0 !important;
-        `;
-        btn.onclick = onClick;
-        return btn;
+    // Приветствие и статистика
+    let welcomeDiv = document.createElement("div");
+    welcomeDiv.style.marginBottom = "25px";
+
+    let helloH1 = document.createElement("h1");
+    helloH1.textContent = "Привет, любимая! 💕";
+    helloH1.style.marginBottom = "5px";
+    welcomeDiv.appendChild(helloH1);
+
+    let statsP = document.createElement("p");
+    statsP.style.color = "#888";
+    statsP.style.fontSize = "14px";
+    statsP.style.margin = "0";
+
+    const totalWatched = watchedTitles.size;
+    const totalWishlist = wishlistTitles.size;
+    statsP.innerHTML = `Просмотрено фильмов: <strong style="color: #9b4f70;">${totalWatched}</strong> | В планах: <strong style="color: #2196f3;">${totalWishlist}</strong>`;
+    welcomeDiv.appendChild(statsP);
+
+    app.appendChild(welcomeDiv);
+
+    // ==========================================
+    // СТАБИЛЬНЫЙ БЛОК ПОИСКА И ФИЛЬТРОВ (ШЕСТЕРЕНКА)
+    // ==========================================
+    let searchContainer = document.createElement("div");
+    searchContainer.style.cssText = `
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        width: 100%;
+        box-sizing: border-box;
+    `;
+
+    let searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.id = "searchInputEl";
+    searchInput.placeholder = "Поиск по названию или жанру...";
+    searchInput.style.cssText = `
+        flex-grow: 1;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        font-size: 14px;
+        box-sizing: border-box;
+    `;
+
+    // Функция мгновенного поиска по тексту + фильтрам
+    const triggerSearch = () => {
+        const q = searchInput.value;
+        if (q.trim() || filterCategory || filterGenre || filterYear || filterMinRating || filterHasRating !== "all") {
+            performCatalogSearch(q);
+        } else {
+            // Если все поля пустые — показываем обычный главный экран
+            showHome();
+        }
     };
 
-    if (currentUser) {
-        let header = document.createElement("div");
-        header.className = "user-header";
-        header.style.display = "flex";
-        header.style.justifyContent = "space-between";
-        header.style.alignItems = "center";
-        header.style.marginBottom = "15px";
+    // Мгновенный поиск при вводе без перезагрузки всей страницы
+    searchInput.oninput = triggerSearch;
 
-        header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${currentUser.email}</span>`;
+    // Кнопка поиска 🔍
+    let searchSubmitBtn = document.createElement("button");
+    searchSubmitBtn.textContent = "🔍";
+    searchSubmitBtn.style.cssText = `
+        width: 42px !important;
+        height: 42px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 8px !important;
+        background: #e3f2fd !important;
+        border: 1px solid #bbdefb !important;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-shrink: 0;
+        box-sizing: border-box;
+    `;
+    searchSubmitBtn.onclick = triggerSearch;
+
+    // Кнопка фильтров ⚙️ (Шестеренка) в таком же стиле
+    let filterBtn = document.createElement("button");
+    filterBtn.textContent = "⚙️";
+    filterBtn.style.cssText = `
+        width: 42px !important;
+        height: 42px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 8px !important;
+        background: #e3f2fd !important;
+        border: 1px solid #bbdefb !important;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-shrink: 0;
+        box-sizing: border-box;
+    `;
+
+    searchContainer.appendChild(searchInput);
+    searchContainer.appendChild(searchSubmitBtn);
+    searchContainer.appendChild(filterBtn);
+    app.appendChild(searchContainer);
+
+    // Панель фильтров (изначально скрыта)
+    let filterPanel = document.createElement("div");
+    filterPanel.style.cssText = `
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        background: #fff0f5;
+        padding: 12px;
+        border: 1px solid #f8bbd0;
+        border-radius: 8px;
+        margin-bottom: 12px;
+    `;
+    filterPanel.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="color:#9b4f70;">Фильтры поиска</strong>
+            <button id="fReset" style="background:none; border:none; color:#d81b60; cursor:pointer; font-size:12px; font-weight:bold;">Сбросить все</button>
+        </div>
         
-        let controls = document.createElement("div");
-        controls.style.display = "flex";
-        controls.style.alignItems = "center";
-        controls.style.gap = "10px";
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <select id="fCategory" style="padding:6px; border-radius:6px; border:1px solid #f8bbd0; font-size:12px;">
+                <option value="">Все категории</option>
+                <option value="Фильмы">Фильмы</option>
+                <option value="Сериалы">Сериалы</option>
+                <option value="Аниме">Аниме</option>
+                <option value="Дорамы">Дорамы</option>
+                <option value="Мультфильмы">Мультфильмы</option>
+            </select>
+            <select id="fGenre" style="padding:6px; border-radius:6px; border:1px solid #f8bbd0; font-size:12px;">
+                <option value="">Все жанры</option>
+                <option value="Комедия">Комедия</option>
+                <option value="Драма">Драма</option>
+                <option value="Мелодрама">Мелодрама</option>
+                <option value="Фантастика">Фантастика</option>
+                <option value="Ужасы">Ужасы</option>
+                <option value="Триллер">Триллер</option>
+                <option value="Детектив">Детектив</option>
+                <option value="Боевик">Боевик</option>
+                <option value="Приключения">Приключения</option>
+                <option value="Фэнтези">Фэнтези</option>
+                <option value="Мультфильм">Мультфильм</option>
+            </select>
+        </div>
 
-        let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
-            const audio = document.getElementById("bgMusic");
-            if (audio.paused) { audio.play(); isMusicPlaying = true; localStorage.setItem("musicEnabled", "true"); musicBtn.textContent = "🔊"; }
-            else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
-        });
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+            <input type="number" id="fYear" placeholder="Год (например, 2024)" style="padding:6px; border-radius:6px; border:1px solid #f8bbd0; font-size:12px;">
+            <select id="fHasRating" style="padding:6px; border-radius:6px; border:1px solid #f8bbd0; font-size:12px;">
+                <option value="all">Все (оцененные и нет)</option>
+                <option value="rated">Только оцененные мной</option>
+                <option value="unrated">Без оценки</option>
+            </select>
+        </div>
 
-        let logoutBtn = createIconButton("❌", () => db.auth.signOut());
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:12px; color:#666;">Мин. оценка:</span>
+            <input type="number" id="fMinRating" min="1" max="10" placeholder="1-10" style="width:60px; padding:6px; border-radius:6px; border:1px solid #f8bbd0; font-size:12px;">
+        </div>
+    `;
+    app.appendChild(filterPanel);
 
-        controls.appendChild(musicBtn);
-        controls.appendChild(logoutBtn);
-        header.appendChild(controls);
-        app.appendChild(header);
+    // Логика открытия/закрытия фильтров по клику на шестеренку
+    filterBtn.onclick = () => {
+        filterPanel.style.display = filterPanel.style.display === "none" ? "flex" : "none";
+    };
+
+    // Слушатели изменений фильтров
+    filterPanel.querySelector("#fCategory").onchange = (e) => {
+        filterCategory = e.target.value;
+        triggerSearch();
+    };
+    filterPanel.querySelector("#fGenre").onchange = (e) => {
+        filterGenre = e.target.value;
+        triggerSearch();
+    };
+    filterPanel.querySelector("#fYear").oninput = (e) => {
+        filterYear = e.target.value;
+        triggerSearch();
+    };
+    filterPanel.querySelector("#fHasRating").onchange = (e) => {
+        filterHasRating = e.target.value;
+        triggerSearch();
+    };
+    filterPanel.querySelector("#fMinRating").oninput = (e) => {
+        filterMinRating = e.target.value;
+        triggerSearch();
+    };
+    filterPanel.querySelector("#fReset").onclick = () => {
+        filterCategory = "";
+        filterGenre = "";
+        filterYear = "";
+        filterHasRating = "all";
+        filterMinRating = "";
+        filterPanel.querySelector("#fCategory").value = "";
+        filterPanel.querySelector("#fGenre").value = "";
+        filterPanel.querySelector("#fYear").value = "";
+        filterPanel.querySelector("#fHasRating").value = "all";
+        filterPanel.querySelector("#fMinRating").value = "";
+        searchInput.value = "";
+        triggerSearch();
+    };
+
+    // Второй сплиттер HR
+    let hrAfterSearch = document.createElement("hr");
+    hrAfterSearch.style.border = "0";
+    hrAfterSearch.style.borderTop = "2px solid #9b4f70";
+    hrAfterSearch.style.margin = "15px 0 20px 0";
+    app.appendChild(hrAfterSearch);
+
+    // Категории
+    for (let category in dbData) {
+        let catBtn = document.createElement("button");
+        catBtn.className = "category-btn";
+        catBtn.textContent = category;
+        catBtn.onclick = () => {
+            currentCategoryName = category;
+            openCategory(category);
+        };
+        app.appendChild(catBtn);
     }
 
-    let title = document.createElement("h1");
-    title.textContent = "Время Кино!";
-    app.appendChild(title);
-
-    if (currentUser) {
-        let addBtn = document.createElement("button");
-        addBtn.className = "btn-add-new";
-        addBtn.textContent = "➕ Добавить тайтл";
-        addBtn.style.background = "#e3f2fd";
-        addBtn.style.color = "#0d47a1";
-        addBtn.style.marginBottom = "10px";
-        addBtn.onclick = () => showAddEditModal();
-        app.appendChild(addBtn);
-        
-        let hr = document.createElement("hr");
-        hr.style.border = "0";
-        hr.style.borderTop = "2px solid #9b4f70"; 
-        hr.style.margin = "15px 0";
-        app.appendChild(hr);
-
-        // ПОИСК И ФИЛЬТРЫ
-        // ПОИСК И ФИЛЬТРЫ (ШЕСТЕРЕНКА)
-        // ==========================================
-        // БЛОК ПОИСКА И ФИЛЬТРОВ (ШЕСТЕРЕНКА)
-        // ==========================================
-        let searchContainer = document.createElement("div");
-        searchContainer.style.cssText = `
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-            width: 100%;
-            box-sizing: border-box;
-        `;
-
-        let searchInput = document.createElement("input");
-        searchInput.type = "text";
-        searchInput.id = "searchInputEl"; // Индификатор для сохранения фокуса
-        searchInput.placeholder = "Поиск по названию или жанру...";
-        searchInput.style.cssText = `
-            flex-grow: 1;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            font-size: 14px;
-            box-sizing: border-box;
-        `;
-
-        const triggerSearch = () => {
-            const q = searchInput.value;
-            if (q.trim() || filterCategory || filterGenre || filterYear || filterMinRating || filterHasRating !== "all") {
-                performCatalogSearch(q);
-            } else {
-                showHome();
-            }
-        };
-
-        // Живой поиск при вводе текста без блокировки ввода!
-        searchInput.oninput = triggerSearch;
-
-        // Кнопка поиска (лупа)
-        let searchSubmitBtn = document.createElement("button");
-        searchSubmitBtn.textContent = "🔍";
-        searchSubmitBtn.style.cssText = `
-            width: 42px !important;
-            height: 42px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border-radius: 8px !important;
-            background: #e3f2fd !important;
-            border: 1px solid #bbdefb !important;
-            cursor: pointer;
-            font-size: 16px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-shrink: 0;
-            box-sizing: border-box;
-        `;
-        searchSubmitBtn.onclick = triggerSearch;
-
-        // Кнопка фильтров (шестеренка), оформленная 1-в-1 как лупа
-        let filterBtn = document.createElement("button");
-        filterBtn.textContent = "⚙️";
-        filterBtn.style.cssText = `
-            width: 42px !important;
-            height: 42px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border-radius: 8px !important;
-            background: #e3f2fd !important;
-            border: 1px solid #bbdefb !important;
-            cursor: pointer;
-            font-size: 16px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-shrink: 0;
-            box-sizing: border-box;
-        `;
-        
-        // Обработчик для шестеренки
-        filterBtn.onclick = () => {
-            // Если у тебя будет функция открытия панели фильтров, пропиши ее вызов здесь.
-            // Сейчас просто оставим заглушку или сброс строки поиска.
-            searchInput.value = "";
-            showHome();
-        };
-
-        searchContainer.appendChild(searchInput);
-        searchContainer.appendChild(searchSubmitBtn);
-        searchContainer.appendChild(filterBtn);
-        app.appendChild(searchContainer);
-
-        // Контейнер панели фильтров (скрыт по умолчанию)
-        let filterPanel = document.createElement("div");
-        filterPanel.className = "filter-panel";
-        filterPanel.style.display = "none";
-
-        // Собираем данные для списков фильтрации
-        const allGenres = new Set();
-        const allCategories = new Set();
-        const allYears = new Set();
-
-        for (let catKey in dbData) {
-            if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) continue;
-            allCategories.add(catKey);
-            for (let genKey in dbData[catKey]) {
-                allGenres.add(genKey);
-                const items = dbData[catKey][genKey];
-                const processArr = (arr) => {
-                    arr.forEach(i => {
-                        if (typeof i === 'string') {
-                            const match = i.match(/\((\d{4})\)$/);
-                            if (match) allYears.add(match[1]);
-                        } else if (typeof i === 'object') {
-                            for (let f in i) processArr(i[f]);
-                        }
-                    });
-                };
-                if (Array.isArray(items)) processArr(items);
-            }
-        }
-
-        filterPanel.innerHTML = `
-            <div class="filter-row">
-                <select id="fCategory">
-                    <option value="">Все категории</option>
-                    ${Array.from(allCategories).sort().map(c => `<option value="${c}" ${filterCategory === c ? 'selected' : ''}>${c}</option>`).join("")}
-                </select>
-                <select id="fGenre">
-                    <option value="">Все жанры</option>
-                    ${Array.from(allGenres).sort().map(g => `<option value="${g}" ${filterGenre === g ? 'selected' : ''}>${g}</option>`).join("")}
-                </select>
-            </div>
-            <div class="filter-row">
-                <select id="fYear">
-                    <option value="">Все года</option>
-                    ${Array.from(allYears).sort((a,b) => b-a).map(y => `<option value="${y}" ${filterYear === y ? 'selected' : ''}>${y}</option>`).join("")}
-                </select>
-                <select id="fHasRating">
-                    <option value="all" ${filterHasRating === 'all' ? 'selected' : ''}>Оценка: Любая</option>
-                    <option value="yes" ${filterHasRating === 'yes' ? 'selected' : ''}>Есть оценка</option>
-                    <option value="no" ${filterHasRating === 'no' ? 'selected' : ''}>Без оценки</option>
-                </select>
-                <select id="fMinRating">
-                    <option value="">Балл: Любой</option>
-                    ${Array.from({length: 10}, (_, i) => `<option value="${i+1}" ${filterMinRating == (i+1) ? 'selected' : ''}>От ${i+1} ★</option>`).join("")}
-                </select>
-            </div>
-            <div style="display: flex; gap: 10px; margin-top: 5px;">
-                <button id="fReset" class="btn-cancel-gray" style="flex: 1; min-height: 35px; padding: 5px; font-size: 13px; border-radius: 8px;">Сбросить фильтры</button>
-            </div>
-        `;
-
-        app.appendChild(filterPanel);
-
-        // Логика открытия/закрытия фильтров
-        filterBtn.onclick = () => {
-            filterPanel.style.display = filterPanel.style.display === "none" ? "flex" : "none";
-        };
-
-        // Слушатели изменений фильтров
-        filterPanel.querySelector("#fCategory").onchange = (e) => {
-            filterCategory = e.target.value;
-            triggerSearch();
-        };
-        filterPanel.querySelector("#fGenre").onchange = (e) => {
-            filterGenre = e.target.value;
-            triggerSearch();
-        };
-        filterPanel.querySelector("#fYear").onchange = (e) => {
-            filterYear = e.target.value;
-            triggerSearch();
-        };
-        filterPanel.querySelector("#fHasRating").onchange = (e) => {
-            filterHasRating = e.target.value;
-            triggerSearch();
-        };
-        filterPanel.querySelector("#fMinRating").onchange = (e) => {
-            filterMinRating = e.target.value;
-            triggerSearch();
-        };
-        filterPanel.querySelector("#fReset").onclick = () => {
-            filterCategory = "";
-            filterGenre = "";
-            filterYear = "";
-            filterHasRating = "all";
-            filterMinRating = "";
-            filterPanel.querySelector("#fCategory").value = "";
-            filterPanel.querySelector("#fGenre").value = "";
-            filterPanel.querySelector("#fYear").value = "";
-            filterPanel.querySelector("#fHasRating").value = "all";
-            filterPanel.querySelector("#fMinRating").value = "";
-            searchInput.value = "";
-            triggerSearch();
-        };
-
-        let hrAfterSearch = document.createElement("hr");
-        hrAfterSearch.style.border = "0";
-        hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
-        hrAfterSearch.style.margin = "15px 0 20px 0";
-        app.appendChild(hrAfterSearch);
+    // Сохраняем фокус, если пользователь вводил текст до рендера
+    if (searchInput.value) {
+        searchInput.focus();
     }
+}
 
     // Рендерим кнопки категорий
     for (let key in dbData) {
