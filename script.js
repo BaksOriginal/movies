@@ -876,17 +876,31 @@ async function showHome() {
         app.appendChild(filterPanel);
 
         // Логика открытия/закрытия фильтров
-        filterToggleBtn.onclick = () => {
+        filterBtn.onclick = () => {
             filterPanel.style.display = filterPanel.style.display === "none" ? "flex" : "none";
         };
 
         // Слушатели изменений фильтров
-        filterPanel.querySelector("#fCategory").onchange = (e) => { filterCategory = e.target.value; doSearch(); };
-        filterPanel.querySelector("#fGenre").onchange = (e) => { filterGenre = e.target.value; doSearch(); };
-        filterPanel.querySelector("#fYear").onchange = (e) => { filterYear = e.target.value; doSearch(); };
-        filterPanel.querySelector("#fHasRating").onchange = (e) => { filterHasRating = e.target.value; doSearch(); };
-        filterPanel.querySelector("#fMinRating").onchange = (e) => { filterMinRating = e.target.value; doSearch(); };
-        
+        filterPanel.querySelector("#fCategory").onchange = (e) => {
+            filterCategory = e.target.value;
+            triggerSearch();
+        };
+        filterPanel.querySelector("#fGenre").onchange = (e) => {
+            filterGenre = e.target.value;
+            triggerSearch();
+        };
+        filterPanel.querySelector("#fYear").onchange = (e) => {
+            filterYear = e.target.value;
+            triggerSearch();
+        };
+        filterPanel.querySelector("#fHasRating").onchange = (e) => {
+            filterHasRating = e.target.value;
+            triggerSearch();
+        };
+        filterPanel.querySelector("#fMinRating").onchange = (e) => {
+            filterMinRating = e.target.value;
+            triggerSearch();
+        };
         filterPanel.querySelector("#fReset").onclick = () => {
             filterCategory = "";
             filterGenre = "";
@@ -899,7 +913,7 @@ async function showHome() {
             filterPanel.querySelector("#fHasRating").value = "all";
             filterPanel.querySelector("#fMinRating").value = "";
             searchInput.value = "";
-            doSearch();
+            triggerSearch();
         };
 
         let hrAfterSearch = document.createElement("hr");
