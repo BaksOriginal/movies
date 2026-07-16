@@ -134,6 +134,17 @@ let isAppInitialized = false;
 
 // Слушатель событий авторизации
 db.auth.onAuthStateChange(async (event, session) => {
+    // Supabase сам слушает возврат фокуса на вкладку / разблокировку экрана
+    // и переотправляет события авторизации (TOKEN_REFRESHED, повторный SIGNED_IN
+    // и т.п.), хотя пользователь на самом деле никуда не уходил.
+    // Если это тот же пользователь и приложение уже открыто — просто тихо
+    // обновляем токен в фоне и НЕ трогаем текущий экран.
+    if (session && isAppInitialized && currentUser && currentUser.id === session.user.id) {
+        currentUser = session.user;
+        saveSessionBackup(session);
+        return;
+    }
+
     if (session) {
         currentUser = session.user;
         saveSessionBackup(session); // Бэкапим сессию
@@ -1384,39 +1395,82 @@ function formatChatTime(isoString) {
     return `${datePart}, ${timePart}`;
 }
 
-// Отрисовка списка сообщений внутри открытого чата
+// Создаёт один DOM-элемент сообщения (используется рендером ниже)
+function createChatBubble(msg) {
+    let bubble = document.createElement("div");
+    const isMine = currentUser && msg.user_id === currentUser.id;
+    bubble.className = "chat-bubble " + (isMine ? "chat-bubble-mine" : "chat-bubble-theirs");
+    bubble.dataset.msgId = msg.id;
+
+    let meta = document.createElement("div");
+    meta.className = "chat-meta";
+    meta.textContent = `${msg.username} • ${formatChatTime(msg.created_at)}`;
+
+    let text = document.createElement("div");
+    text.className = "chat-text";
+    text.textContent = msg.message;
+
+    bubble.appendChild(meta);
+    bubble.appendChild(text);
+    return bubble;
+}
+
+// Отрисовка списка сообщений внутри открытого чата.
+// Важно: не пересоздаём весь список при каждом обновлении (это давало
+// "моргание" каждые несколько секунд из-за опроса/realtime), а только
+// добавляем новые сообщения и убираем удалённые — уже отрисованные
+// сообщения не трогаем.
 function renderChatMessages() {
     const box = document.getElementById("chatBox");
     if (!box) return;
 
-    box.innerHTML = "";
-
+    // Пустое состояние
     if (chatMessages.length === 0) {
-        let empty = document.createElement("p");
-        empty.style.cssText = "text-align:center;color:#999;margin-top:20px;font-size:14px;";
-        empty.textContent = "Сообщений пока нет. Напишите первым!";
-        box.appendChild(empty);
-    } else {
-        chatMessages.forEach(msg => {
-            let bubble = document.createElement("div");
-            const isMine = currentUser && msg.user_id === currentUser.id;
-            bubble.className = "chat-bubble " + (isMine ? "chat-bubble-mine" : "chat-bubble-theirs");
-
-            let meta = document.createElement("div");
-            meta.className = "chat-meta";
-            meta.textContent = `${msg.username} • ${formatChatTime(msg.created_at)}`;
-
-            let text = document.createElement("div");
-            text.className = "chat-text";
-            text.textContent = msg.message;
-
-            bubble.appendChild(meta);
-            bubble.appendChild(text);
-            box.appendChild(bubble);
-        });
+        if (box.dataset.rendered !== "empty") {
+            box.innerHTML = "";
+            let empty = document.createElement("p");
+            empty.style.cssText = "text-align:center;color:#999;margin-top:20px;font-size:14px;";
+            empty.textContent = "Сообщений пока нет. Напишите первым!";
+            box.appendChild(empty);
+            box.dataset.rendered = "empty";
+        }
+        return;
     }
 
-    box.scrollTop = box.scrollHeight;
+    // Если до этого показывалась заглушка "нет сообщений" — очищаем её один раз
+    if (box.dataset.rendered === "empty") {
+        box.innerHTML = "";
+        box.dataset.rendered = "list";
+    }
+    box.dataset.rendered = "list";
+
+    const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+
+    // Собираем id уже отрисованных сообщений
+    const renderedIds = new Set(
+        Array.from(box.querySelectorAll("[data-msg-id]")).map(el => el.dataset.msgId)
+    );
+    const currentIds = new Set(chatMessages.map(m => String(m.id)));
+
+    // Удаляем из DOM сообщения, которых больше нет в данных (например, удалили)
+    box.querySelectorAll("[data-msg-id]").forEach(el => {
+        if (!currentIds.has(el.dataset.msgId)) el.remove();
+    });
+
+    // Добавляем только новые сообщения, в правильном порядке
+    let addedNew = false;
+    chatMessages.forEach(msg => {
+        if (!renderedIds.has(String(msg.id))) {
+            box.appendChild(createChatBubble(msg));
+            addedNew = true;
+        }
+    });
+
+    // Прокручиваем вниз только если появились новые сообщения и пользователь
+    // и так был у нижнего края (чтобы не сбивать чтение старых сообщений)
+    if (addedNew && wasNearBottom) {
+        box.scrollTop = box.scrollHeight;
+    }
 }
 
 // Экран чата (не связан с историей навигации каталога/поиска)
