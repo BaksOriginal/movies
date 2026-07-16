@@ -571,21 +571,6 @@ function performCatalogSearch(query) {
     openData(results, false); 
 }
 
-    results.sort((a, b) => a.score - b.score);
-
-    const uniqueResults = [];
-    const seen = new Set();
-    results.forEach(r => {
-        if (!seen.has(r.title)) {
-            seen.add(r.title);
-            uniqueResults.push(r.title);
-        }
-    });
-
-    currentCategoryName = "🔍 Результаты поиска";
-    openData(uniqueResults, true, `Результаты поиска (${uniqueResults.length})`);
-}
-
 // Главная страница
 async function showHome() {
     startTransitionLock();
