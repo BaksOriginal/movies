@@ -484,6 +484,33 @@ button:nth-child(6){
 .btn-save { background: #4CAF50; color: white; }
 .btn-cancel { background: #f44336; color: white; }
 
+/* Обёртка строки фильма + оценок под ней */
+.movie-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin: 12px 0;
+}
+
+.movie-item .item-row {
+    margin: 0;
+}
+
+/* Строка с оценками пользователей под фильмом */
+.item-ratings {
+    font-size: 13px;
+    font-weight: 600;
+    color: #9b4f70;
+    text-align: left;
+    padding: 4px 18px 0;
+    min-height: 4px;
+}
+
+/* Кнопка удаления оценки внутри модалки */
+.action-buttons .btn-action-delete {
+    width: 100%;
+}
+
 /* Кнопочки редактирования и удаления в строке фильма */
 .btn-edit, .btn-delete {
     background: none;
