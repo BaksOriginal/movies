@@ -129,6 +129,15 @@ async function tryRestoreSession() {
     return false;
 }
 
+// Настоящий выход из аккаунта. Важно чистить резервную копию сессии
+// (cookie) ДО вызова signOut() — иначе обработчик события SIGNED_OUT
+// тут же находит валидный бэкап в cookie и восстанавливает сессию
+// обратно, и кнопка "Выход" фактически ничего не делает.
+async function performLogout() {
+    saveSessionBackup(null);
+    await db.auth.signOut();
+}
+
 // Флаг, который покажет, загрузилось ли приложение в первый раз
 let isAppInitialized = false;
 
@@ -842,7 +851,7 @@ async function showHome() {
             else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
         });
 
-        let logoutBtn = createIconButton("❌", () => db.auth.signOut());
+        let logoutBtn = createIconButton("❌", performLogout);
 
         controls.appendChild(musicBtn);
         controls.appendChild(logoutBtn);
