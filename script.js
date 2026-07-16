@@ -650,10 +650,11 @@ function buildSearchBar(prefillQuery = "") {
     searchInput.value = prefillQuery;
     searchInput.style.cssText = `
         flex-grow: 1;
-        padding: 10px 14px;
+        min-width: 0;
+        padding: 10px 12px;
         border: 1px solid #ccc;
         border-radius: 8px;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 600;
         font-family: "Segoe UI", Arial, sans-serif;
         color: #9b4f70;
