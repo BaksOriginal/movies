@@ -6,7 +6,7 @@ let titleCreatedAt = {}; // "Название (год)" -> дата добавл
 // ==========================================
 // Получите бесплатный ключ на https://www.themoviedb.org/settings/api
 // и вставьте его сюда вместо заглушки.
-const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
+const TMDB_API_KEY = "ВСТАВЬТЕ_СВОЙ_TMDB_API_KEY";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
@@ -352,13 +352,6 @@ function subscribeToChanges() {
             }
         )
         .subscribe();
-}
-
-// Запрашиваем разрешение на уведомления (один раз, пока оно не выдано/не отклонено)
-function requestNotificationPermission() {
-    if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission();
-    }
 }
 
 // Показываем системное уведомление о новом сообщении в чате, если пользователь
@@ -983,7 +976,6 @@ async function showHome() {
     }
     history = [];
     currentCategoryName = null;
-    if (currentUser) requestNotificationPermission();
     await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
@@ -1030,9 +1022,34 @@ async function showHome() {
             else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
         });
 
+        // Уведомления надо запрашивать по клику пользователя — если делать это
+        // само по себе при загрузке страницы, браузер часто тихо игнорирует
+        // такой запрос и разрешение никогда не выдаётся.
+        const notifIcon = () => {
+            if (!("Notification" in window)) return "🔕";
+            if (Notification.permission === "granted") return "🔔";
+            if (Notification.permission === "denied") return "🔕";
+            return "🔔";
+        };
+        let notifBtn = createIconButton(notifIcon(), () => {
+            if (!("Notification" in window)) {
+                alert("Этот браузер не поддерживает уведомления.");
+                return;
+            }
+            if (Notification.permission === "denied") {
+                alert("Уведомления заблокированы в настройках браузера для этого сайта. Разрешите их вручную в настройках сайта, чтобы получать уведомления о новых сообщениях в чате.");
+                return;
+            }
+            Notification.requestPermission().then(() => {
+                notifBtn.textContent = notifIcon();
+            });
+        });
+        notifBtn.style.opacity = (("Notification" in window) && Notification.permission === "granted") ? "1" : "0.55";
+
         let logoutBtn = createIconButton("❌", performLogout);
 
         controls.appendChild(musicBtn);
+        controls.appendChild(notifBtn);
         controls.appendChild(logoutBtn);
         header.appendChild(controls);
         app.appendChild(header);
