@@ -75,6 +75,7 @@ const app = document.getElementById("app");
 let currentUser = null;
 let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
 let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
+let ratingsData = {}; // Оценки: { "Название (год)": [{ username, score, userId }, ...] }
 let history = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
@@ -130,7 +131,7 @@ db.auth.onAuthStateChange(async (event, session) => {
         saveSessionBackup(session); // Бэкапим сессию
         
         // Загружаем списки просмотренного и вишлиста параллельно
-        Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]).then(() => {
+        Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]).then(() => {
             subscribeToChanges(); 
             
             if (!isAppInitialized) {
@@ -148,6 +149,7 @@ db.auth.onAuthStateChange(async (event, session) => {
         currentUser = null;
         watchedTitles.clear();
         wishlistTitles.clear();
+        ratingsData = {};
         isAppInitialized = false;
         saveSessionBackup(null);
         
@@ -181,6 +183,48 @@ async function loadWishlistFromDB() {
     wishlistTitles = new Set(data.map(item => item.title));
 }
 
+// Загрузка оценок (видны обе оценки — и Asmoday, и Myakish)
+async function loadRatingsFromDB() {
+    const { data, error } = await db.from('ratings').select('title, username, score, user_id');
+    if (error) {
+        console.error("Ошибка при загрузке оценок:", error);
+        return;
+    }
+    const temp = {};
+    data.forEach(r => {
+        if (!temp[r.title]) temp[r.title] = [];
+        temp[r.title].push({ username: r.username, score: r.score, userId: r.user_id });
+    });
+    ratingsData = temp;
+}
+
+// В системе всего 2 пользователя — сопоставляем email с красивым именем
+function getUsernameFromEmail(email) {
+    if (email === "nowyouseemeinvi@gmail.com") return "Myakish";
+    if (email === "unknownqsrll@gmail.com") return "Asmoday";
+    return email || "Аноним";
+}
+
+// Форматирует строку с оценками для отображения под тайтлом
+function formatRatings(title) {
+    const ratings = ratingsData[title];
+    if (!ratings || ratings.length === 0) return "";
+    const sorted = [...ratings].sort((a, b) => a.username.localeCompare(b.username));
+    return "⭐ " + sorted.map(r => `${r.username}: ${r.score}/10`).join("   •   ");
+}
+
+// Лёгкое обновление только блоков с оценками (без полной перерисовки экрана)
+async function refreshRatingsUI() {
+    await loadRatingsFromDB();
+    document.querySelectorAll(".movie-item").forEach(wrapper => {
+        let itemDiv = wrapper.querySelector(".item");
+        let ratingsDiv = wrapper.querySelector(".item-ratings");
+        if (itemDiv && ratingsDiv) {
+            ratingsDiv.textContent = formatRatings(itemDiv.textContent.trim());
+        }
+    });
+}
+
 // Подписка на изменения базы данных в реальном времени (Websockets)
 function subscribeToChanges() {
     if (realtimeChannel) return; 
@@ -199,13 +243,19 @@ function subscribeToChanges() {
             { event: '*', schema: 'public', table: 'wishlist_items' },
             () => { updateUIOnLiveChange(); }
         )
+        // Следим за оценками
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'ratings' },
+            () => { updateUIOnLiveChange(); }
+        )
         .subscribe();
 }
 
 // Живое обновление интерфейса
 async function updateUIOnLiveChange() {
     await loadCatalogFromDB();
-    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]);
+    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
 
     // 1. Обновляем счетчики на кнопках главного экрана
     let buttons = document.querySelectorAll("button");
@@ -218,7 +268,7 @@ async function updateUIOnLiveChange() {
         }
     });
 
-    // 2. Обновляем иконки звездочек
+    // 2. Обновляем иконки звездочек и оценки
     let rows = document.querySelectorAll(".item-row");
     rows.forEach(row => {
         let itemDiv = row.querySelector(".item");
@@ -245,6 +295,15 @@ async function updateUIOnLiveChange() {
             } else {
                 watchBtn.textContent = "☆";
             }
+        }
+    });
+
+    // 3. Обновляем блоки с оценками
+    document.querySelectorAll(".movie-item").forEach(wrapper => {
+        let itemDiv = wrapper.querySelector(".item");
+        let ratingsDiv = wrapper.querySelector(".item-ratings");
+        if (itemDiv && ratingsDiv) {
+            ratingsDiv.textContent = formatRatings(itemDiv.textContent.trim());
         }
     });
 }
@@ -668,6 +727,9 @@ async function showHome() {
 
 // Отрисовка строки элемента (тайтла)
 function renderItemRow(itemText, container) {
+    let wrapper = document.createElement("div");
+    wrapper.className = "movie-item";
+
     let row = document.createElement("div");
     row.className = "item-row";
 
@@ -767,7 +829,16 @@ function renderItemRow(itemText, container) {
         row.appendChild(watchBtn);
     }
 
-    container.appendChild(row);
+    wrapper.appendChild(row);
+
+    if (!isSecret) {
+        let ratingsDiv = document.createElement("div");
+        ratingsDiv.className = "item-ratings";
+        ratingsDiv.textContent = formatRatings(itemText);
+        wrapper.appendChild(ratingsDiv);
+    }
+
+    container.appendChild(wrapper);
 }
 
 // Всплывающее меню выбора действия
@@ -784,6 +855,7 @@ function showActionMenu(itemText) {
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
+                <button class="btn-pink-style" id="actRate">⭐ Оценить</button>
                 <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
                 <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
                 <button class="btn-cancel-gray" id="actCancel">Отмена</button>
@@ -806,6 +878,11 @@ function showActionMenu(itemText) {
         handleEditClick(itemText);
     };
 
+    document.getElementById("actRate").onclick = () => {
+        overlay.remove();
+        showRatingModal(itemText);
+    };
+
     document.getElementById("actDelete").onclick = () => {
         overlay.remove();
         handleDeleteClick(itemText);
@@ -814,6 +891,85 @@ function showActionMenu(itemText) {
     document.getElementById("actCancel").onclick = () => {
         overlay.remove();
     };
+}
+
+// Модальное окно выставления/изменения/удаления оценки
+function showRatingModal(itemText) {
+    if (!currentUser) return;
+
+    const myUsername = getUsernameFromEmail(currentUser.email);
+    const existing = (ratingsData[itemText] || []).find(r => r.userId === currentUser.id);
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "ratingModal";
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 10px;">Оценка (${myUsername})</h3>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <div class="modal-form">
+                <label>Ваша оценка (1-10)</label>
+                <input type="number" id="ratingInput" min="1" max="10" step="1" value="${existing ? existing.score : 8}">
+                <div class="modal-buttons">
+                    <button type="button" class="btn-save" id="ratingSave">Сохранить</button>
+                    <button type="button" class="btn-cancel" id="ratingCancel">Отмена</button>
+                </div>
+                ${existing ? '<div class="action-buttons"><button type="button" class="btn-action-delete" id="ratingDelete">🗑️ Удалить мою оценку</button></div>' : ''}
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("ratingCancel").onclick = () => overlay.remove();
+
+    document.getElementById("ratingSave").onclick = async () => {
+        const raw = document.getElementById("ratingInput").value;
+        const val = parseInt(raw, 10);
+
+        if (isNaN(val) || val < 1 || val > 10) {
+            alert("Пожалуйста, введите оценку от 1 до 10.");
+            return;
+        }
+
+        overlay.remove();
+
+        const { error } = await db.from('ratings').upsert(
+            {
+                title: itemText,
+                user_id: currentUser.id,
+                username: myUsername,
+                score: val,
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'title,user_id' }
+        );
+
+        if (error) {
+            console.error("Ошибка при сохранении оценки:", error);
+            alert("Не удалось сохранить оценку.");
+        } else {
+            refreshRatingsUI();
+        }
+    };
+
+    if (existing) {
+        document.getElementById("ratingDelete").onclick = async () => {
+            overlay.remove();
+            const { error } = await db.from('ratings')
+                .delete()
+                .eq('title', itemText)
+                .eq('user_id', currentUser.id);
+
+            if (error) {
+                console.error("Ошибка при удалении оценки:", error);
+                alert("Не удалось удалить оценку.");
+            } else {
+                refreshRatingsUI();
+            }
+        };
+    }
 }
 
 function openData(content, saveHistory = true, customTitle = null) {
