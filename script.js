@@ -81,6 +81,7 @@ let realtimeChannel = null; // Канал для мгновенных обнов
 
 // Текущие фильтры поиска
 let searchFilters = { category: "", genre: "", year: "", hasRating: "", minStars: "" };
+let lastSearchQuery = ""; // Запоминаем последний текстовый запрос, чтобы показывать его в строке поиска на экране результатов
 
 // Состояние чата
 let chatMessages = [];
@@ -578,9 +579,96 @@ function buildFilterSummary(filters) {
     return parts.join(", ");
 }
 
+// Строит панель поиска (поле ввода + кнопка поиска + кнопка фильтров).
+// Вынесена в отдельную функцию, чтобы её можно было показывать не только
+// на главной, но и на экране результатов поиска — тогда можно искать
+// дальше, не возвращаясь на главную страницу.
+function buildSearchBar(prefillQuery = "") {
+    let searchContainer = document.createElement("div");
+    searchContainer.style.cssText = `
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        width: 100%;
+        box-sizing: border-box;
+    `;
+
+    let searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.placeholder = "Поиск по названию или жанру...";
+    searchInput.value = prefillQuery;
+    searchInput.style.cssText = `
+        flex-grow: 1;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        font-size: 14px;
+        box-sizing: border-box;
+    `;
+
+    let searchSubmitBtn = document.createElement("button");
+    searchSubmitBtn.textContent = "🔍";
+    searchSubmitBtn.style.cssText = `
+        width: 42px !important;
+        height: 42px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 8px !important;
+        background: #f5f5f5 !important;
+        border: 1px solid #ddd !important;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-shrink: 0;
+    `;
+
+    let filterBtn = document.createElement("button");
+    filterBtn.id = "searchFilterBtn";
+    filterBtn.textContent = "⚙️";
+    filterBtn.style.cssText = `
+        width: 42px !important;
+        height: 42px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 8px !important;
+        background: ${hasActiveFilters(searchFilters) ? "#ffe3ec" : "#f5f5f5"} !important;
+        border: 1px solid ${hasActiveFilters(searchFilters) ? "#f48fb1" : "#ddd"} !important;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-shrink: 0;
+    `;
+
+    const doSearch = () => {
+        const q = searchInput.value;
+        if (q.trim() || hasActiveFilters(searchFilters)) {
+            performCatalogSearch(q, searchFilters);
+        }
+    };
+
+    filterBtn.onclick = () => showFilterModal(doSearch);
+
+    searchSubmitBtn.onclick = doSearch;
+    searchInput.onkeydown = (e) => {
+        if (e.key === "Enter") {
+            doSearch();
+        }
+    };
+
+    searchContainer.appendChild(searchInput);
+    searchContainer.appendChild(searchSubmitBtn);
+    searchContainer.appendChild(filterBtn);
+    return searchContainer;
+}
+
 function performCatalogSearch(query, filters = {}) {
     const searchStr = (query || "").toLowerCase().trim();
     const hasQuery = searchStr.length > 0;
+    lastSearchQuery = query || "";
 
     if (!hasQuery && !hasActiveFilters(filters)) return;
 
@@ -881,84 +969,7 @@ async function showHome() {
         app.appendChild(hr);
 
         // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
-        let searchContainer = document.createElement("div");
-        searchContainer.style.cssText = `
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-            width: 100%;
-            box-sizing: border-box;
-        `;
-
-        let searchInput = document.createElement("input");
-        searchInput.type = "text";
-        searchInput.placeholder = "Поиск по названию или жанру...";
-        searchInput.style.cssText = `
-            flex-grow: 1;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            font-size: 14px;
-            box-sizing: border-box;
-        `;
-
-        let searchSubmitBtn = document.createElement("button");
-        searchSubmitBtn.textContent = "🔍";
-        searchSubmitBtn.style.cssText = `
-            width: 42px !important;
-            height: 42px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border-radius: 8px !important;
-            background: #e3f2fd !important;
-            border: 1px solid #bbdefb !important;
-            cursor: pointer;
-            font-size: 16px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-shrink: 0;
-        `;
-
-        let filterBtn = document.createElement("button");
-        filterBtn.id = "searchFilterBtn";
-        filterBtn.textContent = "⚙️";
-        filterBtn.style.cssText = `
-            width: 42px !important;
-            height: 42px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border-radius: 8px !important;
-            background: ${hasActiveFilters(searchFilters) ? "#ffe3ec" : "#f5f5f5"} !important;
-            border: 1px solid ${hasActiveFilters(searchFilters) ? "#f48fb1" : "#ddd"} !important;
-            cursor: pointer;
-            font-size: 16px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-shrink: 0;
-        `;
-
-        const doSearch = () => {
-            const q = searchInput.value;
-            if (q.trim() || hasActiveFilters(searchFilters)) {
-                performCatalogSearch(q, searchFilters);
-            }
-        };
-
-        filterBtn.onclick = () => showFilterModal(doSearch);
-
-        searchSubmitBtn.onclick = doSearch;
-        searchInput.onkeydown = (e) => {
-            if (e.key === "Enter") {
-                doSearch();
-            }
-        };
-
-        searchContainer.appendChild(searchInput);
-        searchContainer.appendChild(searchSubmitBtn);
-        searchContainer.appendChild(filterBtn);
-        app.appendChild(searchContainer);
+        app.appendChild(buildSearchBar());
 
         // Второй сплиттер HR (после Поиска)
         let hrAfterSearch = document.createElement("hr");
@@ -1307,6 +1318,12 @@ function openData(content, saveHistory = true, customTitle = null) {
         let title = document.createElement("h1");
         title.textContent = customTitle;
         app.appendChild(title);
+    }
+
+    // На экране результатов поиска показываем ту же панель поиска —
+    // чтобы можно было искать дальше, не возвращаясь на главную
+    if (currentCategoryName === "🔍 Результаты поиска" && currentUser) {
+        app.appendChild(buildSearchBar(lastSearchQuery));
     }
 
     if (Array.isArray(content)) {
