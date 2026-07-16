@@ -346,30 +346,9 @@ function subscribeToChanges() {
             { event: '*', schema: 'public', table: 'chat_messages' },
             (payload) => {
                 onChatRealtimeChange();
-                if (payload.eventType === 'INSERT' && payload.new && currentUser && payload.new.user_id !== currentUser.id) {
-                    notifyNewChatMessage(payload.new);
-                }
             }
         )
         .subscribe();
-}
-
-// Показываем системное уведомление о новом сообщении в чате, если пользователь
-// прямо сейчас не смотрит в открытый чат на активной вкладке
-function notifyNewChatMessage(msg) {
-    if (!("Notification" in window) || Notification.permission !== "granted") return;
-    if (isChatScreenOpen && !document.hidden) return;
-
-    const notif = new Notification(msg.username || "Новое сообщение", {
-        body: msg.message,
-        tag: "chat-message"
-    });
-
-    notif.onclick = () => {
-        window.focus();
-        showChatScreen();
-        notif.close();
-    };
 }
 
 // Живое обновление интерфейса
@@ -667,14 +646,17 @@ function buildSearchBar(prefillQuery = "") {
 
     let searchInput = document.createElement("input");
     searchInput.type = "text";
-    searchInput.placeholder = "Поиск по названию или жанру...";
+    searchInput.placeholder = "Поиск...";
     searchInput.value = prefillQuery;
     searchInput.style.cssText = `
         flex-grow: 1;
-        padding: 10px;
+        padding: 10px 14px;
         border: 1px solid #ccc;
         border-radius: 8px;
-        font-size: 14px;
+        font-size: 20px;
+        font-weight: 600;
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: #9b4f70;
         box-sizing: border-box;
     `;
 
@@ -1009,7 +991,7 @@ async function showHome() {
         header.style.alignItems = "center";
         header.style.marginBottom = "15px";
 
-        header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${currentUser.email}</span>`;
+        header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${getUsernameFromEmail(currentUser.email)}</span>`;
         
         let controls = document.createElement("div");
         controls.style.display = "flex";
@@ -1022,34 +1004,9 @@ async function showHome() {
             else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
         });
 
-        // Уведомления надо запрашивать по клику пользователя — если делать это
-        // само по себе при загрузке страницы, браузер часто тихо игнорирует
-        // такой запрос и разрешение никогда не выдаётся.
-        const notifIcon = () => {
-            if (!("Notification" in window)) return "🔕";
-            if (Notification.permission === "granted") return "🔔";
-            if (Notification.permission === "denied") return "🔕";
-            return "🔔";
-        };
-        let notifBtn = createIconButton(notifIcon(), () => {
-            if (!("Notification" in window)) {
-                alert("Этот браузер не поддерживает уведомления.");
-                return;
-            }
-            if (Notification.permission === "denied") {
-                alert("Уведомления заблокированы в настройках браузера для этого сайта. Разрешите их вручную в настройках сайта, чтобы получать уведомления о новых сообщениях в чате.");
-                return;
-            }
-            Notification.requestPermission().then(() => {
-                notifBtn.textContent = notifIcon();
-            });
-        });
-        notifBtn.style.opacity = (("Notification" in window) && Notification.permission === "granted") ? "1" : "0.55";
-
         let logoutBtn = createIconButton("❌", performLogout);
 
         controls.appendChild(musicBtn);
-        controls.appendChild(notifBtn);
         controls.appendChild(logoutBtn);
         header.appendChild(controls);
         app.appendChild(header);
@@ -1614,6 +1571,14 @@ function formatChatTime(isoString) {
     return `${datePart}, ${timePart}`;
 }
 
+// Сообщение можно редактировать/удалять только в течение 24 часов после отправки
+const CHAT_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+function canModifyChatMessage(msg) {
+    const createdTime = new Date(msg.created_at).getTime();
+    if (isNaN(createdTime)) return false;
+    return (Date.now() - createdTime) < CHAT_EDIT_WINDOW_MS;
+}
+
 // Создаёт один DOM-элемент сообщения (используется рендером ниже)
 function createChatBubble(msg) {
     let bubble = document.createElement("div");
@@ -1701,30 +1666,49 @@ function attachChatLongPress(el, msg) {
 
 // Меню действий над своим сообщением
 function showChatMessageMenu(msg) {
+    const canModify = canModifyChatMessage(msg);
+
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "chatMsgMenuModal";
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 15px;">Сообщение</h3>
+            ${canModify ? `
             <div class="action-buttons">
                 <button class="btn-action-edit" id="chatMsgEdit">✏️ Редактировать</button>
                 <button class="btn-action-delete" id="chatMsgDelete">🗑️ Удалить</button>
                 <button class="btn-action-cancel" id="chatMsgCancel">Отмена</button>
             </div>
+            ` : `
+            <p style="color: #777; font-size: 14px; margin-bottom: 15px;">Изменять и удалять сообщение можно только в течение 24 часов после отправки.</p>
+            <div class="action-buttons">
+                <button class="btn-action-cancel" id="chatMsgCancel">Закрыть</button>
+            </div>
+            `}
         </div>
     `;
     document.body.appendChild(overlay);
 
     document.getElementById("chatMsgCancel").onclick = () => overlay.remove();
 
+    if (!canModify) return;
+
     document.getElementById("chatMsgEdit").onclick = () => {
         overlay.remove();
+        if (!canModifyChatMessage(msg)) {
+            alert("Время редактирования истекло (доступно только 24 часа после отправки).");
+            return;
+        }
         showChatMessageEditModal(msg);
     };
 
     document.getElementById("chatMsgDelete").onclick = async () => {
         overlay.remove();
+        if (!canModifyChatMessage(msg)) {
+            alert("Время удаления истекло (доступно только 24 часа после отправки).");
+            return;
+        }
         if (!confirm("Удалить это сообщение?")) return;
 
         const { error } = await db.from('chat_messages').delete().eq('id', msg.id);
@@ -2288,7 +2272,6 @@ function onPhoneShake() {
     if (allTitles.length === 0) return;
 
     lastShakeTime = now;
-    vibrate(60); // мгновенный отклик на саму тряску
     const randomTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
     
     showRandomTitleModal(randomTitle, allTitles);
