@@ -615,3 +615,26 @@ button:nth-child(6){
 .btn-chat-purple:active {
     background: #d5bdf2 !important;
 }
+
+/* Синий кружок "недавно добавлено" (в течение 2 суток) */
+.new-title-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    min-width: 10px;
+    border-radius: 50%;
+    background: #2196f3;
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.25);
+    flex-shrink: 0;
+}
+
+/* Лёгкая пульсация текста во время "прокрутки" случайного тайтла (тряска) */
+@keyframes slotPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.slot-spin {
+    animation: slotPulse 0.15s ease infinite;
+}

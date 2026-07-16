@@ -1,4 +1,14 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
+let titleCreatedAt = {}; // "Название (год)" -> дата добавления в базу (для синего кружка "новинка")
+
+// ==========================================
+// TMDB (постеры фильмов/сериалов)
+// ==========================================
+// Получите бесплатный ключ на https://www.themoviedb.org/settings/api
+// и вставьте его сюда вместо заглушки.
+const TMDB_API_KEY = "ВСТАВЬТЕ_СВОЙ_TMDB_API_KEY";
+const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
+
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
@@ -32,12 +42,14 @@ async function loadCatalogFromDB() {
 
     // Собираем плоский список из базы обратно в древовидную структуру для сайта
     const tempStructure = {};
+    const tempCreatedAt = {};
 
     titles.forEach(item => {
         const cat = item.category;
         const gen = item.genre;
         const fran = item.franchise;
         const titleWithYear = `${item.title} (${item.year})`;
+        tempCreatedAt[titleWithYear] = item.created_at || null;
 
         if (!tempStructure[cat]) tempStructure[cat] = {};
         if (!tempStructure[cat][gen]) tempStructure[cat][gen] = [];
@@ -60,6 +72,17 @@ async function loadCatalogFromDB() {
     });
 
     dbData = tempStructure;
+    titleCreatedAt = tempCreatedAt;
+}
+
+// Проверка: был ли тайтл добавлен в базу недавно (в течение 2 суток)
+function isRecentlyAdded(title) {
+    const createdAt = titleCreatedAt[title];
+    if (!createdAt) return false;
+    const addedTime = new Date(createdAt).getTime();
+    if (isNaN(addedTime)) return false;
+    const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+    return (Date.now() - addedTime) < TWO_DAYS_MS;
 }
 
 // ==========================================
@@ -168,8 +191,8 @@ db.auth.onAuthStateChange(async (event, session) => {
         const wasAlreadyInitialized = isAppInitialized;
         isAppInitialized = true;
         
-        // Загружаем списки просмотренного и вишлиста параллельно
-        Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]).then(() => {
+        // Загружаем списки просмотренного, вишлиста и оценок одним запросом
+        loadUserDataFromDB().then(() => {
             subscribeToChanges(); 
             
             if (!wasAlreadyInitialized) {
@@ -242,6 +265,30 @@ async function loadRatingsFromDB() {
     ratingsData = temp;
 }
 
+// Загружает watched/wishlist/ratings ОДНИМ запросом через SQL-функцию
+// get_watched_wishlist_ratings (нужно один раз создать её в Supabase, см.
+// инструкцию). Если функции ещё нет (или запрос упал) — тихо откатываемся
+// на прежний способ из трёх параллельных запросов, чтобы ничего не сломалось.
+async function loadUserDataFromDB() {
+    if (!currentUser) return;
+    try {
+        const { data, error } = await db.rpc('get_watched_wishlist_ratings');
+        if (error) throw error;
+
+        watchedTitles = new Set(data.watched || []);
+        wishlistTitles = new Set(data.wishlist || []);
+
+        const temp = {};
+        (data.ratings || []).forEach(r => {
+            if (!temp[r.title]) temp[r.title] = [];
+            temp[r.title].push({ username: r.username, score: r.score, userId: r.user_id });
+        });
+        ratingsData = temp;
+    } catch (e) {
+        await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
+    }
+}
+
 // В системе всего 2 пользователя — сопоставляем email с красивым именем
 function getUsernameFromEmail(email) {
     if (email === "nowyouseemeinvi@gmail.com") return "Myakish";
@@ -297,15 +344,47 @@ function subscribeToChanges() {
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'chat_messages' },
-            () => { onChatRealtimeChange(); }
+            (payload) => {
+                onChatRealtimeChange();
+                if (payload.eventType === 'INSERT' && payload.new && currentUser && payload.new.user_id !== currentUser.id) {
+                    notifyNewChatMessage(payload.new);
+                }
+            }
         )
         .subscribe();
 }
 
+// Запрашиваем разрешение на уведомления (один раз, пока оно не выдано/не отклонено)
+function requestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}
+
+// Показываем системное уведомление о новом сообщении в чате, если пользователь
+// прямо сейчас не смотрит в открытый чат на активной вкладке
+function notifyNewChatMessage(msg) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    if (isChatScreenOpen && !document.hidden) return;
+
+    const notif = new Notification(msg.username || "Новое сообщение", {
+        body: msg.message,
+        tag: "chat-message"
+    });
+
+    notif.onclick = () => {
+        window.focus();
+        showChatScreen();
+        notif.close();
+    };
+}
+
 // Живое обновление интерфейса
 async function updateUIOnLiveChange() {
-    await loadCatalogFromDB();
-    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
+    // Изменения в watched_items/wishlist_items/ratings не затрагивают сам каталог
+    // (таблицу titles) — раньше здесь зря перезагружался ВЕСЬ каталог при
+    // каждом таком изменении. Загружаем только то, что реально изменилось.
+    await loadUserDataFromDB();
 
     // 1. Обновляем счетчики на кнопках главного экрана
     let buttons = document.querySelectorAll("button");
@@ -904,6 +983,7 @@ async function showHome() {
     }
     history = [];
     currentCategoryName = null;
+    if (currentUser) requestNotificationPermission();
     await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
@@ -1086,7 +1166,22 @@ function renderItemRow(itemText, container) {
     if (isSecret) {
         itemDiv.textContent = itemText.replace(/\s*\(\d{4}\)$/, "");
     } else {
-        itemDiv.textContent = itemText;
+        let titleSpan = document.createElement("span");
+        titleSpan.textContent = itemText;
+        itemDiv.appendChild(titleSpan);
+
+        if (isRecentlyAdded(itemText)) {
+            itemDiv.style.display = "flex";
+            itemDiv.style.justifyContent = "space-between";
+            itemDiv.style.alignItems = "center";
+            itemDiv.style.gap = "8px";
+
+            let newDot = document.createElement("span");
+            newDot.className = "new-title-dot";
+            newDot.title = "Добавлено недавно";
+            itemDiv.appendChild(newDot);
+        }
+
         itemDiv.style.cursor = "pointer";
         itemDiv.style.userSelect = "none";
         itemDiv.style.webkitUserSelect = "none";
@@ -1183,6 +1278,39 @@ function renderItemRow(itemText, container) {
 }
 
 // Всплывающее меню выбора действия
+// Ищет постер тайтла на TMDB (сначала как фильм, потом как сериал)
+async function fetchTmdbPoster(itemText) {
+    if (!TMDB_API_KEY || TMDB_API_KEY.includes("ВСТАВЬТЕ")) return null;
+
+    const match = itemText.match(/^(.*)\s\((\d{4})\)$/);
+    const title = match ? match[1] : itemText;
+    const year = match ? match[2] : null;
+
+    try {
+        const movieParams = new URLSearchParams({ api_key: TMDB_API_KEY, query: title, language: "ru-RU" });
+        if (year) movieParams.set("year", year);
+        let res = await fetch(`https://api.themoviedb.org/3/search/movie?${movieParams.toString()}`);
+        let json = await res.json();
+        let result = json.results && json.results[0];
+
+        if (!result) {
+            const tvParams = new URLSearchParams({ api_key: TMDB_API_KEY, query: title, language: "ru-RU" });
+            if (year) tvParams.set("first_air_date_year", year);
+            res = await fetch(`https://api.themoviedb.org/3/search/tv?${tvParams.toString()}`);
+            json = await res.json();
+            result = json.results && json.results[0];
+        }
+
+        if (result && result.poster_path) {
+            return TMDB_IMG_BASE + result.poster_path;
+        }
+        return null;
+    } catch (e) {
+        console.error("Ошибка при запросе постера с TMDB:", e);
+        return null;
+    }
+}
+
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -1193,6 +1321,9 @@ function showActionMenu(itemText) {
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
+            <div id="posterBox" style="margin: 10px 0 15px; display: flex; justify-content: center;">
+                <p style="color: #999; font-size: 13px;">Ищем постер...</p>
+            </div>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
@@ -1205,6 +1336,17 @@ function showActionMenu(itemText) {
 
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
+
+    // Подгружаем постер асинхронно, не блокируя открытие меню
+    const posterBox = overlay.querySelector("#posterBox");
+    fetchTmdbPoster(itemText).then(url => {
+        if (!overlay.isConnected) return; // меню уже закрыли
+        if (url) {
+            posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
+        } else {
+            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильму не найден</p>`;
+        }
+    });
 
     // Логика кнопки трейлера
     document.getElementById("actTrailer").onclick = () => {
@@ -1472,14 +1614,166 @@ function createChatBubble(msg) {
 
     bubble.appendChild(meta);
     bubble.appendChild(text);
+
+    // Редактирование/удаление по долгому нажатию — только на своих сообщениях
+    if (isMine) {
+        bubble.style.cursor = "pointer";
+        attachChatLongPress(bubble, msg);
+    }
+
     return bubble;
+}
+
+// Обновляет содержимое уже отрисованного пузыря сообщения, если текст
+// поменялся (например, сообщение отредактировали)
+function updateChatBubbleContent(bubbleEl, msg) {
+    const textEl = bubbleEl.querySelector(".chat-text");
+    if (textEl && textEl.textContent !== msg.message) {
+        textEl.textContent = msg.message;
+    }
+    const metaEl = bubbleEl.querySelector(".chat-meta");
+    const metaText = `${msg.username} • ${formatChatTime(msg.created_at)}`;
+    if (metaEl && metaEl.textContent !== metaText) {
+        metaEl.textContent = metaText;
+    }
+}
+
+// Долгое нажатие на пузырь сообщения — открывает меню редактирования/удаления
+function attachChatLongPress(el, msg) {
+    let pressTimer = null;
+    let isMoving = false;
+    let startX = 0, startY = 0;
+
+    const startPress = (e) => {
+        isMoving = false;
+        if (e.type === 'touchstart') {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }
+        pressTimer = setTimeout(() => {
+            if (!isMoving) showChatMessageMenu(msg);
+        }, 600);
+    };
+
+    const cancelPress = () => {
+        if (pressTimer !== null) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+    };
+
+    const movePress = (e) => {
+        if (e.type === 'touchmove') {
+            let diffX = Math.abs(e.touches[0].clientX - startX);
+            let diffY = Math.abs(e.touches[0].clientY - startY);
+            if (diffX > 10 || diffY > 10) {
+                isMoving = true;
+                cancelPress();
+            }
+        }
+    };
+
+    el.addEventListener("mousedown", startPress);
+    el.addEventListener("mouseup", cancelPress);
+    el.addEventListener("mouseleave", cancelPress);
+    el.addEventListener("touchstart", startPress, { passive: true });
+    el.addEventListener("touchmove", movePress, { passive: true });
+    el.addEventListener("touchend", cancelPress, { passive: true });
+    el.addEventListener("touchcancel", cancelPress);
+}
+
+// Меню действий над своим сообщением
+function showChatMessageMenu(msg) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "chatMsgMenuModal";
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 15px;">Сообщение</h3>
+            <div class="action-buttons">
+                <button class="btn-action-edit" id="chatMsgEdit">✏️ Редактировать</button>
+                <button class="btn-action-delete" id="chatMsgDelete">🗑️ Удалить</button>
+                <button class="btn-action-cancel" id="chatMsgCancel">Отмена</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById("chatMsgCancel").onclick = () => overlay.remove();
+
+    document.getElementById("chatMsgEdit").onclick = () => {
+        overlay.remove();
+        showChatMessageEditModal(msg);
+    };
+
+    document.getElementById("chatMsgDelete").onclick = async () => {
+        overlay.remove();
+        if (!confirm("Удалить это сообщение?")) return;
+
+        const { error } = await db.from('chat_messages').delete().eq('id', msg.id);
+        if (error) {
+            console.error("Ошибка при удалении сообщения:", error);
+            alert("Не удалось удалить сообщение.");
+            return;
+        }
+        // Убираем сразу локально, не дожидаясь realtime-события
+        chatMessages = chatMessages.filter(m => m.id !== msg.id);
+        renderChatMessages();
+    };
+}
+
+// Модалка редактирования текста сообщения
+function showChatMessageEditModal(msg) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "chatMsgEditModal";
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <h3 style="text-align: center; margin-bottom: 15px;">Редактировать сообщение</h3>
+            <form class="modal-form" id="chatEditForm">
+                <input type="text" id="chatEditInput" required>
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-save">Сохранить</button>
+                    <button type="button" class="btn-cancel" id="chatEditCancel">Отмена</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector("#chatEditInput");
+    input.value = msg.message;
+    input.focus();
+
+    overlay.querySelector("#chatEditCancel").onclick = () => overlay.remove();
+
+    overlay.querySelector("#chatEditForm").onsubmit = async (e) => {
+        e.preventDefault();
+        const newText = input.value.trim();
+        if (!newText || newText === msg.message) {
+            overlay.remove();
+            return;
+        }
+
+        const { error } = await db.from('chat_messages').update({ message: newText }).eq('id', msg.id);
+        if (error) {
+            console.error("Ошибка при редактировании сообщения:", error);
+            alert("Не удалось изменить сообщение.");
+            return;
+        }
+        // Обновляем сразу локально, не дожидаясь realtime-события
+        const local = chatMessages.find(m => m.id === msg.id);
+        if (local) local.message = newText;
+        overlay.remove();
+        renderChatMessages();
+    };
 }
 
 // Отрисовка списка сообщений внутри открытого чата.
 // Важно: не пересоздаём весь список при каждом обновлении (это давало
 // "моргание" каждые несколько секунд из-за опроса/realtime), а только
 // добавляем новые сообщения и убираем удалённые — уже отрисованные
-// сообщения не трогаем.
+// сообщения не трогаем (только обновляем текст на месте, если его отредактировали).
 function renderChatMessages() {
     const box = document.getElementById("chatBox");
     if (!box) return;
@@ -1506,23 +1800,26 @@ function renderChatMessages() {
 
     const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
 
-    // Собираем id уже отрисованных сообщений
-    const renderedIds = new Set(
-        Array.from(box.querySelectorAll("[data-msg-id]")).map(el => el.dataset.msgId)
-    );
+    // Собираем уже отрисованные элементы по id
+    const renderedEls = new Map();
+    box.querySelectorAll("[data-msg-id]").forEach(el => renderedEls.set(el.dataset.msgId, el));
     const currentIds = new Set(chatMessages.map(m => String(m.id)));
 
-    // Удаляем из DOM сообщения, которых больше нет в данных (например, удалили)
-    box.querySelectorAll("[data-msg-id]").forEach(el => {
-        if (!currentIds.has(el.dataset.msgId)) el.remove();
+    // Удаляем из DOM сообщения, которых больше нет в данных (удалили)
+    renderedEls.forEach((el, id) => {
+        if (!currentIds.has(id)) el.remove();
     });
 
-    // Добавляем только новые сообщения, в правильном порядке
+    // Добавляем новые сообщения и обновляем текст уже существующих (если отредактировали)
     let addedNew = false;
     chatMessages.forEach(msg => {
-        if (!renderedIds.has(String(msg.id))) {
+        const idStr = String(msg.id);
+        const existingEl = renderedEls.get(idStr);
+        if (!existingEl) {
             box.appendChild(createChatBubble(msg));
             addedNew = true;
+        } else {
+            updateChatBubbleContent(existingEl, msg);
         }
     });
 
@@ -1884,7 +2181,44 @@ function getAllTitlesFromCategory(dataBranch) {
     return resultList;
 }
 
-function showRandomTitleModal(titleText) {
+// Короткая вибрация (если поддерживается устройством/браузером)
+function vibrate(pattern) {
+    if (navigator.vibrate) {
+        try { navigator.vibrate(pattern); } catch (e) { /* игнорируем, если браузер не разрешил */ }
+    }
+}
+
+// Анимация "прокрутки" случайных названий перед финальным результатом —
+// как в игровом автомате: сначала быстро, затем замедляется
+function runSlotAnimation(el, pool, finalText, isSecretDisplay, onDone) {
+    const displayOf = (t) => isSecretDisplay ? t.replace(/\s*\(\d{4}\)$/, "") : t;
+    el.classList.add("slot-spin");
+
+    const totalSteps = 16;
+    let step = 0;
+
+    function tick() {
+        if (step >= totalSteps) {
+            el.classList.remove("slot-spin");
+            el.textContent = displayOf(finalText);
+            vibrate([40, 30, 60]); // финальный "щелчок"
+            if (onDone) onDone();
+            return;
+        }
+
+        const randomPick = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : finalText;
+        el.textContent = displayOf(randomPick);
+        step++;
+
+        // Замедление к концу прокрутки
+        const delay = 45 + step * step * 2;
+        setTimeout(tick, delay);
+    }
+
+    tick();
+}
+
+function showRandomTitleModal(titleText, pool = []) {
     if (isShakeModalOpen) return;
     isShakeModalOpen = true;
 
@@ -1907,15 +2241,18 @@ function showRandomTitleModal(titleText) {
     `;
 
     const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒")));
-    overlay.querySelector("#shakeRandomTitle").textContent = isSecret ? titleText.replace(/\s*\(\d{4}\)$/, "") : titleText;
+    const titleEl = overlay.querySelector("#shakeRandomTitle");
 
     document.body.appendChild(overlay);
 
+    runSlotAnimation(titleEl, pool, titleText, isSecret);
+
     document.getElementById("closeShakeBtn").onclick = () => { overlay.remove(); isShakeModalOpen = false; };
     document.getElementById("rerollShakeBtn").onclick = () => {
-        const all = getAllTitlesFromCategory(history[history.length - 1]);
+        const all = pool.length > 0 ? pool : getAllTitlesFromCategory(history[history.length - 1]);
         const next = all[Math.floor(Math.random() * all.length)];
-        overlay.querySelector("#shakeRandomTitle").textContent = isSecret ? next.replace(/\s*\(\d{4}\)$/, "") : next;
+        vibrate(30);
+        runSlotAnimation(titleEl, all, next, isSecret);
     };
 }
 
@@ -1934,9 +2271,10 @@ function onPhoneShake() {
     if (allTitles.length === 0) return;
 
     lastShakeTime = now;
+    vibrate(60); // мгновенный отклик на саму тряску
     const randomTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
     
-    showRandomTitleModal(randomTitle);
+    showRandomTitleModal(randomTitle, allTitles);
     isShakeModalOpen = true; 
 }
 
