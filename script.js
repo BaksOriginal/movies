@@ -75,11 +75,19 @@ const app = document.getElementById("app");
 let currentUser = null;
 let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
 let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
+let allRatings = []; // Все оценки из базы данных [{title, user_email, rating, user_id}]
 let history = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
+
+// Глобальные переменные для фильтров поиска
+let filterGenre = "";
+let filterCategory = "";
+let filterYear = "";
+let filterHasRating = "all"; // 'all', 'yes', 'no'
+let filterMinRating = "";
 
 // ==========================================
 // РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
@@ -129,8 +137,8 @@ db.auth.onAuthStateChange(async (event, session) => {
         currentUser = session.user;
         saveSessionBackup(session); // Бэкапим сессию
         
-        // Загружаем списки просмотренного и вишлиста параллельно
-        Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]).then(() => {
+        // Загружаем списки просмотренного, вишлиста и оценок параллельно
+        Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]).then(() => {
             subscribeToChanges(); 
             
             if (!isAppInitialized) {
@@ -148,6 +156,7 @@ db.auth.onAuthStateChange(async (event, session) => {
         currentUser = null;
         watchedTitles.clear();
         wishlistTitles.clear();
+        allRatings = [];
         isAppInitialized = false;
         saveSessionBackup(null);
         
@@ -181,22 +190,36 @@ async function loadWishlistFromDB() {
     wishlistTitles = new Set(data.map(item => item.title));
 }
 
+// Загрузка оценок
+async function loadRatingsFromDB() {
+    if (!currentUser) return;
+    const { data, error } = await db.from('ratings').select('title, user_email, rating, user_id');
+    if (error) {
+        console.error("Ошибка при загрузке оценок:", error);
+        return;
+    }
+    allRatings = data || [];
+}
+
 // Подписка на изменения базы данных в реальном времени (Websockets)
 function subscribeToChanges() {
     if (realtimeChannel) return; 
 
     realtimeChannel = db
         .channel('schema-db-changes')
-        // Следим за просмотренными
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'watched_items' },
             () => { updateUIOnLiveChange(); }
         )
-        // Следим за вишлистом
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'wishlist_items' },
+            () => { updateUIOnLiveChange(); }
+        )
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'ratings' },
             () => { updateUIOnLiveChange(); }
         )
         .subscribe();
@@ -205,9 +228,9 @@ function subscribeToChanges() {
 // Живое обновление интерфейса
 async function updateUIOnLiveChange() {
     await loadCatalogFromDB();
-    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB()]);
+    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
 
-    // 1. Обновляем счетчики на кнопках главного экрана
+    // Обновляем счетчики на кнопках главного экрана
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
         if (btn.textContent.includes("Просмотрено")) {
@@ -218,35 +241,12 @@ async function updateUIOnLiveChange() {
         }
     });
 
-    // 2. Обновляем иконки звездочек
-    let rows = document.querySelectorAll(".item-row");
-    rows.forEach(row => {
-        let itemDiv = row.querySelector(".item");
-        let watchBtn = row.querySelector(".btn-watch");
-        
-        if (itemDiv && watchBtn) {
-            let itemText = itemDiv.textContent.trim();
-            
-            const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
-            let lookupText = itemText;
-            if (isSecret && !itemText.includes("(2026)")) {
-                lookupText = itemText + " (2026)";
-            }
-
-            // Очищаем классы перед переназначением
-            watchBtn.className = "btn-watch";
-
-            if (watchedTitles.has(lookupText)) {
-                watchBtn.classList.add("watched");
-                watchBtn.textContent = "★";
-            } else if (wishlistTitles.has(lookupText)) {
-                watchBtn.classList.add("wishlist-active");
-                watchBtn.textContent = "★";
-            } else {
-                watchBtn.textContent = "☆";
-            }
-        }
-    });
+    // Полностью перерисовываем текущий список элементов, чтобы обновить оценки под ними
+    const itemContainers = document.querySelectorAll(".item-row, .item-ratings-info");
+    if (itemContainers.length > 0 && history.length > 0) {
+        let currentActiveData = history[history.length - 1];
+        openData(currentActiveData, false);
+    }
 }
 
 // Мягкое обновление текущего экрана
@@ -261,43 +261,32 @@ async function refreshCurrentScreen() {
 }
 
 // =======================================================
-// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ ИЛИ СНЯТИЕ)
+// ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ОБНОВЛЕННАЯ С ОЦЕНКОЙ)
 // =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
-
-    // Если фильм уже в одной из категорий — повторный клик просто убирает отметку
-    if (watchedTitles.has(title)) {
-        watchedTitles.delete(title);
-        updateUIOnLiveChange();
-        await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
-        return;
-    }
-
-    if (wishlistTitles.has(title)) {
-        wishlistTitles.delete(title);
-        updateUIOnLiveChange();
-        await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
-        return;
-    }
-
-    // Если фильм чистый — открываем красивое быстрое меню
     showStarChoiceModal(title);
 }
 
-// Модальное окно выбора категории для звёздочки
+// Модальное окно выбора категории для звёздочки (с добавлением Оценки)
 function showStarChoiceModal(title) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "starChoiceModal";
 
+    const isWatched = watchedTitles.has(title);
+    const isWishlist = wishlistTitles.has(title);
+    const myRatingObj = allRatings.find(r => r.title === title && r.user_id === currentUser.id);
+
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Куда добавить?</h3>
+            <h3 style="margin-bottom: 10px;">Действие с тайтлом</h3>
             <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>
-                <button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>
+                <button id="choiceWish" class="btn-pink-style">${isWishlist ? "❌ Убрать из Будем смотреть" : "🍿 Будем смотреть"}</button>
+                <button id="choiceWatch" class="btn-pink-style">${isWatched ? "❌ Убрать из Просмотрено" : "🎬 Просмотрено"}</button>
+                <button id="choiceRate" class="btn-pink-style" style="background-color: #ffd5e3 !important;">⭐ ${myRatingObj ? `Переоценить (сейчас: ${myRatingObj.rating})` : "Оценить фильм"}</button>
+                ${myRatingObj ? '<button id="choiceDeleteRate" class="btn-action-delete">❌ Удалить мою оценку</button>' : ''}
                 <button id="choiceCancel" class="btn-cancel-gray">Отмена</button>
             </div>
         </div>
@@ -307,30 +296,126 @@ function showStarChoiceModal(title) {
 
     document.getElementById("choiceWish").onclick = async () => {
         overlay.remove();
-        wishlistTitles.add(title);
-        updateUIOnLiveChange();
-        const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
-        if (error) {
+        if (isWishlist) {
             wishlistTitles.delete(title);
             updateUIOnLiveChange();
-            console.error("Ошибка при сохранении в вишлист:", error);
+            await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+        } else {
+            wishlistTitles.add(title);
+            // Если добавляем в вишлист, убираем из просмотренного
+            if (watchedTitles.has(title)) {
+                watchedTitles.delete(title);
+                await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            }
+            updateUIOnLiveChange();
+            await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
         }
     };
 
     document.getElementById("choiceWatch").onclick = async () => {
         overlay.remove();
-        watchedTitles.add(title);
-        updateUIOnLiveChange();
-        const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
-        if (error) {
+        if (isWatched) {
             watchedTitles.delete(title);
             updateUIOnLiveChange();
-            console.error("Ошибка при сохранении в просмотренное:", error);
+            await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+        } else {
+            watchedTitles.add(title);
+            // Если добавляем в просмотренное, убираем из вишлиста
+            if (wishlistTitles.has(title)) {
+                wishlistTitles.delete(title);
+                await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            }
+            updateUIOnLiveChange();
+            await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
         }
     };
 
+    document.getElementById("choiceRate").onclick = () => {
+        overlay.remove();
+        showRatingInputModal(title, myRatingObj ? myRatingObj.rating : 0);
+    };
+
+    if (myRatingObj) {
+        document.getElementById("choiceDeleteRate").onclick = async () => {
+            overlay.remove();
+            await db.from('ratings').delete().eq('title', title).eq('user_id', currentUser.id);
+            updateUIOnLiveChange();
+        };
+    }
+
     document.getElementById("choiceCancel").onclick = () => {
         overlay.remove();
+    };
+}
+
+// Модалка ввода оценки (1-10 звезд)
+function showRatingInputModal(title, currentRating) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "ratingInputModal";
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3>Оцените фильм</h3>
+            <p style="color: #666; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            
+            <div class="rating-stars-input" id="starsContainer">
+                ${Array.from({ length: 10 }, (_, i) => `
+                    <span class="rating-star ${i < currentRating ? 'active' : ''}" data-value="${i + 1}">★</span>
+                `).join("")}
+            </div>
+            <div style="font-weight: bold; margin-bottom: 20px; font-size: 18px;" id="ratingValue">${currentRating || 0} / 10</div>
+
+            <div class="modal-buttons">
+                <button id="saveRating" class="btn-save">Сохранить</button>
+                <button id="cancelRating" class="btn-cancel">Отмена</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    let selectedRating = currentRating;
+    const stars = overlay.querySelectorAll(".rating-star");
+    const valueDisplay = overlay.querySelector("#ratingValue");
+
+    stars.forEach(star => {
+        star.onclick = () => {
+            selectedRating = parseInt(star.getAttribute("data-value"), 10);
+            valueDisplay.textContent = `${selectedRating} / 10`;
+            stars.forEach((s, idx) => {
+                if (idx < selectedRating) {
+                    s.classList.add("active");
+                } else {
+                    s.classList.remove("active");
+                }
+            });
+        };
+    });
+
+    document.getElementById("cancelRating").onclick = () => overlay.remove();
+
+    document.getElementById("saveRating").onclick = async () => {
+        if (selectedRating === 0) {
+            alert("Пожалуйста, выберите оценку!");
+            return;
+        }
+        overlay.remove();
+
+        // Проверяем, был ли уже оценен фильм, чтобы сделать upsert
+        const { error } = await db.from('ratings').upsert({
+            user_id: currentUser.id,
+            user_email: currentUser.email,
+            title: title,
+            rating: selectedRating
+        }, { onConflict: 'user_id,title' });
+
+        if (error) {
+            console.error("Ошибка сохранения оценки:", error);
+            alert("Не удалось сохранить оценку.");
+        } else {
+            updateUIOnLiveChange();
+        }
     };
 }
 
@@ -371,7 +456,7 @@ function showLoginScreen() {
 }
 
 // =======================================================
-// ЛОГИКА ПОИСКА (ЛЕВЕНШТЕЙН / НЕЧЕТКИЙ ПОИСК)
+// ЛОГИКА ПОИСКА (ЛЕВЕНШТЕЙН / НЕЧЕТКИЙ ПОИСК С ФИЛЬТРАМИ)
 // =======================================================
 function getLevenshteinDistance(a, b) {
     const tmp = [];
@@ -391,8 +476,6 @@ function getLevenshteinDistance(a, b) {
 
 function performCatalogSearch(query) {
     const searchStr = query.toLowerCase().trim();
-    if (!searchStr) return;
-
     const results = [];
     
     for (let catKey in dbData) {
@@ -400,11 +483,47 @@ function performCatalogSearch(query) {
             continue;
         }
 
+        // Фильтр по категории
+        if (filterCategory && catKey !== filterCategory) {
+            continue;
+        }
+
         const categoryData = dbData[catKey];
         for (let genreKey in categoryData) {
+            // Фильтр по жанру
+            if (filterGenre && genreKey !== filterGenre) {
+                continue;
+            }
+
             const listOrObj = categoryData[genreKey];
 
             const processTitle = (fullTitle, franchiseName = null) => {
+                const matchYear = fullTitle.match(/\((\d{4})\)$/);
+                const itemYear = matchYear ? matchYear[1] : "";
+
+                // Фильтр по году
+                if (filterYear && itemYear !== filterYear) {
+                    return;
+                }
+
+                // Расчет оценок
+                const itemRatings = allRatings.filter(r => r.title === fullTitle);
+                const hasRatings = itemRatings.length > 0;
+                const avgRating = hasRatings ? (itemRatings.reduce((sum, r) => sum + r.rating, 0) / itemRatings.length) : 0;
+
+                // Фильтр "Есть ли оценка"
+                if (filterHasRating === "yes" && !hasRatings) return;
+                if (filterHasRating === "no" && hasRatings) return;
+
+                // Фильтр "Минимальная оценка"
+                if (filterMinRating && avgRating < parseFloat(filterMinRating)) return;
+
+                // Если поисковой запрос пустой, но применены фильтры — выводим все совпавшие
+                if (!searchStr) {
+                    results.push({ title: fullTitle, score: 0 });
+                    return;
+                }
+
                 const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
                 
                 if (cleanTitle.includes(searchStr) || 
@@ -470,7 +589,7 @@ function performCatalogSearch(query) {
     });
 
     currentCategoryName = "🔍 Результаты поиска";
-    openData(uniqueResults, true, `Результаты для: "${query}"`);
+    openData(uniqueResults, true, `Результаты поиска (${uniqueResults.length})`);
 }
 
 // Главная страница
@@ -546,14 +665,13 @@ async function showHome() {
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
         
-        // Первый сплиттер HR (после "Добавить")
         let hr = document.createElement("hr");
         hr.style.border = "0";
         hr.style.borderTop = "2px solid #9b4f70"; 
         hr.style.margin = "15px 0";
         app.appendChild(hr);
 
-        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
+        // ПОИСК И ФИЛЬТРЫ
         let searchContainer = document.createElement("div");
         searchContainer.style.cssText = `
             display: flex;
@@ -565,7 +683,8 @@ async function showHome() {
 
         let searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.placeholder = "Поиск по названию или жанру...";
+        searchInput.id = "mainSearchInput";
+        searchInput.placeholder = "Поиск по названию...";
         searchInput.style.cssText = `
             flex-grow: 1;
             padding: 10px;
@@ -593,11 +712,25 @@ async function showHome() {
             flex-shrink: 0;
         `;
 
+        let filterToggleBtn = document.createElement("button");
+        filterToggleBtn.textContent = "⚙️ Фильтры";
+        filterToggleBtn.style.cssText = `
+            width: auto !important;
+            min-height: auto !important;
+            height: 42px !important;
+            padding: 0 10px !important;
+            margin: 0 !important;
+            border-radius: 8px !important;
+            background: #ffe3ec !important;
+            color: #d81b60 !important;
+            font-size: 13px !important;
+            font-weight: bold;
+            cursor: pointer;
+        `;
+
         const doSearch = () => {
             const q = searchInput.value;
-            if (q.trim()) {
-                performCatalogSearch(q);
-            }
+            performCatalogSearch(q);
         };
 
         searchSubmitBtn.onclick = doSearch;
@@ -609,9 +742,99 @@ async function showHome() {
 
         searchContainer.appendChild(searchInput);
         searchContainer.appendChild(searchSubmitBtn);
+        searchContainer.appendChild(filterToggleBtn);
         app.appendChild(searchContainer);
 
-        // Второй сплиттер HR (после Поиска)
+        // Контейнер панели фильтров (скрыт по умолчанию)
+        let filterPanel = document.createElement("div");
+        filterPanel.className = "filter-panel";
+        filterPanel.style.display = "none";
+
+        // Собираем данные для списков фильтрации
+        const allGenres = new Set();
+        const allCategories = new Set();
+        const allYears = new Set();
+
+        for (let catKey in dbData) {
+            if (catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️")) continue;
+            allCategories.add(catKey);
+            for (let genKey in dbData[catKey]) {
+                allGenres.add(genKey);
+                const items = dbData[catKey][genKey];
+                const processArr = (arr) => {
+                    arr.forEach(i => {
+                        if (typeof i === 'string') {
+                            const match = i.match(/\((\d{4})\)$/);
+                            if (match) allYears.add(match[1]);
+                        } else if (typeof i === 'object') {
+                            for (let f in i) processArr(i[f]);
+                        }
+                    });
+                };
+                if (Array.isArray(items)) processArr(items);
+            }
+        }
+
+        filterPanel.innerHTML = `
+            <div class="filter-row">
+                <select id="fCategory">
+                    <option value="">Все категории</option>
+                    ${Array.from(allCategories).sort().map(c => `<option value="${c}" ${filterCategory === c ? 'selected' : ''}>${c}</option>`).join("")}
+                </select>
+                <select id="fGenre">
+                    <option value="">Все жанры</option>
+                    ${Array.from(allGenres).sort().map(g => `<option value="${g}" ${filterGenre === g ? 'selected' : ''}>${g}</option>`).join("")}
+                </select>
+            </div>
+            <div class="filter-row">
+                <select id="fYear">
+                    <option value="">Все года</option>
+                    ${Array.from(allYears).sort((a,b) => b-a).map(y => `<option value="${y}" ${filterYear === y ? 'selected' : ''}>${y}</option>`).join("")}
+                </select>
+                <select id="fHasRating">
+                    <option value="all" ${filterHasRating === 'all' ? 'selected' : ''}>Оценка: Любая</option>
+                    <option value="yes" ${filterHasRating === 'yes' ? 'selected' : ''}>Есть оценка</option>
+                    <option value="no" ${filterHasRating === 'no' ? 'selected' : ''}>Без оценки</option>
+                </select>
+                <select id="fMinRating">
+                    <option value="">Балл: Любой</option>
+                    ${Array.from({length: 10}, (_, i) => `<option value="${i+1}" ${filterMinRating == (i+1) ? 'selected' : ''}>От ${i+1} ★</option>`).join("")}
+                </select>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 5px;">
+                <button id="fReset" class="btn-cancel-gray" style="flex: 1; min-height: 35px; padding: 5px; font-size: 13px; border-radius: 8px;">Сбросить фильтры</button>
+            </div>
+        `;
+
+        app.appendChild(filterPanel);
+
+        // Логика открытия/закрытия фильтров
+        filterToggleBtn.onclick = () => {
+            filterPanel.style.display = filterPanel.style.display === "none" ? "flex" : "none";
+        };
+
+        // Слушатели изменений фильтров
+        filterPanel.querySelector("#fCategory").onchange = (e) => { filterCategory = e.target.value; doSearch(); };
+        filterPanel.querySelector("#fGenre").onchange = (e) => { filterGenre = e.target.value; doSearch(); };
+        filterPanel.querySelector("#fYear").onchange = (e) => { filterYear = e.target.value; doSearch(); };
+        filterPanel.querySelector("#fHasRating").onchange = (e) => { filterHasRating = e.target.value; doSearch(); };
+        filterPanel.querySelector("#fMinRating").onchange = (e) => { filterMinRating = e.target.value; doSearch(); };
+        
+        filterPanel.querySelector("#fReset").onclick = () => {
+            filterCategory = "";
+            filterGenre = "";
+            filterYear = "";
+            filterHasRating = "all";
+            filterMinRating = "";
+            filterPanel.querySelector("#fCategory").value = "";
+            filterPanel.querySelector("#fGenre").value = "";
+            filterPanel.querySelector("#fYear").value = "";
+            filterPanel.querySelector("#fHasRating").value = "all";
+            filterPanel.querySelector("#fMinRating").value = "";
+            searchInput.value = "";
+            doSearch();
+        };
+
         let hrAfterSearch = document.createElement("hr");
         hrAfterSearch.style.border = "0";
         hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
@@ -626,7 +849,6 @@ async function showHome() {
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
 
-        // Третий сплиттер HR (после категории "Секрет")
         if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) {
             let hrAfterSecret = document.createElement("hr");
             hrAfterSecret.style.border = "0";
@@ -646,7 +868,6 @@ async function showHome() {
     };
     app.appendChild(wishlistBtn);
 
-    // Кнопка "Просмотрено" на главной
     let watchedBtn = document.createElement("button");
     watchedBtn.className = "btn-pink-style";
     watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
@@ -666,7 +887,7 @@ async function showHome() {
     app.appendChild(footer);
 }
 
-// Отрисовка строки элемента (тайтла)
+// Отрисовка строки элемента (тайтла) и блока оценок под ним
 function renderItemRow(itemText, container) {
     let row = document.createElement("div");
     row.className = "item-row";
@@ -752,7 +973,6 @@ function renderItemRow(itemText, container) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
         
-        // Установка правильного состояния звездочки на старте
         if (watchedTitles.has(itemText)) {
             watchBtn.classList.add("watched");
             watchBtn.textContent = "★";
@@ -768,6 +988,28 @@ function renderItemRow(itemText, container) {
     }
 
     container.appendChild(row);
+
+    // Добавляем инфо об оценках ПОД строкой фильма (если не секретный)
+    if (!isSecret) {
+        const itemRatings = allRatings.filter(r => r.title === itemText);
+        if (itemRatings.length > 0) {
+            let ratingsDiv = document.createElement("div");
+            ratingsDiv.className = "item-ratings-info";
+            
+            // Средняя оценка
+            const avg = (itemRatings.reduce((sum, r) => sum + r.rating, 0) / itemRatings.length).toFixed(1);
+            ratingsDiv.innerHTML = `<span style="font-weight: bold; color: #ffb400;">⭐ ${avg}/10</span>`;
+
+            // Список оценок пользователей
+            itemRatings.forEach(r => {
+                const shortName = r.user_email.split("@")[0]; // "myakish" или "asmoday"
+                ratingsDiv.innerHTML += `
+                    <span class="user-rating-badge">${shortName}: ${r.rating}</span>
+                `;
+            });
+            container.appendChild(ratingsDiv);
+        }
+    }
 }
 
 // Всплывающее меню выбора действия
@@ -1071,24 +1313,13 @@ async function handleDeleteClick(itemText) {
     if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
         
         // Удаляем из просмотренных
-        const { error: watchedError } = await db
-            .from("watched_items")
-            .delete()
-            .eq("title", itemText);
-
-        if (watchedError) {
-            console.error("Не удалось удалить из просмотренных:", watchedError.message);
-        }
+        await db.from("watched_items").delete().eq("title", itemText);
 
         // Удаляем из вишлиста
-        const { error: wishlistError } = await db
-            .from("wishlist_items")
-            .delete()
-            .eq("title", itemText);
+        await db.from("wishlist_items").delete().eq("title", itemText);
 
-        if (wishlistError) {
-            console.error("Не удалось удалить из списка 'Будем смотреть':", wishlistError.message);
-        }
+        // Удаляем оценки
+        await db.from("ratings").delete().eq("title", itemText);
 
         const { error } = await db
             .from("titles")
@@ -1249,9 +1480,9 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
+
 // Генератор бесконечных нежных сердечек на заднем фоне
 function initHeartsBackground() {
-    // Если контейнер уже почему-то существует, не создаем его заново
     if (document.querySelector('.hearts-background')) return;
 
     const container = document.createElement('div');
@@ -1261,36 +1492,29 @@ function initHeartsBackground() {
     function spawnHeart() {
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
-        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
+        heart.innerHTML = '❤️';
 
-        // Рандомизируем параметры для живого и естественного эффекта
-        const size = Math.random() * 18 + 12; // Размер от 12px до 30px
-        const startLeft = Math.random() * 100; // Позиция по горизонтали (в %)
-        const duration = Math.random() * 12 + 10; // Скорость подъема от 10 до 22 секунд (очень плавно)
-        const swayX = (Math.random() * 120 - 60) + 'px'; // Амплитуда покачивания влево/вправо
-        const rotateDeg = (Math.random() * 360) + 'deg'; // Случайный угол вращения
+        const size = Math.random() * 18 + 12; 
+        const startLeft = Math.random() * 100; 
+        const duration = Math.random() * 12 + 10; 
+        const swayX = (Math.random() * 120 - 60) + 'px'; 
+        const rotateDeg = (Math.random() * 360) + 'deg'; 
 
-        // Применяем стили
         heart.style.fontSize = `${size}px`;
         heart.style.left = `${startLeft}%`;
         heart.style.animationDuration = `${duration}s`;
         
-        // Передаем переменные покачивания во floatUp анимацию
         heart.style.setProperty('--sway-x', swayX);
         heart.style.setProperty('--rotate-deg', rotateDeg);
 
         container.appendChild(heart);
 
-        // Самоликвидация элемента из DOM после того, как он улетел, чтобы не грузить браузер
         setTimeout(() => {
             heart.remove();
         }, duration * 1000);
     }
 
-    // Создаем первое сердечко сразу
     spawnHeart();
-    
-    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
     setInterval(spawnHeart, 900);
 }
 
@@ -1317,22 +1541,21 @@ style.textContent = `
         box-sizing: border-box !important;
         line-height: 1 !important;
     }
-    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
     .hearts-background {
         position: fixed;
         top: 0;
         left: 0;
         width: 100vw;
         height: 100vh;
-        pointer-events: none; /* Клики проходят сквозь них */
-        z-index: -1;          /* Строго на заднем фоне */
+        pointer-events: none;
+        z-index: -1;
         overflow: hidden;
     }
 
     .floating-heart {
         position: absolute;
-        bottom: -50px;        /* Появляются чуть ниже экрана */
-        color: #ff4081;       /* Малиново-розовый цвет */
+        bottom: -50px;
+        color: #ff4081;
         opacity: 0;
         pointer-events: none;
         user-select: none;
@@ -1345,24 +1568,21 @@ style.textContent = `
             opacity: 0;
         }
         10% {
-            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
+            opacity: 0.15;
         }
         90% {
             opacity: 0.15;
         }
         100% {
-            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
             transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
-            opacity: 0;       /* Полностью растворяются вверху */
+            opacity: 0;
         }
     }
-    /* Звёздочка для вишлиста (Красивый голубой) */
     .btn-watch.wishlist-active {
         color: #2196f3 !important;
         opacity: 1 !important;
     }
 
-    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
     .btn-pink-style {
         background-color: #ffe3ec !important;
         color: #d81b60 !important;
@@ -1374,7 +1594,6 @@ style.textContent = `
         background-color: #ffd5e3 !important;
     }
 
-    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
     .btn-cancel-gray {
         background-color: #f0f0f0 !important;
         color: #333333 !important;
