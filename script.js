@@ -109,7 +109,11 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
 let currentUser = null;
-let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
+let watchedTitles = new Set(); // Производный union: просмотрено хоть кем-то (мной, партнёром или обоими) — используется для звёздочки
+let watchedByUser = {}; // "Название (год)" -> Set<user_id> — кто именно из двоих отметил тайтл просмотренным
+let watchedTitlesMine = new Set();     // Просмотрено только мной
+let watchedTitlesPartner = new Set();  // Просмотрено только партнёром
+let watchedTitlesBoth = new Set();     // Просмотрено нами обоими
 let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
 let ratingsData = {}; // Оценки: { "Название (год)": [{ username, score, userId }, ...] }
 let history = [];
@@ -228,6 +232,10 @@ db.auth.onAuthStateChange(async (event, session) => {
 
         currentUser = null;
         watchedTitles.clear();
+        watchedByUser = {};
+        watchedTitlesMine.clear();
+        watchedTitlesPartner.clear();
+        watchedTitlesBoth.clear();
         wishlistTitles.clear();
         ratingsData = {};
         chatMessages = [];
@@ -286,15 +294,73 @@ window.addEventListener("unhandledrejection", (event) => {
     }
 });
 
-// Загрузка просмотренных тайтлов
+// Загрузка просмотренных тайтлов (с указанием, КЕМ именно отмечено)
 async function loadWatchedFromDB() {
     if (!currentUser) return;
-    const { data, error } = await db.from('watched_items').select('title');
+    const { data, error } = await db.from('watched_items').select('title, user_id');
     if (error) {
         console.error("Ошибка при загрузке списка просмотренного:", error);
         return;
     }
-    watchedTitles = new Set(data.map(item => item.title));
+
+    const temp = {};
+    data.forEach(row => {
+        if (!temp[row.title]) temp[row.title] = new Set();
+        temp[row.title].add(row.user_id);
+    });
+    watchedByUser = temp;
+    recomputeWatchedBuckets();
+}
+
+// Пересчитывает 3 ведра просмотренного (мной / партнёром / нами) на основе
+// watchedByUser и currentUser. Вызывать после любого изменения watchedByUser.
+function recomputeWatchedBuckets() {
+    watchedTitlesMine = new Set();
+    watchedTitlesPartner = new Set();
+    watchedTitlesBoth = new Set();
+    watchedTitles = new Set();
+
+    if (!currentUser) return;
+
+    for (let title in watchedByUser) {
+        const users = watchedByUser[title];
+        if (!users || users.size === 0) continue;
+
+        watchedTitles.add(title);
+
+        const iWatched = users.has(currentUser.id);
+        const othersWatched = Array.from(users).some(id => id !== currentUser.id);
+
+        if (iWatched && othersWatched) {
+            watchedTitlesBoth.add(title);
+        } else if (iWatched) {
+            watchedTitlesMine.add(title);
+        } else if (othersWatched) {
+            watchedTitlesPartner.add(title);
+        }
+    }
+}
+
+// Пытается определить user_id партнёра по уже загруженным данным (чат,
+// оценки, отметки просмотренного) — своего ID Supabase Auth не отдаёт для
+// чужого аккаунта напрямую, поэтому вылавливаем его из общих данных.
+function getPartnerUserId() {
+    if (!currentUser) return null;
+
+    for (let msg of chatMessages) {
+        if (msg.user_id && msg.user_id !== currentUser.id) return msg.user_id;
+    }
+    for (let title in watchedByUser) {
+        for (let uid of watchedByUser[title]) {
+            if (uid !== currentUser.id) return uid;
+        }
+    }
+    for (let title in ratingsData) {
+        for (let r of ratingsData[title]) {
+            if (r.userId && r.userId !== currentUser.id) return r.userId;
+        }
+    }
+    return null;
 }
 
 // Загрузка вишлиста
@@ -408,28 +474,14 @@ async function loadRatingsFromDB() {
     ratingsData = temp;
 }
 
-// Загружает watched/wishlist/ratings ОДНИМ запросом через SQL-функцию
-// get_watched_wishlist_ratings (нужно один раз создать её в Supabase, см.
-// инструкцию). Если функции ещё нет (или запрос упал) — тихо откатываемся
-// на прежний способ из трёх параллельных запросов, чтобы ничего не сломалось.
+// Загружает watched/wishlist/ratings параллельными запросами.
+// Раньше здесь был быстрый путь через SQL-функцию get_watched_wishlist_ratings,
+// но она отдаёт "просмотрено" плоским списком без указания, КЕМ именно
+// отмечено — а это как раз нужно для деления на "мной/партнёром/нами".
+// Поэтому теперь всегда идём напрямую, тремя параллельными запросами.
 async function loadUserDataFromDB() {
     if (!currentUser) return;
-    try {
-        const { data, error } = await db.rpc('get_watched_wishlist_ratings');
-        if (error) throw error;
-
-        watchedTitles = new Set(data.watched || []);
-        wishlistTitles = new Set(data.wishlist || []);
-
-        const temp = {};
-        (data.ratings || []).forEach(r => {
-            if (!temp[r.title]) temp[r.title] = [];
-            temp[r.title].push({ username: r.username, score: r.score, userId: r.user_id });
-        });
-        ratingsData = temp;
-    } catch (e) {
-        await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
-    }
+    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
 }
 
 // В системе всего 2 пользователя — сопоставляем email с красивым именем
@@ -534,16 +586,19 @@ async function updateUIOnLiveChange() {
     // каждом таком изменении. Загружаем только то, что реально изменилось.
     await loadUserDataFromDB();
 
-    // 1. Обновляем счетчики на кнопках главного экрана
-    let buttons = document.querySelectorAll("button");
-    buttons.forEach(btn => {
-        if (btn.textContent.includes("Просмотрено")) {
-            btn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
-        }
-        if (btn.textContent.includes("Будем смотреть")) {
-            btn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-        }
-    });
+    // 1. Обновляем счетчики на кнопках главного экрана (только по явным id —
+    // раньше здесь искали ВСЕ кнопки по вхождению текста "Просмотрено"/"Будем
+    // смотреть", из-за чего заодно портились и подкатегории "Просмотрено
+    // мной/партнёром/нами" с похожим текстом на кнопках)
+    const watchedMainBtn = document.getElementById("watchedMainBtn");
+    if (watchedMainBtn) {
+        const totalWatched = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
+        watchedMainBtn.textContent = "🎬 Просмотрено (" + totalWatched + ")";
+    }
+    const wishlistMainBtn = document.getElementById("wishlistMainBtn");
+    if (wishlistMainBtn) {
+        wishlistMainBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
+    }
 
     // 2. Обновляем иконки звездочек и оценки
     let rows = document.querySelectorAll(".item-row");
@@ -596,12 +651,72 @@ async function refreshCurrentScreen() {
     }
 }
 
-// ==========================================
+// =======================================================
 // НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ, ОЦЕНКА ИЛИ СНЯТИЕ)
-// ==========================================
+// =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
     showStarChoiceModal(title);
+}
+
+// Отмечает тайтл просмотренным. forBoth=true — отмечаем сразу за себя И за
+// партнёра (если его user_id удалось определить и он ещё сам не отмечал).
+async function markWatched(title, forBoth) {
+    if (!currentUser) return;
+
+    // Если тайтл был в вишлисте — просмотренное отменяет "будем смотреть"
+    if (wishlistTitles.has(title)) {
+        wishlistTitles.delete(title);
+        db.from('wishlist_items').delete().eq('title', title).then(({ error }) => {
+            if (error) console.error("Не удалось убрать из вишлиста при отметке просмотренного:", error);
+        });
+    }
+
+    const rowsToInsert = [{ user_id: currentUser.id, title: title }];
+
+    if (forBoth) {
+        const partnerId = getPartnerUserId();
+        const partnerAlreadyHasIt = !!(watchedByUser[title] && watchedByUser[title].has(partnerId));
+        if (partnerId && !partnerAlreadyHasIt) {
+            rowsToInsert.push({ user_id: partnerId, title: title });
+        }
+    }
+
+    // Оптимистично обновляем локально сразу, не дожидаясь ответа сервера
+    if (!watchedByUser[title]) watchedByUser[title] = new Set();
+    rowsToInsert.forEach(r => watchedByUser[title].add(r.user_id));
+    recomputeWatchedBuckets();
+    updateUIOnLiveChange();
+
+    const { error } = await db.from('watched_items').insert(rowsToInsert);
+    if (error) {
+        console.error("Ошибка при сохранении в просмотренное:", error);
+        rowsToInsert.forEach(r => watchedByUser[title] && watchedByUser[title].delete(r.user_id));
+        recomputeWatchedBuckets();
+        updateUIOnLiveChange();
+        alert("Не удалось сохранить отметку просмотренного.");
+    }
+}
+
+// Убирает ТОЛЬКО отметку текущего пользователя (если было "нами" — станет
+// "партнёром"; если было только "мной" — исчезнет из просмотренного вовсе)
+async function removeMyWatched(title) {
+    if (!currentUser) return;
+
+    if (watchedByUser[title]) {
+        watchedByUser[title].delete(currentUser.id);
+        if (watchedByUser[title].size === 0) delete watchedByUser[title];
+    }
+    recomputeWatchedBuckets();
+    updateUIOnLiveChange();
+
+    const { error } = await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+    if (error) {
+        console.error("Ошибка при удалении из просмотренного:", error);
+        // На всякий случай перезагружаем актуальное состояние с сервера
+        await loadWatchedFromDB();
+        updateUIOnLiveChange();
+    }
 }
 
 // Модальное окно выбора действия для звёздочки
@@ -610,18 +725,25 @@ function showStarChoiceModal(title) {
     overlay.className = "modal-overlay";
     overlay.id = "starChoiceModal";
 
-    const isWatched = watchedTitles.has(title);
+    const iWatchedIt = watchedTitlesMine.has(title) || watchedTitlesBoth.has(title);
+    const isWatchedAtAll = watchedTitles.has(title);
     const isWishlisted = wishlistTitles.has(title);
 
     let optionsHtml = "";
-    if (isWatched) {
-        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного</button>`;
-    } else if (isWishlisted) {
-        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
+
+    if (iWatchedIt) {
+        optionsHtml += `<button id="choiceRemoveWatched" class="btn-pink-style">❌ Убрать мою отметку "просмотрено"</button>`;
     } else {
-        optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
-        optionsHtml += `<button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>`;
+        optionsHtml += `<button id="choiceWatchMe" class="btn-pink-style">🎬 Просмотрено мной</button>`;
+        optionsHtml += `<button id="choiceWatchBoth" class="btn-pink-style">🎬❤️ Просмотрено нами</button>`;
     }
+
+    if (isWishlisted) {
+        optionsHtml += `<button id="choiceRemoveWish" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
+    } else if (!isWatchedAtAll) {
+        optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
+    }
+
     optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
     optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
 
@@ -637,19 +759,21 @@ function showStarChoiceModal(title) {
 
     document.body.appendChild(overlay);
 
-    const removeBtn = document.getElementById("choiceRemove");
-    if (removeBtn) {
-        removeBtn.onclick = async () => {
+    const removeWatchedBtn = document.getElementById("choiceRemoveWatched");
+    if (removeWatchedBtn) {
+        removeWatchedBtn.onclick = () => {
             overlay.remove();
-            if (isWatched) {
-                watchedTitles.delete(title);
-                updateUIOnLiveChange();
-                await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
-            } else if (isWishlisted) {
-                wishlistTitles.delete(title);
-                updateUIOnLiveChange();
-                await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
-            }
+            removeMyWatched(title);
+        };
+    }
+
+    const removeWishBtn = document.getElementById("choiceRemoveWish");
+    if (removeWishBtn) {
+        removeWishBtn.onclick = async () => {
+            overlay.remove();
+            wishlistTitles.delete(title);
+            updateUIOnLiveChange();
+            await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
         };
     }
 
@@ -668,18 +792,19 @@ function showStarChoiceModal(title) {
         };
     }
 
-    const watchBtnEl = document.getElementById("choiceWatch");
-    if (watchBtnEl) {
-        watchBtnEl.onclick = async () => {
+    const watchMeBtn = document.getElementById("choiceWatchMe");
+    if (watchMeBtn) {
+        watchMeBtn.onclick = () => {
             overlay.remove();
-            watchedTitles.add(title);
-            updateUIOnLiveChange();
-            const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
-            if (error) {
-                watchedTitles.delete(title);
-                updateUIOnLiveChange();
-                console.error("Ошибка при сохранении в просмотренное:", error);
-            }
+            markWatched(title, false);
+        };
+    }
+
+    const watchBothBtn = document.getElementById("choiceWatchBoth");
+    if (watchBothBtn) {
+        watchBothBtn.onclick = () => {
+            overlay.remove();
+            markWatched(title, true);
         };
     }
 
@@ -1249,6 +1374,7 @@ async function showHome() {
     }
 
     let wishlistBtn = document.createElement("button");
+    wishlistBtn.id = "wishlistMainBtn";
     wishlistBtn.className = "btn-pink-style";
     wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
     wishlistBtn.onclick = () => {
@@ -1258,14 +1384,16 @@ async function showHome() {
     };
     app.appendChild(wishlistBtn);
 
-    // Кнопка "Просмотрено" на главной
+    // Кнопка "Просмотрено" на главной — ведёт в папку с 3 подкатегориями
+    // (мной / партнёром / нами)
     let watchedBtn = document.createElement("button");
+    watchedBtn.id = "watchedMainBtn";
     watchedBtn.className = "btn-pink-style";
-    watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
+    const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
+    watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
     watchedBtn.onclick = () => {
-        const list = Array.from(watchedTitles);
         currentCategoryName = "🎬 Просмотрено";
-        openData(list, true, "🎬 Просмотрено");
+        openData(buildWatchedCategoryTree(), true, "🎬 Просмотрено");
     };
     app.appendChild(watchedBtn);
 
@@ -1577,7 +1705,7 @@ function showActionMenu(itemText) {
         if (url) {
             posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
         } else {
-            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильм не найден</p>`;
+            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильму не найден</p>`;
         }
     });
 
@@ -1901,9 +2029,11 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(countFooter);
     }
 
-    // Тумблер тёмной темы — только внутри корневой секретной категории, но не в подкатегориях
-    const isMainSecretCategoryOnly = isInSecretCategory && (content === dbData[currentCategoryName]);
-    if (isMainSecretCategoryOnly && currentUser) {
+    // Тумблер тёмной темы — только на самом верхнем экране категории "Секрет"
+    // (history.length === 1 сразу после клика по кнопке категории на главной),
+    // а не в её подкатегориях/жанрах ниже по дереву
+    const isTopLevelOfSecretCategory = isInSecretCategory && history.length === 1;
+    if (isTopLevelOfSecretCategory && currentUser) {
         app.appendChild(buildThemeToggle());
     }
 
@@ -2792,6 +2922,16 @@ let lastShakeTime = 0;
 let isShakeModalOpen = false; 
 let shakeDetectionStarted = false; // чтобы не навешивать слушатель devicemotion повторно
 
+// Строит виртуальную структуру категории "Просмотрено" с 3 подкатегориями —
+// переиспользует ту же ветку рендера openData(), что и обычные жанры/категории
+function buildWatchedCategoryTree() {
+    return {
+        ["🙋 Просмотрено мной (" + watchedTitlesMine.size + ")"]: Array.from(watchedTitlesMine),
+        ["🧑‍🤝‍🧑 Просмотрено партнёром (" + watchedTitlesPartner.size + ")"]: Array.from(watchedTitlesPartner),
+        ["❤️ Просмотрено нами (" + watchedTitlesBoth.size + ")"]: Array.from(watchedTitlesBoth),
+    };
+}
+
 function getAllTitlesFromCategory(dataBranch) {
     let resultList = [];
 
@@ -2973,7 +3113,10 @@ function handleMotion(event) {
     let deltaY = Math.abs(lastY - y);
     let deltaZ = Math.abs(lastZ - z);
 
-    if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
+    if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || 
+        (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || 
+        (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
+        
         onPhoneShake();
     }
 
@@ -2981,27 +3124,171 @@ function handleMotion(event) {
 }
 
 function startShakeDetection() {
-    if (shakeDetectionStarted) return; 
+    if (shakeDetectionStarted) return; // уже запущено — не навешиваем слушатель второй раз
+    shakeDetectionStarted = true;
 
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-        // iOS 13+ требует явного разрешения, но запрашивать его можно ТОЛЬКО по клику пользователя.
-        // Поэтому вешаем один раз обработчик клика на весь документ. При первом же тапе пользователя
-        // в любой точке экрана — запрашиваем разрешение на акселерометр.
-        const requestPermissionOnFirstClick = () => {
-            DeviceMotionEvent.requestPermission()
-                .then(permissionState => {
-                    if (permissionState === 'granted') {
-                        window.addEventListener('devicemotion', handleMotion);
-                        shakeDetectionStarted = true;
-                    }
-                })
-                .catch(console.error);
-            document.removeEventListener('click', requestPermissionOnFirstClick);
-        };
-        document.addEventListener('click', requestPermissionOnFirstClick);
+        DeviceMotionEvent.requestPermission()
+            .then(permissionState => {
+                if (permissionState === 'granted') {
+                    window.addEventListener('devicemotion', handleMotion);
+                    console.log("Детектор тряски успешно запущен (iOS)");
+                }
+            })
+            .catch(console.error);
     } else {
-        // Обычные браузеры (Android, старые iOS) — просто вешаем слушатель сразу
         window.addEventListener('devicemotion', handleMotion);
-        shakeDetectionStarted = true;
+        console.log("Детектор тряски успешно запущен (Android)");
     }
 }
+
+function setupMusicAutoplay() {
+    const audio = document.getElementById("bgMusic");
+    
+    const playHandler = () => {
+        if (isMusicPlaying) {
+            audio.play().catch(e => console.log("Музыка не смогла запуститься"));
+            document.removeEventListener("click", playHandler); 
+        }
+    };
+
+    document.addEventListener("click", playHandler);
+}
+// Генератор бесконечных нежных сердечек на заднем фоне
+function initHeartsBackground() {
+    // Если контейнер уже почему-то существует, не создаем его заново
+    if (document.querySelector('.hearts-background')) return;
+
+    const container = document.createElement('div');
+    container.className = 'hearts-background';
+    document.body.appendChild(container);
+
+    function spawnHeart() {
+        const heart = document.createElement('div');
+        heart.className = 'floating-heart';
+        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
+
+        // Рандомизируем параметры для живого и естественного эффекта
+        const size = Math.random() * 18 + 12; // Размер от 12px до 30px
+        const startLeft = Math.random() * 100; // Позиция по горизонтали (в %)
+        const duration = Math.random() * 12 + 10; // Скорость подъема от 10 до 22 секунд (очень плавно)
+        const swayX = (Math.random() * 120 - 60) + 'px'; // Амплитуда покачивания влево/вправо
+        const rotateDeg = (Math.random() * 360) + 'deg'; // Случайный угол вращения
+
+        // Применяем стили
+        heart.style.fontSize = `${size}px`;
+        heart.style.left = `${startLeft}%`;
+        heart.style.animationDuration = `${duration}s`;
+        
+        // Передаем переменные покачивания во floatUp анимацию
+        heart.style.setProperty('--sway-x', swayX);
+        heart.style.setProperty('--rotate-deg', rotateDeg);
+
+        container.appendChild(heart);
+
+        // Самоликвидация элемента из DOM после того, как он улетел, чтобы не грузить браузер
+        setTimeout(() => {
+            heart.remove();
+        }, duration * 1000);
+    }
+
+    // Создаем первое сердечко сразу
+    spawnHeart();
+    
+    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
+    setInterval(spawnHeart, 900);
+}
+
+// Запускаем магию!
+initHeartsBackground();
+setupMusicAutoplay();
+
+const style = document.createElement('style');
+style.textContent = `
+    .round-btn {
+        overflow: hidden;
+        width: 40px !important;
+        height: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        cursor: pointer !important;
+        border: 1px solid #ccc !important;
+        background: #f9f9f9 !important;
+        font-size: 18px !important;
+        box-sizing: border-box !important;
+        line-height: 1 !important;
+    }
+    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
+    .hearts-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none; /* Клики проходят сквозь них */
+        z-index: -1;          /* Строго на заднем фоне */
+        overflow: hidden;
+    }
+
+    .floating-heart {
+        position: absolute;
+        bottom: -50px;        /* Появляются чуть ниже экрана */
+        color: #ff4081;       /* Малиново-розовый цвет */
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+        animation: floatUp linear forwards;
+    }
+
+    @keyframes floatUp {
+        0% {
+            transform: translateY(0) translateX(0) rotate(0deg);
+            opacity: 0;
+        }
+        10% {
+            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
+        }
+        90% {
+            opacity: 0.15;
+        }
+        100% {
+            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
+            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
+            opacity: 0;       /* Полностью растворяются вверху */
+        }
+    }
+    /* Звёздочка для вишлиста (Красивый голубой) */
+    .btn-watch.wishlist-active {
+        color: #2196f3 !important;
+        opacity: 1 !important;
+    }
+
+    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
+    .btn-pink-style {
+        background-color: #ffe3ec !important;
+        color: #d81b60 !important;
+        border: none !important;
+        font-weight: 600 !important;
+        transition: background-color 0.2s ease, transform 0.1s ease;
+    }
+    .btn-pink-style:hover {
+        background-color: #ffd5e3 !important;
+    }
+
+    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
+    .btn-cancel-gray {
+        background-color: #f0f0f0 !important;
+        color: #333333 !important;
+        border: none !important;
+        font-weight: 600 !important;
+        transition: background-color 0.2s ease;
+    }
+    .btn-cancel-gray:hover {
+        background-color: #e5e5e5 !important;
+    }
+`;
+document.head.appendChild(style);
