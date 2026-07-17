@@ -525,6 +525,20 @@ async function loadCommentsForTitle(title) {
     return data || [];
 }
 
+// Загружает ВСЕ комментарии по ВСЕМ тайтлам разом (для общего экрана "Комментарии")
+async function loadAllComments() {
+    const { data, error } = await db
+        .from('comments')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+    if (error) {
+        console.error("Ошибка при загрузке всех комментариев:", error);
+        return [];
+    }
+    return data || [];
+}
+
 // Лёгкое обновление только блоков с оценками (без полной перерисовки экрана)
 async function refreshRatingsUI() {
     await loadRatingsFromDB();
@@ -1420,6 +1434,12 @@ async function showHome() {
         chatBtn.textContent = "💬 Чат";
         chatBtn.onclick = () => showChatScreen();
         app.appendChild(chatBtn);
+
+        let allCommentsBtn = document.createElement("button");
+        allCommentsBtn.className = "btn-chat-purple";
+        allCommentsBtn.textContent = "🗨️ Комментарии";
+        allCommentsBtn.onclick = () => showAllCommentsScreen();
+        app.appendChild(allCommentsBtn);
     }
 
     let footer = document.createElement("p");
@@ -1977,6 +1997,174 @@ async function showCommentsModal(itemText) {
     }
 
     await refresh();
+}
+
+// =======================================================
+// ОБЩИЙ ЭКРАН "КОММЕНТАРИИ" — все комментарии по всем тайтлам сразу,
+// сгруппированные по фильму/сериалу. Редактировать или удалять здесь
+// можно только СВОЙ комментарий (как и в showCommentsModal выше).
+// =======================================================
+async function showAllCommentsScreen() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = null;
+
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = "🗨️ Комментарии";
+    app.appendChild(title);
+
+    let container = document.createElement("div");
+    container.id = "allCommentsContainer";
+    container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Загрузка...</p>`;
+    app.appendChild(container);
+
+    // Своя навигация (не трогает историю поиска/каталога) — как у экрана чата
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+
+    let homeBtn = document.createElement("button");
+    homeBtn.textContent = "🏠 Домой";
+    homeBtn.onclick = () => showHome();
+    nav.appendChild(homeBtn);
+
+    let containerEl = document.querySelector(".container");
+    if (containerEl) {
+        containerEl.insertBefore(nav, containerEl.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
+
+    await renderAllComments(container);
+}
+
+// Загружает и (пере)отрисовывает содержимое экрана "Комментарии"
+async function renderAllComments(container) {
+    const allComments = await loadAllComments();
+    if (!container.isConnected) return;
+
+    container.innerHTML = "";
+
+    if (allComments.length === 0) {
+        container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Комментариев пока нет.</p>`;
+        return;
+    }
+
+    // Группируем по названию тайтла, сохраняя порядок первого появления
+    const byTitle = {};
+    const titleOrder = [];
+    allComments.forEach(c => {
+        if (!byTitle[c.title]) {
+            byTitle[c.title] = [];
+            titleOrder.push(c.title);
+        }
+        byTitle[c.title].push(c);
+    });
+
+    titleOrder.forEach(titleName => {
+        const group = document.createElement("div");
+        group.className = "comment-title-group";
+        group.style.marginBottom = "22px";
+
+        const heading = document.createElement("h3");
+        heading.style.marginBottom = "8px";
+        heading.textContent = titleName.replace(/\s*\(\d{4}\)$/, "");
+        group.appendChild(heading);
+
+        byTitle[titleName].forEach(c => {
+            const card = document.createElement("div");
+            card.className = "comment-card";
+            const isMine = currentUser && c.user_id === currentUser.id;
+            card.innerHTML = `
+                <div class="comment-card-header"><span>${c.username}</span></div>
+                <div class="comment-card-text"></div>
+                ${isMine ? `<div class="comment-card-actions">
+                    <button class="btn-action-edit" data-act="edit">✏️ Изменить</button>
+                    <button class="btn-action-delete" data-act="delete">🗑️ Удалить</button>
+                </div>` : ``}
+            `;
+            card.querySelector(".comment-card-text").textContent = c.comment;
+
+            if (isMine) {
+                card.querySelector('[data-act="edit"]').onclick = () => {
+                    showInlineCommentEditForm(card, c, container);
+                };
+                card.querySelector('[data-act="delete"]').onclick = async () => {
+                    if (!confirm("Удалить ваш комментарий?")) return;
+                    const { error } = await db.from('comments').delete().eq('id', c.id);
+                    if (error) {
+                        alert("Не удалось удалить комментарий.");
+                        return;
+                    }
+                    await renderAllComments(container);
+                };
+            }
+
+            group.appendChild(card);
+        });
+
+        container.appendChild(group);
+    });
+}
+
+// Показывает прямо внутри карточки комментария форму редактирования своего текста
+function showInlineCommentEditForm(card, existingComment, container) {
+    const myUsername = getUsernameFromEmail(currentUser.email);
+
+    const formBox = document.createElement("div");
+    formBox.className = "modal-form";
+    formBox.innerHTML = `
+        <input type="text" id="inlineCommentInput" required maxlength="500" placeholder="Ваш комментарий...">
+        <div class="modal-buttons" style="margin-top: 8px;">
+            <button type="button" class="btn-save" id="inlineCommentSave">Сохранить</button>
+            <button type="button" class="btn-cancel" id="inlineCommentCancel">Отмена</button>
+        </div>
+    `;
+
+    // Прячем обычный вид карточки, показываем форму вместо неё
+    Array.from(card.children).forEach(child => child.style.display = "none");
+    card.appendChild(formBox);
+
+    const input = formBox.querySelector("#inlineCommentInput");
+    input.value = existingComment.comment;
+    input.focus();
+
+    formBox.querySelector("#inlineCommentCancel").onclick = () => {
+        formBox.remove();
+        Array.from(card.children).forEach(child => child.style.display = "");
+    };
+
+    formBox.querySelector("#inlineCommentSave").onclick = async () => {
+        const text = input.value.trim();
+        if (!text) return;
+
+        const { error } = await db.from('comments').upsert(
+            {
+                title: existingComment.title,
+                user_id: currentUser.id,
+                username: myUsername,
+                comment: text,
+                updated_at: new Date().toISOString()
+            },
+            { onConflict: 'title,user_id' }
+        );
+
+        if (error) {
+            console.error("Ошибка при сохранении комментария:", error);
+            alert("Не удалось сохранить комментарий.");
+            return;
+        }
+
+        await renderAllComments(container);
+    };
 }
 
 function openData(content, saveHistory = true, customTitle = null) {
