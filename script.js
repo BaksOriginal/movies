@@ -128,6 +128,14 @@ let isDarkTheme = false;
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
+// Отслеживают, находится ли пользователь СЕЙЧАС внутри разделов "Просмотрено"
+// или "Будем смотреть" (эти разделы строятся из watchedTitles*/wishlistTitles
+// "на лету", поэтому при любом изменении данных их нужно перерисовывать заново,
+// а не просто патчить иконки — иначе тайтл остаётся в старой подкатегории/
+// списке до возврата на главную).
+let currentWatchedBucket = null; // null | 'top' | 'mine' | 'partner' | 'both'
+let isWishlistScreenOpen = false;
+
 // ==========================================
 // РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
 // ==========================================
@@ -663,6 +671,19 @@ function refreshUIFromState() {
             ratingsDiv.textContent = formatRatings(itemDiv.textContent.trim());
         }
     });
+
+    // 4. Экраны "Просмотрено"/"Будем смотреть" строятся "на лету" из текущего
+    // состояния, а не из статичного списка — поэтому точечного патча иконок
+    // (шаг 2) им недостаточно: тайтл после изменения может должен переехать в
+    // другую подкатегорию (мной → партнёром) или вовсе пропасть из списка.
+    // Если сейчас открыт один из таких экранов — перерисовываем его целиком.
+    if (currentWatchedBucket === 'top') {
+        renderWatchedTop();
+    } else if (currentWatchedBucket) {
+        renderWatchedBucket(currentWatchedBucket);
+    } else if (isWishlistScreenOpen) {
+        renderWishlistFolder();
+    }
 }
 
 // Мягкое обновление текущего экрана
@@ -1276,6 +1297,8 @@ function showFilterModal(onFiltersChanged) {
 async function showHome() {
     startTransitionLock();
     isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -1403,9 +1426,7 @@ async function showHome() {
     wishlistBtn.className = "btn-pink-style";
     wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
     wishlistBtn.onclick = () => {
-        const list = Array.from(wishlistTitles);
-        currentCategoryName = "🍿 Будем смотреть";
-        openData(list, true, "🍿 Будем смотреть");
+        renderWishlistFolder();
     };
     app.appendChild(wishlistBtn);
 
@@ -1417,8 +1438,7 @@ async function showHome() {
     const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
     watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
     watchedBtn.onclick = () => {
-        currentCategoryName = "🎬 Просмотрено";
-        openData(buildWatchedCategoryTree(), true, "🎬 Просмотрено");
+        renderWatchedTop();
     };
     app.appendChild(watchedBtn);
 
@@ -2007,6 +2027,8 @@ async function showCommentsModal(itemText) {
 async function showAllCommentsScreen() {
     startTransitionLock();
     isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -2170,6 +2192,8 @@ function showInlineCommentEditForm(card, existingComment, container) {
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -2753,6 +2777,8 @@ function renderChatMessages() {
 async function showChatScreen() {
     startTransitionLock();
     isChatScreenOpen = true;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
     currentCategoryName = null;
 
     let oldNav = document.querySelector(".navigation");
@@ -3121,14 +3147,154 @@ let lastShakeTime = 0;
 let isShakeModalOpen = false; 
 let shakeDetectionStarted = false; // чтобы не навешивать слушатель devicemotion повторно
 
-// Строит виртуальную структуру категории "Просмотрено" с 3 подкатегориями —
-// переиспользует ту же ветку рендера openData(), что и обычные жанры/категории
-function buildWatchedCategoryTree() {
-    return {
-        ["🙋 Просмотрено мной (" + watchedTitlesMine.size + ")"]: Array.from(watchedTitlesMine),
-        ["🧑‍🤝‍🧑 Просмотрено партнёром (" + watchedTitlesPartner.size + ")"]: Array.from(watchedTitlesPartner),
-        ["❤️ Просмотрено нами (" + watchedTitlesBoth.size + ")"]: Array.from(watchedTitlesBoth),
-    };
+// =======================================================
+// "ЖИВЫЕ" ЭКРАНЫ "ПРОСМОТРЕНО" И "БУДЕМ СМОТРЕТЬ"
+// =======================================================
+// В отличие от обычного каталога, эти разделы строятся не из статичных
+// данных БД, а из watchedTitles*/wishlistTitles, которые меняются прямо
+// во время просмотра экрана (пользователь снимает/ставит отметку не выходя
+// из папки). Поэтому они НЕ используют общий openData()/history (там бы
+// содержимое застыло на момент открытия папки) — у них свои функции
+// рендера, которые вызываются заново после каждого изменения состояния
+// (см. refreshUIFromState()), и своя маленькая навигация.
+
+const WATCHED_BUCKETS = {
+    mine:    { label: "🙋 Просмотрено мной",       set: () => watchedTitlesMine },
+    partner: { label: "🧑‍🤝‍🧑 Просмотрено партнёром", set: () => watchedTitlesPartner },
+    both:    { label: "❤️ Просмотрено нами",       set: () => watchedTitlesBoth },
+};
+
+function renderWatchedNav(backHandler) {
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+
+    if (backHandler) {
+        let back = document.createElement("button");
+        back.textContent = "⬅ Назад";
+        back.onclick = backHandler;
+        nav.appendChild(back);
+    }
+
+    let home = document.createElement("button");
+    home.textContent = "🏠 Домой";
+    home.onclick = () => showHome();
+    nav.appendChild(home);
+
+    let container = document.querySelector(".container");
+    if (container) {
+        container.insertBefore(nav, container.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
+}
+
+// Верхний экран "Просмотрено" — 3 кнопки-подкатегории со счётчиками
+function renderWatchedTop() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = "🎬 Просмотрено";
+    currentWatchedBucket = 'top';
+    isWishlistScreenOpen = false;
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = "🎬 Просмотрено";
+    app.appendChild(title);
+
+    for (let key in WATCHED_BUCKETS) {
+        const bucket = WATCHED_BUCKETS[key];
+        let btn = document.createElement("button");
+        btn.textContent = `${bucket.label} (${bucket.set().size})`;
+        btn.onclick = () => renderWatchedBucket(key);
+        app.appendChild(btn);
+    }
+
+    renderWatchedNav(() => showHome());
+}
+
+// Экран одной подкатегории (мной / партнёром / нами) со списком тайтлов
+function renderWatchedBucket(bucketKey) {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = "🎬 Просмотрено";
+    currentWatchedBucket = bucketKey;
+    isWishlistScreenOpen = false;
+
+    const bucket = WATCHED_BUCKETS[bucketKey];
+    if (!bucket) { renderWatchedTop(); return; }
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = bucket.label;
+    app.appendChild(title);
+
+    const list = Array.from(bucket.set());
+    if (list.length === 0) {
+        let empty = document.createElement("p");
+        empty.style.textAlign = "center";
+        empty.style.color = "#999";
+        empty.textContent = "Здесь пока пусто.";
+        app.appendChild(empty);
+    } else {
+        list.forEach(item => renderItemRow(item, app));
+    }
+
+    let countFooter = document.createElement("p");
+    countFooter.className = "count-footer";
+    countFooter.textContent = `Всего тайтлов: ${list.length}`;
+    app.appendChild(countFooter);
+
+    renderWatchedNav(() => renderWatchedTop());
+}
+
+// Экран "Будем смотреть" — плоский список вишлиста
+function renderWishlistFolder() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = "🍿 Будем смотреть";
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = true;
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = "🍿 Будем смотреть";
+    app.appendChild(title);
+
+    const list = Array.from(wishlistTitles);
+    if (list.length === 0) {
+        let empty = document.createElement("p");
+        empty.style.textAlign = "center";
+        empty.style.color = "#999";
+        empty.textContent = "Здесь пока пусто.";
+        app.appendChild(empty);
+    } else {
+        list.forEach(item => renderItemRow(item, app));
+    }
+
+    let countFooter = document.createElement("p");
+    countFooter.className = "count-footer";
+    countFooter.textContent = `Всего тайтлов: ${list.length}`;
+    app.appendChild(countFooter);
+
+    renderWatchedNav(() => showHome());
 }
 
 function getAllTitlesFromCategory(dataBranch) {
