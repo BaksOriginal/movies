@@ -1061,15 +1061,17 @@ let nav = document.querySelector(".navigation");
  watchedBtn.className = "btn-pink-style";
  const totalWatched = watchedByMe.size + watchedByPartner.size + watchedTogether.size;
  watchedBtn.textContent = "🎬 Просмотрено (" + totalWatched + ")";
- watchedBtn.onclick = () => {
-     currentCategoryName = "🎬 Просмотрено";
-     const watchedData = {
-         "Просмотрено мной (" + watchedByMe.size + ")": Array.from(watchedByMe),
-         "Просмотрено партнёром (" + watchedByPartner.size + ")": Array.from(watchedByPartner),
-         "Просмотрено нами (" + watchedTogether.size + ")": Array.from(watchedTogether)
-     };
-     openData(watchedData, true, "🎬 Просмотрено");
- };
+watchedBtn.onclick = () => {
+    currentCategoryName = "🎬 Просмотрено";
+
+    const watchedData = {
+        [`Просмотрено мной (${watchedByMe.size})`]: Array.from(watchedByMe),
+        [`Просмотрено партнёром (${watchedByPartner.size})`]: Array.from(watchedByPartner),
+        [`Просмотрено нами (${watchedTogether.size})`]: Array.from(watchedTogether)
+    };
+
+    openData(watchedData, true, "🎬 Просмотрено");
+};
  app.appendChild(watchedBtn);
 
  if (currentUser) {
