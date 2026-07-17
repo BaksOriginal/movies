@@ -101,16 +101,6 @@ let watchedByMe = new Set();
 let watchedByPartner = new Set();
 let watchedTogether = new Set();
 
-// Обратная совместимость: геттер для кода, который ожидает watchedTitles
-Object.defineProperty(window, 'watchedTitles', {
-    get: () => {
-        const result = new Set();
-        watchedByMe.forEach(t => result.add(t));
-        watchedTogether.forEach(t => result.add(t));
-        return result;
-    }
-});
-
 let wishlistTitles = new Set();
 let ratingsData = {};
 let history = [];
@@ -249,7 +239,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 // ==========================================
-// ЗАГРУЗКА ДАННЫХ ПРОСМОТРЕННОГО (НОВАЯ СТРУКТУРА)
+// ЗАГРУЗКА ДАННЫХ ПРОСМОТРЕННОГО (ИСПРАВЛЕННАЯ)
 // ==========================================
 async function loadWatchedFromDB() {
     if (!currentUser) return;
@@ -376,6 +366,9 @@ async function loadRatingsFromDB() {
     ratingsData = temp;
 }
 
+// =======================================================
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ ВСЕХ ДАННЫХ
+// =======================================================
 async function loadUserDataFromDB() {
     if (!currentUser) return;
     try {
@@ -505,11 +498,14 @@ function subscribeToChanges() {
         .subscribe();
 }
 
+// =======================================================
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ UI
+// =======================================================
 async function updateUIOnLiveChange() {
     await loadUserDataFromDB();
 
-    let buttons = document.querySelectorAll("button");
-    buttons.forEach(btn => {
+    // Обновляем кнопки на главной
+    document.querySelectorAll("button").forEach(btn => {
         if (btn.textContent.includes("Просмотрено мной")) {
             btn.textContent = "🎬 Просмотрено мной (" + watchedByMe.size + ")";
         }
@@ -524,25 +520,33 @@ async function updateUIOnLiveChange() {
         }
     });
 
-    let rows = document.querySelectorAll(".item-row");
-    rows.forEach(row => {
+    // Обновляем звёздочки у тайтлов
+    document.querySelectorAll(".item-row").forEach(row => {
         let itemDiv = row.querySelector(".item");
         let watchBtn = row.querySelector(".btn-watch");
 
         if (itemDiv && watchBtn) {
             let itemText = itemDiv.textContent.trim();
-
+            
+            // Для секретных тайтлов пропускаем
             const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
             let lookupText = itemText;
             if (isSecret && !itemText.includes("(2026)")) {
                 lookupText = itemText + " (2026)";
             }
 
+            // Сбрасываем все классы
             watchBtn.className = "btn-watch";
 
-            if (watchedByMe.has(lookupText) || watchedTogether.has(lookupText)) {
+            // Определяем статус в правильном порядке приоритета
+            if (watchedTogether.has(lookupText)) {
                 watchBtn.classList.add("watched");
                 watchBtn.textContent = "★";
+                watchBtn.style.color = "";
+            } else if (watchedByMe.has(lookupText)) {
+                watchBtn.classList.add("watched");
+                watchBtn.textContent = "★";
+                watchBtn.style.color = "";
             } else if (watchedByPartner.has(lookupText)) {
                 watchBtn.classList.add("watched-partner");
                 watchBtn.textContent = "★";
@@ -555,6 +559,7 @@ async function updateUIOnLiveChange() {
         }
     });
 
+    // Обновляем оценки
     document.querySelectorAll(".movie-item").forEach(wrapper => {
         let itemDiv = wrapper.querySelector(".item");
         let ratingsDiv = wrapper.querySelector(".item-ratings");
@@ -575,14 +580,16 @@ async function refreshCurrentScreen() {
 }
 
 // =======================================================
-// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ КЛИКА ПО ЗВЕЗДОЧКЕ
 // =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
     showStarChoiceModal(title);
 }
 
-// Проверяет, есть ли у партнёра отметка "self" на этот тайтл
+// =======================================================
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ ПРОВЕРКИ ПАРТНЁРА
+// =======================================================
 async function checkPartnerWatchedSelf(title) {
     if (!currentUser) return false;
     const { data, error } = await db
@@ -600,32 +607,51 @@ async function checkPartnerWatchedSelf(title) {
     return !!data;
 }
 
+// =======================================================
+// ИСПРАВЛЕННОЕ МОДАЛЬНОЕ ОКНО ДЛЯ ЗВЕЗДОЧКИ
+// =======================================================
 function showStarChoiceModal(title) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "starChoiceModal";
 
-    const isWatchedByMe = watchedByMe.has(title) || watchedTogether.has(title);
-    const isWatchedByPartner = watchedByPartner.has(title);
+    // Определяем текущий статус
     const isWatchedTogether = watchedTogether.has(title);
+    const isWatchedByMe = watchedByMe.has(title);
+    const isWatchedByPartner = watchedByPartner.has(title);
     const isWishlisted = wishlistTitles.has(title);
 
     let optionsHtml = "";
 
+    // Определяем доступные действия на основе текущего статуса
     if (isWatchedTogether) {
+        // Если смотрим вместе - можно убрать
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного</button>`;
+    } else if (isWatchedByMe && isWatchedByPartner) {
+        // Редкий случай: отмечено и мной, и партнёром - предлагаем объединить
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
         optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного</button>`;
     } else if (isWatchedByMe) {
+        // Только мной - можно убрать или добавить партнёра
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
         optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного мной</button>`;
     } else if (isWatchedByPartner) {
+        // Только партнёром - можно добавить себя или объединить
         optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
         optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
     } else if (isWishlisted) {
+        // В вишлисте - можно убрать или отметить как просмотренное
+        optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
         optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
     } else {
+        // Ничего не отмечено
         optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
         optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
         optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
     }
+    
+    // Всегда добавляем оценку и отмену
     optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
     optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
 
@@ -641,23 +667,43 @@ function showStarChoiceModal(title) {
 
     document.body.appendChild(overlay);
 
+    // ===== ОБРАБОТЧИКИ КНОПОК =====
+
+    // Удаление из просмотренного/вишлиста
     const removeBtn = document.getElementById("choiceRemove");
     if (removeBtn) {
         removeBtn.onclick = async () => {
             overlay.remove();
-            if (isWatchedTogether || isWatchedByMe) {
-                watchedByMe.delete(title);
+            
+            // Удаляем из всех коллекций
+            if (watchedTogether.has(title)) {
                 watchedTogether.delete(title);
-                updateUIOnLiveChange();
-                await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
-            } else if (isWishlisted) {
+                // Удаляем из БД
+                await db.from('watched_items').delete().eq('title', title);
+            }
+            if (watchedByMe.has(title)) {
+                watchedByMe.delete(title);
+                await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id).eq('watch_type', 'self');
+            }
+            if (watchedByPartner.has(title)) {
+                // Удаляем только свою запись, если она есть
+                const { data } = await db.from('watched_items').select('user_id').eq('title', title).eq('watch_type', 'self');
+                if (data && data.some(item => item.user_id === currentUser.id)) {
+                    watchedByMe.delete(title);
+                    await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id).eq('watch_type', 'self');
+                }
+                // Если партнёр отметил - оставляем
+            }
+            if (wishlistTitles.has(title)) {
                 wishlistTitles.delete(title);
-                updateUIOnLiveChange();
                 await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
             }
+            
+            updateUIOnLiveChange();
         };
     }
 
+    // Добавление в вишлист
     const wishBtn = document.getElementById("choiceWish");
     if (wishBtn) {
         wishBtn.onclick = async () => {
@@ -673,19 +719,24 @@ function showStarChoiceModal(title) {
         };
     }
 
+    // Отметить как просмотрено мной
     const watchSelfBtn = document.getElementById("choiceWatchSelf");
     if (watchSelfBtn) {
         watchSelfBtn.onclick = async () => {
             overlay.remove();
 
+            // Проверяем, есть ли у партнёра отметка
             const partnerHasSelf = await checkPartnerWatchedSelf(title);
 
             if (partnerHasSelf) {
+                // Если у партнёра уже есть, то объединяем в "вместе"
                 watchedTogether.add(title);
                 watchedByPartner.delete(title);
+                watchedByMe.delete(title);
                 updateUIOnLiveChange();
 
-                await db.from('watched_items').delete().eq('title', title).eq('watch_type', 'self');
+                // Удаляем все старые записи и создаём одну "together"
+                await db.from('watched_items').delete().eq('title', title);
                 const { error } = await db.from('watched_items').insert([{ 
                     user_id: currentUser.id, 
                     title: title,
@@ -697,8 +748,15 @@ function showStarChoiceModal(title) {
                     console.error("Ошибка при сохранении 'вместе':", error);
                 }
             } else {
+                // Просто отмечаем как просмотрено мной
                 watchedByMe.add(title);
+                // Если был в вишлисте - убираем
+                if (wishlistTitles.has(title)) {
+                    wishlistTitles.delete(title);
+                    await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+                }
                 updateUIOnLiveChange();
+                
                 const { error } = await db.from('watched_items').insert([{ 
                     user_id: currentUser.id, 
                     title: title,
@@ -713,15 +771,22 @@ function showStarChoiceModal(title) {
         };
     }
 
+    // Отметить как просмотрено нами
     const watchTogetherBtn = document.getElementById("choiceWatchTogether");
     if (watchTogetherBtn) {
         watchTogetherBtn.onclick = async () => {
             overlay.remove();
+            
             watchedTogether.add(title);
             watchedByMe.delete(title);
             watchedByPartner.delete(title);
+            if (wishlistTitles.has(title)) {
+                wishlistTitles.delete(title);
+                await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            }
             updateUIOnLiveChange();
 
+            // Удаляем все старые записи и создаём одну "together"
             await db.from('watched_items').delete().eq('title', title);
             const { error } = await db.from('watched_items').insert([{ 
                 user_id: currentUser.id, 
@@ -736,14 +801,22 @@ function showStarChoiceModal(title) {
         };
     }
 
-    document.getElementById("choiceRate").onclick = () => {
-        overlay.remove();
-        showRatingModal(title);
-    };
+    // Оценка
+    const rateBtn = document.getElementById("choiceRate");
+    if (rateBtn) {
+        rateBtn.onclick = () => {
+            overlay.remove();
+            showRatingModal(title);
+        };
+    }
 
-    document.getElementById("choiceCancel").onclick = () => {
-        overlay.remove();
-    };
+    // Отмена
+    const cancelBtn = document.getElementById("choiceCancel");
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
+            overlay.remove();
+        };
+    }
 }
 
 function showLoginScreen() {
@@ -1159,7 +1232,7 @@ function showFilterModal(onFiltersChanged) {
 }
 
 // =======================================================
-// ГЛАВНАЯ СТРАНИЦА
+// ИСПРАВЛЕННЫЙ ПОКАЗ ГЛАВНОЙ СТРАНИЦЫ
 // =======================================================
 async function showHome() {
     startTransitionLock();
@@ -1334,7 +1407,6 @@ async function showHome() {
         chatBtn.onclick = () => showChatScreen();
         app.appendChild(chatBtn);
 
-        // ===== КНОПКА КОММЕНТАРИЕВ =====
         let commentsBtn = document.createElement("button");
         commentsBtn.className = "btn-chat-purple";
         commentsBtn.textContent = "💭 Комментарии";
@@ -1352,7 +1424,7 @@ async function showHome() {
 }
 
 // =======================================================
-// ОТРИСОВКА ЭЛЕМЕНТА (ТАЙТЛА)
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ ОТРИСОВКИ ЭЛЕМЕНТА
 // =======================================================
 function renderItemRow(itemText, container) {
     let wrapper = document.createElement("div");
@@ -1457,7 +1529,11 @@ function renderItemRow(itemText, container) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
 
-        if (watchedByMe.has(itemText) || watchedTogether.has(itemText)) {
+        // Определяем статус в правильном порядке приоритета
+        if (watchedTogether.has(itemText)) {
+            watchBtn.classList.add("watched");
+            watchBtn.textContent = "★";
+        } else if (watchedByMe.has(itemText)) {
             watchBtn.classList.add("watched");
             watchBtn.textContent = "★";
         } else if (watchedByPartner.has(itemText)) {
@@ -1470,7 +1546,10 @@ function renderItemRow(itemText, container) {
             watchBtn.textContent = "☆";
         }
 
-        watchBtn.onclick = () => handleStarClick(itemText);
+        watchBtn.onclick = (e) => {
+            e.stopPropagation();
+            handleStarClick(itemText);
+        };
         row.appendChild(watchBtn);
     }
 
@@ -2131,9 +2210,7 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(countFooter);
     }
 
-    // ===== ИСПРАВЛЕНИЕ: тумблер темы ТОЛЬКО на уровне категории (history.length === 1) =====
-    // history.length === 1 означает, что мы только что кликнули по категории (первый уровень)
-    // и ещё не углубились в жанры/франшизы
+    // Тумблер темы только на уровне категории
     if (isInSecretCategory && currentUser && history.length === 1) {
         app.appendChild(buildThemeToggle());
     }
