@@ -555,6 +555,7 @@ function subscribeToChanges() {
             { event: 'read_status' },
             (payload) => {
                 const info = payload.payload || {};
+                console.log("[read_status] получен broadcast от собеседника:", info, "isChatScreenOpen:", isChatScreenOpen);
                 if (!currentUser || info.user_id === currentUser.id) return; // игнорируем собственную отметку
                 if (!info.last_read_at) return;
 
@@ -566,7 +567,9 @@ function subscribeToChanges() {
                 if (isChatScreenOpen) updateReadIndicator();
             }
         )
-        .subscribe();
+        .subscribe((status) => {
+            console.log("[realtimeChannel] статус подписки:", status);
+        });
 }
 
 // Живое обновление интерфейса
@@ -2050,12 +2053,13 @@ async function markChatAsRead() {
     // вовсе, если Realtime/RLS для этой таблицы настроены не полностью).
     // Broadcast летит собеседнику напрямую и мгновенно, точно так же,
     // как индикатор "печатает...".
+    console.log("[read_status] отправляю broadcast, канал существует:", !!realtimeChannel, "время:", nowIso);
     if (realtimeChannel) {
         realtimeChannel.send({
             type: 'broadcast',
             event: 'read_status',
             payload: { user_id: currentUser.id, last_read_at: nowIso }
-        });
+        }).then(res => console.log("[read_status] результат отправки broadcast:", res));
     }
 }
 
