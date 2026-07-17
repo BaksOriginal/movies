@@ -16,8 +16,8 @@ const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 // вашего GitHub-репозитория и укажите ниже владельца/имя репозитория/ветку.
 // Список стикеров подтягивается динамически через GitHub API — просто
 // добавляйте новые файлы в папку, менять код не нужно.
-const GITHUB_STICKERS_OWNER = "ВАШ_GITHUB_ЛОГИН";
-const GITHUB_STICKERS_REPO = "ВАШ_РЕПОЗИТОРИЙ";
+const GITHUB_STICKERS_OWNER = "BaksOriginal";
+const GITHUB_STICKERS_REPO = "movies";
 const GITHUB_STICKERS_BRANCH = "main";
 const GITHUB_STICKERS_PATH = "stickers";
 const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутри текстового поля message
