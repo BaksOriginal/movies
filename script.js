@@ -16,8 +16,8 @@ const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 // вашего GitHub-репозитория и укажите ниже владельца/имя репозитория/ветку.
 // Список стикеров подтягивается динамически через GitHub API — просто
 // добавляйте новые файлы в папку, менять код не нужно.
-const GITHUB_STICKERS_OWNER = "BaksOriginal";
-const GITHUB_STICKERS_REPO = "movies";
+const GITHUB_STICKERS_OWNER = "ВАШ_GITHUB_ЛОГИН";
+const GITHUB_STICKERS_REPO = "ВАШ_РЕПОЗИТОРИЙ";
 const GITHUB_STICKERS_BRANCH = "main";
 const GITHUB_STICKERS_PATH = "stickers";
 const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутри текстового поля message
@@ -188,12 +188,14 @@ db.auth.onAuthStateChange(async (event, session) => {
     if (session && isAppInitialized && currentUser && currentUser.id === session.user.id) {
         currentUser = session.user;
         saveSessionBackup(session);
+        startShakeDetection(); // безопасно — функция сама не даст навесить слушатель дважды
         return;
     }
 
     if (session) {
         currentUser = session.user;
         saveSessionBackup(session); // Бэкапим сессию
+        startShakeDetection(); // На случай, если сессия восстановилась автоматически, а не через форму логина (функция сама защищена от повторного запуска)
 
         // Важно: помечаем инициализацию начатой СРАЗУ, синхронно, а не после
         // загрузки данных. Иначе при первой загрузке страницы Supabase иногда
@@ -1756,6 +1758,8 @@ function createChatBubble(msg) {
         img.src = getStickerUrl(msg.message);
         img.alt = "стикер";
         img.className = "chat-sticker-img";
+        img.draggable = false;
+        img.oncontextmenu = (e) => e.preventDefault(); // отключаем системное меню браузера на долгом тапе
         text.appendChild(img);
     } else {
         text.textContent = msg.message;
@@ -2354,6 +2358,7 @@ const SHAKE_TIMEOUT = 2500;
 let lastX = null, lastY = null, lastZ = null;
 let lastShakeTime = 0;
 let isShakeModalOpen = false; 
+let shakeDetectionStarted = false; // чтобы не навешивать слушатель devicemotion повторно
 
 function getAllTitlesFromCategory(dataBranch) {
     let resultList = [];
@@ -2547,6 +2552,9 @@ function handleMotion(event) {
 }
 
 function startShakeDetection() {
+    if (shakeDetectionStarted) return; // уже запущено — не навешиваем слушатель второй раз
+    shakeDetectionStarted = true;
+
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
         DeviceMotionEvent.requestPermission()
             .then(permissionState => {
