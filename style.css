@@ -806,4 +806,10 @@ button:nth-child(6){
     max-height: 140px;
     border-radius: 14px;
     display: block;
+    -webkit-touch-callout: none; /* отключает системное меню браузера на долгом тапе (iOS) */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    user-drag: none;
+    pointer-events: none; /* тач/клик проходит "сквозь" картинку сразу к родительскому пузырю сообщения */
 }
