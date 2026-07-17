@@ -547,6 +547,25 @@ function subscribeToChanges() {
                 if (isChatScreenOpen) showTypingIndicator(info.username || "Собеседник");
             }
         )
+        // Мгновенное обновление статуса "Просмотрено" через broadcast
+        // (не зависит от postgres_changes/RLS по таблице chat_reads —
+        // приходит напрямую и без задержек)
+        .on(
+            'broadcast',
+            { event: 'read_status' },
+            (payload) => {
+                const info = payload.payload || {};
+                if (!currentUser || info.user_id === currentUser.id) return; // игнорируем собственную отметку
+                if (!info.last_read_at) return;
+
+                // Обновляем только если пришедшая отметка новее уже сохранённой
+                // (на случай, если события придут не по порядку)
+                if (!otherUserLastRead || new Date(info.last_read_at).getTime() > new Date(otherUserLastRead).getTime()) {
+                    otherUserLastRead = info.last_read_at;
+                }
+                if (isChatScreenOpen) updateReadIndicator();
+            }
+        )
         .subscribe();
 }
 
@@ -2015,12 +2034,28 @@ async function onChatRealtimeChange() {
 // Записывает текущее время как момент, когда пользователь последний раз видел чат
 async function markChatAsRead() {
     if (!currentUser) return;
+    const nowIso = new Date().toISOString();
+
     const { error } = await db.from('chat_reads').upsert(
-        { user_id: currentUser.id, last_read_at: new Date().toISOString() },
+        { user_id: currentUser.id, last_read_at: nowIso },
         { onConflict: 'user_id' }
     );
     if (error) {
         console.error("Ошибка при отметке чата прочитанным:", error);
+        return;
+    }
+
+    // Дублируем через broadcast — не ждём postgres_changes по таблице
+    // chat_reads (событие может приходить с задержкой или не приходить
+    // вовсе, если Realtime/RLS для этой таблицы настроены не полностью).
+    // Broadcast летит собеседнику напрямую и мгновенно, точно так же,
+    // как индикатор "печатает...".
+    if (realtimeChannel) {
+        realtimeChannel.send({
+            type: 'broadcast',
+            event: 'read_status',
+            payload: { user_id: currentUser.id, last_read_at: nowIso }
+        });
     }
 }
 
