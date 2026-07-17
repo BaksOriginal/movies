@@ -22,24 +22,17 @@ const GITHUB_STICKERS_BRANCH = "main";
 const GITHUB_STICKERS_PATH = "stickers";
 const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутри текстового поля message
 
-let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
-// Включаем временную блокировку кликов на 350мс
-function startTransitionLock() {
-    isTransitioning = true;
-    setTimeout(() => {
-        isTransitioning = false;
-    }, 350); 
-}
-
-// Перехватываем ВСЕ клики на сайте на стадии погружения
-document.addEventListener('click', (e) => {
-    if (isTransitioning) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
-}, true); // true обязателен — это заставит событие обрабатываться в первую очередь
+// Раньше здесь была функция startTransitionLock(), которая на 350мс блокировала
+// АБСОЛЮТНО ВСЕ клики на странице после каждого openData()/showHome(). Экран у
+// нас перерисовывается мгновенно (через innerHTML, без CSS-анимации), поэтому
+// защищать тут было нечего — а на практике это глобально "съедало" самый первый
+// клик пользователя по только что отрисованному экрану (например, по звёздочке
+// "Просмотрено"/"Будем смотреть" сразу после захода в раздел), из-за чего
+// приходилось кликать дважды. Функция оставлена как no-op на случай, если где-то
+// в коде остался вызов startTransitionLock().
+function startTransitionLock() {}
 
 // Функция для загрузки тайтлов из Supabase и сборки структуры
 async function loadCatalogFromDB() {
