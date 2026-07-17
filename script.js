@@ -2080,13 +2080,29 @@ function updateReadIndicator() {
 
     if (!currentUser) return;
     const myMessages = chatMessages.filter(m => m.user_id === currentUser.id);
-    if (myMessages.length === 0) return;
+    if (myMessages.length === 0) {
+        console.log("[updateReadIndicator] у меня нет своих сообщений в chatMessages");
+        return;
+    }
 
     const lastMine = myMessages[myMessages.length - 1];
-    if (!otherUserLastRead) return;
-    if (new Date(otherUserLastRead).getTime() < new Date(lastMine.created_at).getTime()) return;
+    console.log(
+        "[updateReadIndicator] моё последнее сообщение id:", lastMine.id,
+        "created_at:", lastMine.created_at,
+        "| otherUserLastRead:", otherUserLastRead
+    );
+
+    if (!otherUserLastRead) {
+        console.log("[updateReadIndicator] otherUserLastRead ещё пустой — выхожу");
+        return;
+    }
+    if (new Date(otherUserLastRead).getTime() < new Date(lastMine.created_at).getTime()) {
+        console.log("[updateReadIndicator] otherUserLastRead РАНЬШЕ, чем моё сообщение — галочку не показываю");
+        return;
+    }
 
     const bubbleEl = document.querySelector(`.chat-bubble[data-msg-id="${lastMine.id}"] .chat-read-indicator`);
+    console.log("[updateReadIndicator] найден ли элемент индикатора в DOM:", !!bubbleEl);
     if (bubbleEl) bubbleEl.textContent = "✓ Просмотрено";
 }
 
