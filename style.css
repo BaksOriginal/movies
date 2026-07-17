@@ -813,3 +813,282 @@ button:nth-child(6){
     user-drag: none;
     pointer-events: none; /* тач/клик проходит "сквозь" картинку сразу к родительскому пузырю сообщения */
 }
+
+/* ===== Итоговый счётчик тайтлов внизу категории/жанра ===== */
+.count-footer {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #9b4f70;
+    opacity: 0.75;
+    margin: 18px 0 4px;
+}
+
+/* ===== Комментарии ===== */
+.comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 260px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    text-align: left;
+}
+
+.comment-card {
+    background: #fdf2f6;
+    border-radius: 14px;
+    padding: 10px 14px;
+}
+
+.comment-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: #9b4f70;
+    margin-bottom: 4px;
+}
+
+.comment-card-text {
+    font-size: 14px;
+    color: #4a3040;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.comment-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.comment-card-actions button {
+    flex: none;
+    width: auto;
+    min-height: auto;
+    padding: 4px 10px;
+    margin: 0;
+    font-size: 12px;
+    border-radius: 10px;
+    box-shadow: none;
+}
+
+/* ===== Чат: цитата ответа внутри пузыря ===== */
+.chat-reply-quote {
+    border-left: 3px solid rgba(155, 79, 112, 0.5);
+    padding: 4px 8px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.35);
+    font-size: 12px;
+    line-height: 1.25;
+    max-height: 40px;
+    overflow: hidden;
+}
+
+.chat-bubble-theirs .chat-reply-quote {
+    background: rgba(255, 255, 255, 0.55);
+}
+
+.chat-reply-quote-author {
+    font-weight: bold;
+    opacity: 0.85;
+}
+
+.chat-reply-quote-text {
+    opacity: 0.85;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* Панель "Ответ на сообщение" над полем ввода */
+.chat-reply-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: white;
+    border-radius: 16px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    box-shadow: 0 4px 12px rgba(180,80,120,0.15);
+    font-size: 13px;
+}
+
+.chat-reply-bar-info {
+    overflow: hidden;
+}
+
+.chat-reply-bar-author {
+    font-weight: bold;
+    color: #9b4f70;
+    display: block;
+}
+
+.chat-reply-bar-text {
+    color: #777;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    display: block;
+}
+
+.chat-reply-bar-cancel {
+    background: none;
+    border: none;
+    color: #9b4f70;
+    font-size: 18px;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0 4px;
+}
+
+/* Реакция сердечком на сообщении */
+.chat-bubble {
+    position: relative;
+}
+
+.chat-reaction-heart {
+    position: absolute;
+    bottom: -10px;
+    font-size: 15px;
+    background: white;
+    border-radius: 50%;
+    padding: 1px 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    animation: fadeUp 0.2s ease both;
+}
+
+.chat-bubble-mine .chat-reaction-heart { left: -6px; }
+.chat-bubble-theirs .chat-reaction-heart { right: -6px; }
+
+/* Индикатор "печатает..." */
+.chat-typing-indicator {
+    font-size: 13px;
+    color: #9b4f70;
+    opacity: 0.8;
+    padding: 0 6px 4px;
+    min-height: 16px;
+    text-align: left;
+}
+
+/* Индикатор "Просмотрено" под своим последним сообщением */
+.chat-read-indicator {
+    font-size: 11px;
+    opacity: 0.75;
+    margin-top: 2px;
+    text-align: right;
+}
+
+/* ===== Переключатель тёмной темы (секретная категория) ===== */
+.theme-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 10px 0 20px;
+}
+
+.theme-toggle-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #8a6a1f;
+}
+
+.theme-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+.theme-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.theme-switch-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #e0d0d8;
+    transition: 0.2s;
+    border-radius: 28px;
+}
+
+.theme-switch-slider:before {
+    position: absolute;
+    content: "";
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.2s;
+    border-radius: 50%;
+}
+
+.theme-switch input:checked + .theme-switch-slider {
+    background-color: #9b4f70;
+}
+
+.theme-switch input:checked + .theme-switch-slider:before {
+    transform: translateX(22px);
+}
+
+/* ===== Тёмная тема ===== */
+body.dark-theme {
+    background: linear-gradient(135deg, #1a1420, #241a2c);
+    color: #eadfe8;
+}
+
+body.dark-theme h1,
+body.dark-theme .user-header,
+body.dark-theme .btn-logout {
+    color: #d9a7c4 !important;
+}
+
+body.dark-theme button,
+body.dark-theme .item,
+body.dark-theme .login-form,
+body.dark-theme .btn-watch,
+body.dark-theme .chat-box,
+body.dark-theme .comment-card,
+body.dark-theme .chat-reply-bar {
+    background: #2b2233;
+    color: #eadfe8;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+
+body.dark-theme .modal-content {
+    background: #2b2233;
+    color: #eadfe8;
+}
+
+body.dark-theme .modal-content h3 {
+    color: #eadfe8;
+}
+
+body.dark-theme .login-form input,
+body.dark-theme .modal-form input,
+body.dark-theme .modal-form select,
+body.dark-theme .chat-input-row #chatInput {
+    background: #1f1826;
+    color: #eadfe8;
+    border-color: #40324a;
+}
+
+body.dark-theme .chat-bubble-theirs {
+    background: #3a2c44;
+    color: #eadfe8;
+}
+
+body.dark-theme .item-ratings,
+body.dark-theme .count-footer {
+    color: #d9a7c4;
+}
