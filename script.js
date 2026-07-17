@@ -9,6 +9,19 @@ let titleCreatedAt = {}; // "Название (год)" -> дата добавл
 const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
+// ==========================================
+// СТИКЕРЫ ДЛЯ ЧАТА (хранятся в GitHub, не в БД)
+// ==========================================
+// Загрузите картинки стикеров (.png/.jpg/.jpeg/.webp/.gif) в папку "stickers"
+// вашего GitHub-репозитория и укажите ниже владельца/имя репозитория/ветку.
+// Список стикеров подтягивается динамически через GitHub API — просто
+// добавляйте новые файлы в папку, менять код не нужно.
+const GITHUB_STICKERS_OWNER = "ВАШ_GITHUB_ЛОГИН";
+const GITHUB_STICKERS_REPO = "ВАШ_РЕПОЗИТОРИЙ";
+const GITHUB_STICKERS_BRANCH = "main";
+const GITHUB_STICKERS_PATH = "stickers";
+const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутри текстового поля message
+
 let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
@@ -1343,6 +1356,92 @@ async function fetchTmdbPoster(itemText) {
     }
 }
 
+// ==========================================
+// СТИКЕРЫ ЧАТА
+// ==========================================
+let cachedStickerList = null; // кэшируем на время сессии, чтобы не дергать GitHub API каждый раз
+
+// Загружает список файлов-стикеров из папки stickers в GitHub-репозитории
+async function fetchStickerList() {
+    if (cachedStickerList) return cachedStickerList;
+
+    try {
+        const apiUrl = `https://api.github.com/repos/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}/contents/${GITHUB_STICKERS_PATH}?ref=${GITHUB_STICKERS_BRANCH}`;
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error("GitHub API вернул статус " + res.status);
+        const json = await res.json();
+        if (!Array.isArray(json)) return [];
+
+        const imageExtRe = /\.(png|jpe?g|gif|webp)$/i;
+        cachedStickerList = json
+            .filter(f => f.type === "file" && imageExtRe.test(f.name))
+            .map(f => ({
+                name: f.name,
+                url: `https://raw.githubusercontent.com/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}/${GITHUB_STICKERS_BRANCH}/${GITHUB_STICKERS_PATH}/${f.name}`
+            }));
+
+        return cachedStickerList;
+    } catch (e) {
+        console.error("Ошибка при загрузке списка стикеров с GitHub:", e);
+        return [];
+    }
+}
+
+// Проверяет, является ли текст сообщения стикером
+function isStickerMessage(messageText) {
+    return typeof messageText === "string" && messageText.startsWith(STICKER_PREFIX);
+}
+
+// Достает URL картинки стикера из текста сообщения
+function getStickerUrl(messageText) {
+    return messageText.slice(STICKER_PREFIX.length);
+}
+
+// Модалка выбора стикера
+function showStickerPicker(onPick) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "stickerPickerModal";
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="max-height:70vh; overflow-y:auto;">
+            <h3 style="text-align:center; margin-bottom:15px;">😊 Стикеры</h3>
+            <div class="sticker-grid" id="stickerGrid">
+                <p style="text-align:center;color:#999;font-size:13px;">Загружаем стикеры...</p>
+            </div>
+            <button class="btn-action-cancel" id="stickerPickerCancel" style="margin-top:15px;width:100%;">Закрыть</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById("stickerPickerCancel").onclick = () => overlay.remove();
+
+    fetchStickerList().then(list => {
+        const grid = document.getElementById("stickerGrid");
+        if (!grid) return; // модалку уже закрыли, пока грузились стикеры
+
+        if (list.length === 0) {
+            grid.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Стикеры не найдены. Проверьте настройки GITHUB_STICKERS_* в script.js</p>`;
+            return;
+        }
+
+        grid.innerHTML = "";
+        list.forEach(sticker => {
+            const img = document.createElement("img");
+            img.src = sticker.url;
+            img.alt = sticker.name;
+            img.loading = "lazy";
+            img.className = "sticker-thumb";
+            img.onclick = () => {
+                overlay.remove();
+                onPick(sticker.url);
+            };
+            grid.appendChild(img);
+        });
+    });
+}
+
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -1650,7 +1749,17 @@ function createChatBubble(msg) {
 
     let text = document.createElement("div");
     text.className = "chat-text";
-    text.textContent = msg.message;
+
+    if (isStickerMessage(msg.message)) {
+        bubble.classList.add("chat-bubble-sticker");
+        let img = document.createElement("img");
+        img.src = getStickerUrl(msg.message);
+        img.alt = "стикер";
+        img.className = "chat-sticker-img";
+        text.appendChild(img);
+    } else {
+        text.textContent = msg.message;
+    }
 
     bubble.appendChild(meta);
     bubble.appendChild(text);
@@ -1667,6 +1776,8 @@ function createChatBubble(msg) {
 // Обновляет содержимое уже отрисованного пузыря сообщения, если текст
 // поменялся (например, сообщение отредактировали)
 function updateChatBubbleContent(bubbleEl, msg) {
+    if (isStickerMessage(msg.message)) return; // стикеры не редактируются
+
     const textEl = bubbleEl.querySelector(".chat-text");
     if (textEl && textEl.textContent !== msg.message) {
         textEl.textContent = msg.message;
@@ -1725,6 +1836,7 @@ function attachChatLongPress(el, msg) {
 // Меню действий над своим сообщением
 function showChatMessageMenu(msg) {
     const canModify = canModifyChatMessage(msg);
+    const isSticker = isStickerMessage(msg.message);
 
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -1734,7 +1846,7 @@ function showChatMessageMenu(msg) {
             <h3 style="margin-bottom: 15px;">Сообщение</h3>
             ${canModify ? `
             <div class="action-buttons">
-                <button class="btn-action-edit" id="chatMsgEdit">✏️ Редактировать</button>
+                ${!isSticker ? `<button class="btn-action-edit" id="chatMsgEdit">✏️ Редактировать</button>` : ``}
                 <button class="btn-action-delete" id="chatMsgDelete">🗑️ Удалить</button>
                 <button class="btn-action-cancel" id="chatMsgCancel">Отмена</button>
             </div>
@@ -1752,7 +1864,8 @@ function showChatMessageMenu(msg) {
 
     if (!canModify) return;
 
-    document.getElementById("chatMsgEdit").onclick = () => {
+    const editBtn = document.getElementById("chatMsgEdit");
+    if (editBtn) editBtn.onclick = () => {
         overlay.remove();
         if (!canModifyChatMessage(msg)) {
             alert("Время редактирования истекло (доступно только 24 часа после отправки).");
@@ -1918,16 +2031,18 @@ async function showChatScreen() {
     chatInput.placeholder = "Написать сообщение...";
     chatInput.autocomplete = "off";
 
+    let stickerBtn = document.createElement("button");
+    stickerBtn.id = "chatStickerBtn";
+    stickerBtn.type = "button";
+    stickerBtn.textContent = "😊";
+
     let sendBtn = document.createElement("button");
     sendBtn.id = "chatSendBtn";
     sendBtn.textContent = "➤";
 
-    const sendMessage = async () => {
-        const text = chatInput.value.trim();
+    // Общая отправка сообщения в БД — используется и для текста, и для стикеров
+    const sendChatMessage = async (text) => {
         if (!text || !currentUser) return;
-
-        chatInput.value = "";
-        chatInput.focus();
 
         const username = getUsernameFromEmail(currentUser.email);
         const { data, error } = await db.from('chat_messages')
@@ -1949,6 +2064,21 @@ async function showChatScreen() {
         }
     };
 
+    const sendMessage = async () => {
+        const text = chatInput.value.trim();
+        if (!text) return;
+
+        chatInput.value = "";
+        chatInput.focus();
+
+        await sendChatMessage(text);
+    };
+
+    stickerBtn.onclick = () => {
+        if (!currentUser) return;
+        showStickerPicker((stickerUrl) => sendChatMessage(STICKER_PREFIX + stickerUrl));
+    };
+
     sendBtn.onclick = sendMessage;
     chatInput.onkeydown = (e) => {
         if (e.key === "Enter") {
@@ -1958,6 +2088,7 @@ async function showChatScreen() {
     };
 
     inputRow.appendChild(chatInput);
+    inputRow.appendChild(stickerBtn);
     inputRow.appendChild(sendBtn);
     app.appendChild(inputRow);
 
@@ -2296,31 +2427,75 @@ function showRandomTitleModal(titleText, pool = []) {
 
     overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); isShakeModalOpen = false; } };
 
+    const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒")));
+
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center; border: 3px solid #ff4081;">
             <div style="font-size: 40px;">🎰</div>
             <h2 id="shakeRandomTitle" style="margin: 15px 0;"></h2>
+            ${!isSecret ? `
+            <div id="shakePosterBox" style="margin: 0 0 15px; display: none; justify-content: center;"></div>
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <button id="posterShakeBtn" class="btn-pink-style" style="flex:1;">🖼 Постер</button>
+                <button id="trailerShakeBtn" class="btn-pink-style" style="flex:1;">🎬 Трейлер</button>
+            </div>
+            ` : ``}
             <div style="display: flex; flex-direction: column; gap: 10px;">
                 <button id="closeShakeBtn" class="btn-save">Супер, смотрим!</button>
                 <button id="rerollShakeBtn" class="btn-cancel">🔄 Другой фильм</button>
+                <button id="bottomCloseShakeBtn" class="btn-cancel-gray">Закрыть</button>
             </div>
         </div>
     `;
 
-    const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒")));
     const titleEl = overlay.querySelector("#shakeRandomTitle");
+    let currentTitle = titleText; // тайтл, который сейчас показан (меняется при "Другой фильм")
 
     document.body.appendChild(overlay);
 
     runSlotAnimation(titleEl, pool, titleText, isSecret);
 
-    document.getElementById("closeShakeBtn").onclick = () => { overlay.remove(); isShakeModalOpen = false; };
+    const closeModal = () => { overlay.remove(); isShakeModalOpen = false; };
+
+    document.getElementById("closeShakeBtn").onclick = closeModal;
+    document.getElementById("bottomCloseShakeBtn").onclick = closeModal;
     document.getElementById("rerollShakeBtn").onclick = () => {
         const all = pool.length > 0 ? pool : getAllTitlesFromCategory(history[history.length - 1]);
         const next = all[Math.floor(Math.random() * all.length)];
         vibrate(30);
+        currentTitle = next;
+        // Скрываем постер прошлого тайтла — он больше не актуален после перепрокрутки
+        const posterBox = overlay.querySelector("#shakePosterBox");
+        if (posterBox) { posterBox.style.display = "none"; posterBox.innerHTML = ""; }
         runSlotAnimation(titleEl, all, next, isSecret);
     };
+
+    if (!isSecret) {
+        const posterBtn = document.getElementById("posterShakeBtn");
+        const trailerBtn = document.getElementById("trailerShakeBtn");
+        const posterBox = document.getElementById("shakePosterBox");
+
+        posterBtn.onclick = async () => {
+            if (posterBox.style.display === "flex") {
+                posterBox.style.display = "none";
+                return;
+            }
+            posterBox.style.display = "flex";
+            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Ищем постер...</p>`;
+            const url = await fetchTmdbPoster(currentTitle);
+            if (!overlay.isConnected) return; // модалку уже закрыли, пока грузился постер
+            if (url) {
+                posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
+            } else {
+                posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильму не найден</p>`;
+            }
+        };
+
+        trailerBtn.onclick = () => {
+            const query = encodeURIComponent(currentTitle + " трейлер");
+            window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
+        };
+    }
 }
 
 function onPhoneShake() {

@@ -740,3 +740,69 @@ button:nth-child(6){
     background: #83415e;
     transform: none;
 }
+
+/* Кнопка открытия стикеров рядом с полем ввода */
+.chat-input-row #chatStickerBtn {
+    width: 50px;
+    min-width: 50px;
+    min-height: 50px;
+    height: 50px;
+    padding: 0;
+    margin: 0;
+    border-radius: 50%;
+    background: #ffe3ec;
+    color: #9b4f70;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(180,80,120,0.15);
+}
+
+.chat-input-row #chatStickerBtn:hover {
+    background: #ffd5e3;
+    transform: none;
+}
+
+/* Сетка выбора стикера в модалке */
+.sticker-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+}
+
+.sticker-thumb {
+    width: 70px;
+    height: 70px;
+    object-fit: contain;
+    cursor: pointer;
+    border-radius: 14px;
+    background: #fdf2f6;
+    padding: 6px;
+    box-sizing: border-box;
+    transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.sticker-thumb:hover {
+    transform: scale(1.08);
+    background: #ffe3ec;
+}
+
+/* Пузырь с картинкой-стикером — без фона и рамки текстового пузыря */
+.chat-bubble-sticker {
+    background: transparent !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+}
+
+.chat-bubble-sticker .chat-meta {
+    padding: 0 4px;
+}
+
+.chat-sticker-img {
+    max-width: 140px;
+    max-height: 140px;
+    border-radius: 14px;
+    display: block;
+}
