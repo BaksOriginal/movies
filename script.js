@@ -596,9 +596,9 @@ async function refreshCurrentScreen() {
     }
 }
 
-// =======================================================
+// ==========================================
 // НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ, ОЦЕНКА ИЛИ СНЯТИЕ)
-// =======================================================
+// ==========================================
 async function handleStarClick(title) {
     if (!currentUser) return;
     showStarChoiceModal(title);
@@ -1577,7 +1577,7 @@ function showActionMenu(itemText) {
         if (url) {
             posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
         } else {
-            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильму не найден</p>`;
+            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильм не найден</p>`;
         }
     });
 
@@ -1901,8 +1901,9 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(countFooter);
     }
 
-    // Тумблер тёмной темы — только внутри секретной категории
-    if (isInSecretCategory && currentUser) {
+    // Тумблер тёмной темы — только внутри корневой секретной категории, но не в подкатегориях
+    const isMainSecretCategoryOnly = isInSecretCategory && (content === dbData[currentCategoryName]);
+    if (isMainSecretCategoryOnly && currentUser) {
         app.appendChild(buildThemeToggle());
     }
 
@@ -2972,10 +2973,7 @@ function handleMotion(event) {
     let deltaY = Math.abs(lastY - y);
     let deltaZ = Math.abs(lastZ - z);
 
-    if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || 
-        (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || 
-        (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
-        
+    if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
         onPhoneShake();
     }
 
@@ -2983,171 +2981,27 @@ function handleMotion(event) {
 }
 
 function startShakeDetection() {
-    if (shakeDetectionStarted) return; // уже запущено — не навешиваем слушатель второй раз
-    shakeDetectionStarted = true;
+    if (shakeDetectionStarted) return; 
 
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-        DeviceMotionEvent.requestPermission()
-            .then(permissionState => {
-                if (permissionState === 'granted') {
-                    window.addEventListener('devicemotion', handleMotion);
-                    console.log("Детектор тряски успешно запущен (iOS)");
-                }
-            })
-            .catch(console.error);
+        // iOS 13+ требует явного разрешения, но запрашивать его можно ТОЛЬКО по клику пользователя.
+        // Поэтому вешаем один раз обработчик клика на весь документ. При первом же тапе пользователя
+        // в любой точке экрана — запрашиваем разрешение на акселерометр.
+        const requestPermissionOnFirstClick = () => {
+            DeviceMotionEvent.requestPermission()
+                .then(permissionState => {
+                    if (permissionState === 'granted') {
+                        window.addEventListener('devicemotion', handleMotion);
+                        shakeDetectionStarted = true;
+                    }
+                })
+                .catch(console.error);
+            document.removeEventListener('click', requestPermissionOnFirstClick);
+        };
+        document.addEventListener('click', requestPermissionOnFirstClick);
     } else {
+        // Обычные браузеры (Android, старые iOS) — просто вешаем слушатель сразу
         window.addEventListener('devicemotion', handleMotion);
-        console.log("Детектор тряски успешно запущен (Android)");
+        shakeDetectionStarted = true;
     }
 }
-
-function setupMusicAutoplay() {
-    const audio = document.getElementById("bgMusic");
-    
-    const playHandler = () => {
-        if (isMusicPlaying) {
-            audio.play().catch(e => console.log("Музыка не смогла запуститься"));
-            document.removeEventListener("click", playHandler); 
-        }
-    };
-
-    document.addEventListener("click", playHandler);
-}
-// Генератор бесконечных нежных сердечек на заднем фоне
-function initHeartsBackground() {
-    // Если контейнер уже почему-то существует, не создаем его заново
-    if (document.querySelector('.hearts-background')) return;
-
-    const container = document.createElement('div');
-    container.className = 'hearts-background';
-    document.body.appendChild(container);
-
-    function spawnHeart() {
-        const heart = document.createElement('div');
-        heart.className = 'floating-heart';
-        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
-
-        // Рандомизируем параметры для живого и естественного эффекта
-        const size = Math.random() * 18 + 12; // Размер от 12px до 30px
-        const startLeft = Math.random() * 100; // Позиция по горизонтали (в %)
-        const duration = Math.random() * 12 + 10; // Скорость подъема от 10 до 22 секунд (очень плавно)
-        const swayX = (Math.random() * 120 - 60) + 'px'; // Амплитуда покачивания влево/вправо
-        const rotateDeg = (Math.random() * 360) + 'deg'; // Случайный угол вращения
-
-        // Применяем стили
-        heart.style.fontSize = `${size}px`;
-        heart.style.left = `${startLeft}%`;
-        heart.style.animationDuration = `${duration}s`;
-        
-        // Передаем переменные покачивания во floatUp анимацию
-        heart.style.setProperty('--sway-x', swayX);
-        heart.style.setProperty('--rotate-deg', rotateDeg);
-
-        container.appendChild(heart);
-
-        // Самоликвидация элемента из DOM после того, как он улетел, чтобы не грузить браузер
-        setTimeout(() => {
-            heart.remove();
-        }, duration * 1000);
-    }
-
-    // Создаем первое сердечко сразу
-    spawnHeart();
-    
-    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
-    setInterval(spawnHeart, 900);
-}
-
-// Запускаем магию!
-initHeartsBackground();
-setupMusicAutoplay();
-
-const style = document.createElement('style');
-style.textContent = `
-    .round-btn {
-        overflow: hidden;
-        width: 40px !important;
-        height: 40px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border-radius: 50% !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        cursor: pointer !important;
-        border: 1px solid #ccc !important;
-        background: #f9f9f9 !important;
-        font-size: 18px !important;
-        box-sizing: border-box !important;
-        line-height: 1 !important;
-    }
-    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
-    .hearts-background {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        pointer-events: none; /* Клики проходят сквозь них */
-        z-index: -1;          /* Строго на заднем фоне */
-        overflow: hidden;
-    }
-
-    .floating-heart {
-        position: absolute;
-        bottom: -50px;        /* Появляются чуть ниже экрана */
-        color: #ff4081;       /* Малиново-розовый цвет */
-        opacity: 0;
-        pointer-events: none;
-        user-select: none;
-        animation: floatUp linear forwards;
-    }
-
-    @keyframes floatUp {
-        0% {
-            transform: translateY(0) translateX(0) rotate(0deg);
-            opacity: 0;
-        }
-        10% {
-            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
-        }
-        90% {
-            opacity: 0.15;
-        }
-        100% {
-            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
-            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
-            opacity: 0;       /* Полностью растворяются вверху */
-        }
-    }
-    /* Звёздочка для вишлиста (Красивый голубой) */
-    .btn-watch.wishlist-active {
-        color: #2196f3 !important;
-        opacity: 1 !important;
-    }
-
-    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
-    .btn-pink-style {
-        background-color: #ffe3ec !important;
-        color: #d81b60 !important;
-        border: none !important;
-        font-weight: 600 !important;
-        transition: background-color 0.2s ease, transform 0.1s ease;
-    }
-    .btn-pink-style:hover {
-        background-color: #ffd5e3 !important;
-    }
-
-    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
-    .btn-cancel-gray {
-        background-color: #f0f0f0 !important;
-        color: #333333 !important;
-        border: none !important;
-        font-weight: 600 !important;
-        transition: background-color 0.2s ease;
-    }
-    .btn-cancel-gray:hover {
-        background-color: #e5e5e5 !important;
-    }
-`;
-document.head.appendChild(style);
