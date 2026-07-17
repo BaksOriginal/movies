@@ -572,13 +572,31 @@ function subscribeToChanges() {
         .subscribe();
 }
 
-// Живое обновление интерфейса
+// Живое обновление интерфейса. Дергает базу и подтягивает актуальные
+// watched/wishlist/ratings — используется ТОЛЬКО когда изменение пришло
+// извне (через realtime-канал, например, от партнёра). Для собственных
+// действий пользователя (клик по звёздочке и т.п.) нельзя вызывать эту
+// функцию сразу после оптимистичного локального обновления: запрос на
+// чтение здесь улетает НЕ дожидаясь, пока запись (insert/delete) реально
+// зафиксируется на сервере, и если чтение обгонит запись — оно перетрёт
+// свежее локальное состояние старыми данными и звёздочка "откатится"
+// назад, будто клик не сработал (отсюда ощущение, что нужно нажимать
+// дважды). Для локальных оптимистичных обновлений используйте
+// refreshUIFromState() ниже — она просто перерисовывает то, что уже есть
+// в памяти, без похода в базу.
 async function updateUIOnLiveChange() {
     // Изменения в watched_items/wishlist_items/ratings не затрагивают сам каталог
     // (таблицу titles) — раньше здесь зря перезагружался ВЕСЬ каталог при
     // каждом таком изменении. Загружаем только то, что реально изменилось.
     await loadUserDataFromDB();
+    refreshUIFromState();
+}
 
+// Перерисовывает интерфейс на основе уже имеющегося в памяти состояния
+// (watchedTitles/wishlistTitles/ratingsData и т.д.), БЕЗ обращения к базе.
+// Именно эту функцию нужно звать сразу после оптимистичного локального
+// изменения (клик по звёздочке), чтобы не словить гонку с loadUserDataFromDB().
+function refreshUIFromState() {
     // 1. Обновляем счетчики на кнопках главного экрана (только по явным id —
     // раньше здесь искали ВСЕ кнопки по вхождению текста "Просмотрено"/"Будем
     // смотреть", из-за чего заодно портились и подкатегории "Просмотрено
@@ -679,14 +697,14 @@ async function markWatched(title, forBoth) {
     if (!watchedByUser[title]) watchedByUser[title] = new Set();
     rowsToInsert.forEach(r => watchedByUser[title].add(r.user_id));
     recomputeWatchedBuckets();
-    updateUIOnLiveChange();
+    refreshUIFromState();
 
     const { error } = await db.from('watched_items').insert(rowsToInsert);
     if (error) {
         console.error("Ошибка при сохранении в просмотренное:", error);
         rowsToInsert.forEach(r => watchedByUser[title] && watchedByUser[title].delete(r.user_id));
         recomputeWatchedBuckets();
-        updateUIOnLiveChange();
+        refreshUIFromState();
         alert("Не удалось сохранить отметку просмотренного.");
     }
 }
@@ -701,14 +719,14 @@ async function removeMyWatched(title) {
         if (watchedByUser[title].size === 0) delete watchedByUser[title];
     }
     recomputeWatchedBuckets();
-    updateUIOnLiveChange();
+    refreshUIFromState();
 
     const { error } = await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
     if (error) {
         console.error("Ошибка при удалении из просмотренного:", error);
         // На всякий случай перезагружаем актуальное состояние с сервера
         await loadWatchedFromDB();
-        updateUIOnLiveChange();
+        refreshUIFromState();
     }
 }
 
@@ -765,7 +783,7 @@ function showStarChoiceModal(title) {
         removeWishBtn.onclick = async () => {
             overlay.remove();
             wishlistTitles.delete(title);
-            updateUIOnLiveChange();
+            refreshUIFromState();
             await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
         };
     }
@@ -775,11 +793,11 @@ function showStarChoiceModal(title) {
         wishBtn.onclick = async () => {
             overlay.remove();
             wishlistTitles.add(title);
-            updateUIOnLiveChange();
+            refreshUIFromState();
             const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
             if (error) {
                 wishlistTitles.delete(title);
-                updateUIOnLiveChange();
+                refreshUIFromState();
                 console.error("Ошибка при сохранении в вишлист:", error);
             }
         };
