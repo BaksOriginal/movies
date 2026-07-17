@@ -491,119 +491,141 @@ showHome();
 // =======================================================
 async function handleStarClick(title) {
 if (!currentUser) return;
-showStarChoiceModal(title);
-}
 function showStarChoiceModal(title) {
-const overlay = document.createElement("div");
-overlay.className = "modal-overlay";
-overlay.id = "starChoiceModal";
-const isWatchedByMe = watchedByMe.has(title);
- const isWatchedByPartner = watchedByPartner.has(title);
- const isWatchedTogether = watchedTogether.has(title);
- const isWishlisted = wishlistTitles.has(title);
- let optionsHtml = "";
- if (isWatchedTogether) {
-     optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного нами</button>`;
- } else if (isWatchedByMe) {
-     optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного мной</button>`;
- } else if (isWatchedByPartner) {
-     optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
-     optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
- } else if (isWishlisted) {
-     optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
-     optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
-     optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
- } else {
-     optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
-     optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
-     optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
- }
- optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
- optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
- overlay.innerHTML = `
-     <div class="modal-content" style="text-align: center;">
-         <h3 style="margin-bottom: 10px;">Действие</h3>
-         <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
-         <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-             ${optionsHtml}
-         </div>
-     </div>
- `;
- document.body.appendChild(overlay);
- const removeBtn = document.getElementById("choiceRemove");
- if (removeBtn) {
-     removeBtn.onclick = async () => {
-         overlay.remove();
-         if (isWatchedTogether) {
-             watchedTogether.delete(title);
-             await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id).eq('watch_type', 'together');
-         } else if (isWatchedByMe) {
-             watchedByMe.delete(title);
-             await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id).eq('watch_type', 'self');
-         } else if (isWishlisted) {
-             wishlistTitles.delete(title);
-             await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
-         }
-         updateUIOnLiveChange();
-     };
- }
- const wishBtn = document.getElementById("choiceWish");
- if (wishBtn) {
-     wishBtn.onclick = async () => {
-         overlay.remove();
-         wishlistTitles.add(title);
-         updateUIOnLiveChange();
-         const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
-         if (error) {
-             wishlistTitles.delete(title);
-             updateUIOnLiveChange();
-             console.error("Ошибка при сохранении в вишлист:", error);
-         }
-     };
- }
- const watchSelfBtn = document.getElementById("choiceWatchSelf");
- if (watchSelfBtn) {
-     watchSelfBtn.onclick = async () => {
-         overlay.remove();
-         watchedByMe.add(title);
-         updateUIOnLiveChange();
-         const { error } = await db.from('watched_items').insert([{ 
-             user_id: currentUser.id, 
-             title: title,
-             watch_type: 'self'
-         }]);
-         if (error) {
-             watchedByMe.delete(title);
-             updateUIOnLiveChange();
-             console.error("Ошибка при сохранении 'сам':", error);
-         }
-     };
- }
- const watchTogetherBtn = document.getElementById("choiceWatchTogether");
- if (watchTogetherBtn) {
-     watchTogetherBtn.onclick = async () => {
-         overlay.remove();
-         watchedTogether.add(title);
-         updateUIOnLiveChange();
-         const { error } = await db.from('watched_items').insert([{ 
-             user_id: currentUser.id, 
-             title: title,
-             watch_type: 'together'
-         }]);
-         if (error) {
-             watchedTogether.delete(title);
-             updateUIOnLiveChange();
-             console.error("Ошибка при сохранении 'вместе':", error);
-         }
-     };
- }
- document.getElementById("choiceRate").onclick = () => {
-     overlay.remove();
-     showRatingModal(title);
- };
- document.getElementById("choiceCancel").onclick = () => {
-     overlay.remove();
- };
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "starChoiceModal";
+    
+    const isWatchedByMe = watchedByMe.has(title);
+    const isWatchedByPartner = watchedByPartner.has(title);
+    const isWatchedTogether = watchedTogether.has(title);
+    const isWishlisted = wishlistTitles.has(title);
+    
+    let optionsHtml = "";
+    
+    if (isWatchedTogether) {
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного нами</button>`;
+    } else if (isWatchedByMe) {
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного мной</button>`;
+    } else if (isWatchedByPartner) {
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
+        optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
+    } else if (isWishlisted) {
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
+        optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
+    } else {
+        optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
+        optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
+    }
+    
+    optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
+    optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
+    
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 10px;">Действие</h3>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                ${optionsHtml}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    const removeBtn = document.getElementById("choiceRemove");
+    if (removeBtn) {
+        removeBtn.onclick = async () => {
+            overlay.remove();
+            if (isWatchedTogether) {
+                watchedTogether.delete(title);
+            } else if (isWatchedByMe) {
+                watchedByMe.delete(title);
+            } else if (isWishlisted) {
+                wishlistTitles.delete(title);
+                await db.from('wishlist_items').delete().eq('title', title).eq('user_id', currentUser.id);
+                updateUIOnLiveChange();
+                return;
+            }
+            
+            // Удаляем из БД только свои записи
+            await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            updateUIOnLiveChange();
+        };
+    }
+    
+    const wishBtn = document.getElementById("choiceWish");
+    if (wishBtn) {
+        wishBtn.onclick = async () => {
+            overlay.remove();
+            wishlistTitles.add(title);
+            updateUIOnLiveChange();
+            const { error } = await db.from('wishlist_items').insert([{ user_id: currentUser.id, title: title }]);
+            if (error) {
+                wishlistTitles.delete(title);
+                updateUIOnLiveChange();
+                console.error("Ошибка при сохранении в вишлист:", error);
+            }
+        };
+    }
+    
+    const watchSelfBtn = document.getElementById("choiceWatchSelf");
+    if (watchSelfBtn) {
+        watchSelfBtn.onclick = async () => {
+            overlay.remove();
+            
+            watchedByMe.add(title);
+            watchedTogether.delete(title); 
+            updateUIOnLiveChange();
+            
+            // Сначала удаляем свои старые записи, потом вставляем новую (защита от дублей)
+            await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            const { error } = await db.from('watched_items').insert([{ 
+                user_id: currentUser.id, 
+                title: title,
+                watch_type: 'self'
+            }]);
+            
+            if (error) {
+                watchedByMe.delete(title);
+                updateUIOnLiveChange();
+                console.error("Ошибка при сохранении 'Просмотрено мной':", error);
+            }
+        };
+    }
+    
+    const watchTogetherBtn = document.getElementById("choiceWatchTogether");
+    if (watchTogetherBtn) {
+        watchTogetherBtn.onclick = async () => {
+            overlay.remove();
+            
+            watchedTogether.add(title);
+            watchedByMe.delete(title);
+            updateUIOnLiveChange();
+            
+            await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
+            const { error } = await db.from('watched_items').insert([{ 
+                user_id: currentUser.id, 
+                title: title,
+                watch_type: 'together'
+            }]);
+            
+            if (error) {
+                watchedTogether.delete(title);
+                updateUIOnLiveChange();
+                console.error("Ошибка при сохранении 'Просмотрено нами':", error);
+            }
+        };
+    }
+    
+    document.getElementById("choiceRate").onclick = () => {
+        overlay.remove();
+        showRatingModal(title);
+    };
+    document.getElementById("choiceCancel").onclick = () => {
+        overlay.remove();
+    };
 }
 function showLoginScreen() {
 app.innerHTML = `<h1>Авторизация</h1> <form class="login-form" id="loginForm"> <input type="text" id="loginUsername" placeholder="Имя" required autocomplete="username"> <input type="password" id="loginPassword" placeholder="Пароль" required autocomplete="current-password"> <button type="submit">Войти</button> </form>`;
@@ -1220,99 +1242,6 @@ isChatScreenOpen = false;
 if (chatPollInterval) {
 clearInterval(chatPollInterval);
 chatPollInterval = null;
-}
-currentCategoryName = null;
-let oldNav = document.querySelector(".navigation");
- if (oldNav) oldNav.remove();
- app.innerHTML = "";
- let title = document.createElement("h1");
- title.textContent = "💭 Комментарии";
- app.appendChild(title);
- let loading = document.createElement("p");
- loading.style.textAlign = "center";
- loading.style.color = "#999";
- loading.textContent = "Загрузка...";
- app.appendChild(loading);
- const allComments = await loadAllComments();
- loading.remove();
- if (allComments.length === 0) {
-     let empty = document.createElement("p");
-     empty.style.textAlign = "center";
-     empty.style.color = "#999";
-     empty.style.marginTop = "20px";
-     empty.textContent = "Комментариев пока нет.";
-     app.appendChild(empty);
- } else {
-     // Группируем комментарии по тайтлу
-     const byTitle = {};
-     allComments.forEach(c => {
-         if (!byTitle[c.title]) byTitle[c.title] = [];
-         byTitle[c.title].push(c);
-     });
-     for (let titleName in byTitle) {
-         let titleBlock = document.createElement("div");
-         titleBlock.style.marginBottom = "20px";
-         titleBlock.style.textAlign = "left";
-         let titleHeader = document.createElement("div");
-         titleHeader.style.fontWeight = "bold";
-         titleHeader.style.fontSize = "16px";
-         titleHeader.style.color = "#9b4f70";
-         titleHeader.style.marginBottom = "8px";
-         titleHeader.style.padding = "0 4px";
-         titleHeader.textContent = titleName;
-         titleBlock.appendChild(titleHeader);
-         byTitle[titleName].forEach(c => {
-             const card = document.createElement("div");
-             card.className = "comment-card";
-             const isMine = c.user_id === currentUser.id;
-             card.innerHTML = `
-                 <div class="comment-card-header"><span></span><span></span></div>
-                 <div class="comment-card-text"></div>
-                 ${isMine ? `<div class="comment-card-actions">
-                     <button class="btn-action-edit" data-act="edit">✏️ Изменить</button>
-                     <button class="btn-action-delete" data-act="delete">🗑️ Удалить</button>
-                 </div>` : ``}
-             `;
-             card.querySelector(".comment-card-header span:first-child").textContent = c.username;
-             card.querySelector(".comment-card-header span:last-child").textContent = formatChatTime(c.created_at);
-             card.querySelector(".comment-card-text").textContent = c.comment;
-             if (isMine) {
-                 card.querySelector('[data-act="edit"]').onclick = () => {
-                     showGlobalCommentEditForm(card, c, titleBlock);
-                 };
-                 card.querySelector('[data-act="delete"]').onclick = async () => {
-                     if (!confirm("Удалить ваш комментарий?")) return;
-                     const { error } = await db.from('comments').delete().eq('id', c.id);
-                     if (error) {
-                         alert("Не удалось удалить комментарий.");
-                         return;
-                     }
-                     card.remove();
-                     if (titleBlock.querySelectorAll('.comment-card').length === 0) {
-                         titleBlock.remove();
-                     }
-                 };
-             }
-             titleBlock.appendChild(card);
-         });
-         app.appendChild(titleBlock);
-     }
- }
- // Навигация
- let nav = document.createElement("div");
- nav.className = "navigation";
- let homeBtn = document.createElement("button");
- homeBtn.textContent = "🏠 Домой";
- homeBtn.onclick = () => {
-     showHome();
- };
- nav.appendChild(homeBtn);
- let container = document.querySelector(".container");
- if (container) {
-     container.insertBefore(nav, container.firstChild);
- } else {
-     document.body.insertBefore(nav, app);
- }
 }
 function showGlobalCommentEditForm(cardEl, comment, titleBlock) {
 // Убираем старые формы редактирования
