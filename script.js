@@ -2101,8 +2101,19 @@ function createChatBubble(msg) {
 }
 
 // Обновляет содержимое уже отрисованного пузыря сообщения, если текст
-// поменялся (например, сообщение отредактировали)
+// поменялся (например, сообщение отредактировали, или сообщение, на
+// которое ссылается ответ, было удалено)
 function updateChatBubbleContent(bubbleEl, msg) {
+    // Обновляем текст цитаты ответа (например, "Сообщение удалено"),
+    // если она есть — это нужно независимо от того, стикер это или нет
+    const quoteTextEl = bubbleEl.querySelector(".chat-reply-quote-text");
+    if (quoteTextEl) {
+        const quoteText = msg.reply_to_text || "";
+        if (quoteTextEl.textContent !== quoteText) {
+            quoteTextEl.textContent = quoteText;
+        }
+    }
+
     if (isStickerMessage(msg.message)) return; // стикеры не редактируются
 
     const textEl = bubbleEl.querySelector(".chat-text");
@@ -2274,6 +2285,16 @@ function showChatMessageMenu(msg, isMine) {
         }
         if (!confirm("Удалить это сообщение?")) return;
 
+        // Сначала помечаем "удалено" во всех ответах, ссылающихся на это
+        // сообщение — иначе после удаления самого сообщения его текст
+        // навсегда останется висеть в чужих цитатах.
+        const { error: replyUpdateError } = await db.from('chat_messages')
+            .update({ reply_to_text: "Сообщение удалено" })
+            .eq('reply_to_id', msg.id);
+        if (replyUpdateError) {
+            console.error("Ошибка при обновлении ответов на удаляемое сообщение:", replyUpdateError);
+        }
+
         const { error } = await db.from('chat_messages').delete().eq('id', msg.id);
         if (error) {
             console.error("Ошибка при удалении сообщения:", error);
@@ -2282,6 +2303,10 @@ function showChatMessageMenu(msg, isMine) {
         }
         // Убираем сразу локально, не дожидаясь realtime-события
         chatMessages = chatMessages.filter(m => m.id !== msg.id);
+        // И сразу же обновляем локальные цитаты в ответах на него
+        chatMessages.forEach(m => {
+            if (m.reply_to_id === msg.id) m.reply_to_text = "Сообщение удалено";
+        });
         renderChatMessages();
     };
 }
