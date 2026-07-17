@@ -16,344 +16,146 @@ button, .item, .btn-watch, .btn-edit, .btn-delete, .item-row, .rating-star{
     touch-action: manipulation;
 }
 
-
 body{
-
     margin:0;
-
     min-height:100vh;
-
     background:
     linear-gradient(
         135deg,
         #ffdce5,
         #fff3f7
     );
-
     color:#4a3040;
-
     font-family:
     "Segoe UI",
     Arial,
     sans-serif;
-
 }
-
-
-
-/* Основной контейнер */
 
 .container{
-
     width:90%;
-
     max-width:500px;
-
     margin:auto;
-
     padding:25px 0 40px;
-
     text-align:center;
-
 }
-
-
-
-/* Заголовок */
 
 h1{
-
     font-size:32px;
-
     font-weight:700;
-
     margin:30px 0;
-
     color:#9b4f70;
-
     animation:fadeIn 0.5s ease both;
-
 }
-
-
-
-/* Верхняя панель */
 
 .navigation{
-
     display:flex;
-
     gap:10px;
-
     padding:10px 0;
-
     width:100%;
-
 }
-
-
 
 .navigation button{
-
     flex:1;
-
     min-height:50px;
-
     padding:10px;
-
-
     margin:0;
-
-
     border-radius:25px;
-
-
     font-size:16px;
-
 }
 
-
-
-/* Все кнопки */
-
 button{
-
     width:100%;
-
     min-height:60px;
-
     padding:18px 20px;
-
     margin:12px 0;
-
-
     border:none;
-
     border-radius:30px;
-
-
     background:white;
-
     color:#9b4f70;
-
-
     font-size:20px;
-
     font-weight:600;
-
-
     cursor:pointer;
-
-
     box-shadow:
     0 6px 18px rgba(180,80,120,0.18);
-
-
     transition:
-
     transform 0.2s ease,
     box-shadow 0.2s ease,
     background 0.2s ease;
-
-
     animation:
     fadeUp 0.3s ease both;
-
 }
-
-
 
 button:hover{
-
     transform:translateY(-3px);
-
-
     box-shadow:
-
     0 8px 20px rgba(180,80,120,0.25);
-
 }
-
-
 
 button:active{
-
     transform:scale(0.96);
-
     background:#ffe3ec;
-
 }
-
-
-
-/* Контейнеры */
 
 .category-container,
 .genre-container,
 .items-container{
-
     display:flex;
-
     flex-direction:column;
-
 }
-
-
-
-/* Названия */
 
 .item{
-
     background:white;
-
     margin:12px 0;
-
     padding:18px;
-
-
     border-radius:22px;
-
-
     font-size:20px;
-
     font-weight:500;
-
-
     box-shadow:
-
     0 6px 18px rgba(180,80,120,0.15);
-
-
     animation:
-
     fadeUp 0.35s ease both;
-
 }
 
-
-
-/* Задержки только для кнопок */
-
-button:nth-child(1){
-
-    animation-delay:0s;
-
-}
-
-
-button:nth-child(2){
-
-    animation-delay:0.05s;
-
-}
-
-
-button:nth-child(3){
-
-    animation-delay:0.1s;
-
-}
-
-
-button:nth-child(4){
-
-    animation-delay:0.15s;
-
-}
-
-
-button:nth-child(5){
-
-    animation-delay:0.2s;
-
-}
-
-
-button:nth-child(6){
-
-    animation-delay:0.25s;
-
-}
-
-
-
-/* Анимация появления */
+button:nth-child(1){ animation-delay:0s; }
+button:nth-child(2){ animation-delay:0.05s; }
+button:nth-child(3){ animation-delay:0.1s; }
+button:nth-child(4){ animation-delay:0.15s; }
+button:nth-child(5){ animation-delay:0.2s; }
+button:nth-child(6){ animation-delay:0.25s; }
 
 @keyframes fadeUp{
-
     from{
-
         opacity:0;
-
         transform:translateY(8px);
-
     }
-
-
     to{
-
         opacity:1;
-
         transform:translateY(0);
-
     }
-
 }
-
-
 
 @keyframes fadeIn{
-
-    from{
-
-        opacity:0;
-
-    }
-
-
-    to{
-
-        opacity:1;
-
-    }
-
+    from{ opacity:0; }
+    to{ opacity:1; }
 }
-
-
-
-/* Переход экранов */
 
 #app{
-
     animation:
-
     pageChange 0.25s ease both;
-
 }
-
-
 
 @keyframes pageChange{
-
     from{
-
         opacity:0;
-
         transform:translateX(15px);
-
     }
-
-
     to{
-
         opacity:1;
-
         transform:translateX(0);
-
     }
-
 }
-/* Форма входа */
+
 .login-form {
     display: flex;
     flex-direction: column;
@@ -380,7 +182,6 @@ button:nth-child(6){
     margin-top: 10px;
 }
 
-/* Строка элемента (фильм + кнопка-галочка) */
 .item-row {
     display: flex;
     align-items: center;
@@ -395,7 +196,6 @@ button:nth-child(6){
     text-align: left;
 }
 
-/* Кнопка отметки просмотренного */
 .btn-watch {
     min-height: 58px;
     width: 60px;
@@ -416,7 +216,12 @@ button:nth-child(6){
     color: white;
 }
 
-/* Шапка пользователя на главном экране */
+/* Звёздочка партнёра — фиолетовая (светлая тема) */
+.btn-watch.watched-partner {
+    background: #f3e5f5;
+    color: #9c27b0;
+}
+
 .user-header {
     display: flex;
     justify-content: space-between;
@@ -441,7 +246,7 @@ button:nth-child(6){
     box-shadow: none !important;
     transform: none !important;
 }
-/* Стили для модального окна добавления/редактирования */
+
 .modal-overlay {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
@@ -498,7 +303,6 @@ button:nth-child(6){
 .btn-save { background: #4CAF50; color: white; }
 .btn-cancel { background: #f44336; color: white; }
 
-/* Обёртка строки фильма + оценок под ней */
 .movie-item {
     display: flex;
     flex-direction: column;
@@ -510,7 +314,6 @@ button:nth-child(6){
     margin: 0;
 }
 
-/* Строка с оценками пользователей под фильмом */
 .item-ratings {
     font-size: 13px;
     font-weight: 600;
@@ -520,12 +323,10 @@ button:nth-child(6){
     min-height: 4px;
 }
 
-/* Кнопка удаления оценки внутри модалки */
 .action-buttons .btn-action-delete {
     width: 100%;
 }
 
-/* Виджет из 10 кликабельных звёзд для оценки */
 .rating-stars {
     display: flex;
     justify-content: center;
@@ -551,7 +352,6 @@ button:nth-child(6){
     color: #f0a500;
 }
 
-/* Кнопочки редактирования и удаления в строке фильма */
 .btn-edit, .btn-delete {
     background: none;
     border: none;
@@ -563,7 +363,7 @@ button:nth-child(6){
 }
 .btn-edit:hover { transform: scale(1.2); }
 .btn-delete:hover { transform: scale(1.2); }
-/* Кнопки действий внутри модального окна */
+
 .action-buttons {
     display: flex;
     flex-direction: column;
@@ -601,7 +401,6 @@ button:nth-child(6){
     background: #e0e0e0;
 }
 
-/* Нежно-золотая кнопка секретной категории */
 .btn-secret-gold {
     background: linear-gradient(135deg, #fff3d6, #ffe9b3) !important;
     color: #8a6a1f !important;
@@ -616,7 +415,6 @@ button:nth-child(6){
     background: #ffdf99 !important;
 }
 
-/* Нежно-фиолетовая кнопка чата */
 .btn-chat-purple {
     background: #ece0fa !important;
     color: #6a3fa0 !important;
@@ -630,7 +428,6 @@ button:nth-child(6){
     background: #d5bdf2 !important;
 }
 
-/* Синий кружок "недавно добавлено" (в течение 2 суток) */
 .new-title-dot {
     display: inline-block;
     width: 10px;
@@ -642,7 +439,6 @@ button:nth-child(6){
     flex-shrink: 0;
 }
 
-/* Лёгкая пульсация текста во время "прокрутки" случайного тайтла (тряска) */
 @keyframes slotPulse {
     0% { transform: scale(1); }
     50% { transform: scale(1.05); }
@@ -653,7 +449,6 @@ button:nth-child(6){
     animation: slotPulse 0.15s ease infinite;
 }
 
-/* ===== Чат ===== */
 .chat-box {
     display: flex;
     flex-direction: column;
@@ -677,6 +472,7 @@ button:nth-child(6){
     line-height: 1.35;
     word-wrap: break-word;
     animation: fadeUp 0.2s ease both;
+    position: relative;
 }
 
 .chat-bubble-mine {
@@ -711,7 +507,7 @@ button:nth-child(6){
 
 .chat-input-row #chatInput {
     flex: 1;
-    min-width: 0; /* без этого поле ввода не сжимается во флекс-контейнере и выталкивает кнопки за экран */
+    min-width: 0;
     padding: 12px 14px;
     border: 2px solid #ffdce5;
     border-radius: 25px;
@@ -742,7 +538,6 @@ button:nth-child(6){
     transform: none;
 }
 
-/* Кнопка открытия стикеров рядом с полем ввода */
 .chat-input-row #chatStickerBtn {
     width: 46px;
     min-width: 46px;
@@ -765,7 +560,6 @@ button:nth-child(6){
     transform: none;
 }
 
-/* Сетка выбора стикера в модалке */
 .sticker-grid {
     display: flex;
     flex-wrap: wrap;
@@ -790,7 +584,6 @@ button:nth-child(6){
     background: #ffe3ec;
 }
 
-/* Пузырь с картинкой-стикером — без фона и рамки текстового пузыря */
 .chat-bubble-sticker {
     background: transparent !important;
     padding: 0 !important;
@@ -806,15 +599,14 @@ button:nth-child(6){
     max-height: 140px;
     border-radius: 14px;
     display: block;
-    -webkit-touch-callout: none; /* отключает системное меню браузера на долгом тапе (iOS) */
+    -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
     -webkit-user-drag: none;
     user-drag: none;
-    pointer-events: none; /* тач/клик проходит "сквозь" картинку сразу к родительскому пузырю сообщения */
+    pointer-events: none;
 }
 
-/* ===== Итоговый счётчик тайтлов внизу категории/жанра ===== */
 .count-footer {
     text-align: center;
     font-size: 13px;
@@ -824,7 +616,6 @@ button:nth-child(6){
     margin: 18px 0 4px;
 }
 
-/* ===== Комментарии ===== */
 .comments-list {
     display: flex;
     flex-direction: column;
@@ -875,7 +666,6 @@ button:nth-child(6){
     box-shadow: none;
 }
 
-/* ===== Чат: цитата ответа внутри пузыря ===== */
 .chat-reply-quote {
     border-left: 3px solid rgba(155, 79, 112, 0.5);
     padding: 4px 8px;
@@ -904,7 +694,6 @@ button:nth-child(6){
     overflow: hidden;
 }
 
-/* Панель "Ответ на сообщение" над полем ввода */
 .chat-reply-bar {
     display: flex;
     align-items: center;
@@ -946,7 +735,6 @@ button:nth-child(6){
     padding: 0 4px;
 }
 
-/* Реакция сердечком на сообщении */
 .chat-bubble {
     position: relative;
 }
@@ -965,7 +753,6 @@ button:nth-child(6){
 .chat-bubble-mine .chat-reaction-heart { left: -6px; }
 .chat-bubble-theirs .chat-reaction-heart { right: -6px; }
 
-/* Индикатор "печатает..." */
 .chat-typing-indicator {
     font-size: 13px;
     color: #9b4f70;
@@ -975,7 +762,6 @@ button:nth-child(6){
     text-align: left;
 }
 
-/* Индикатор "Просмотрено" под своим последним сообщением */
 .chat-read-indicator {
     font-size: 11px;
     opacity: 0.75;
@@ -983,7 +769,6 @@ button:nth-child(6){
     text-align: right;
 }
 
-/* ===== Переключатель тёмной темы (секретная категория) ===== */
 .theme-toggle-row {
     display: flex;
     align-items: center;
@@ -1041,7 +826,7 @@ button:nth-child(6){
     transform: translateX(22px);
 }
 
-/* ===== Тёмная тема ===== */
+/* ===== ТЁМНАЯ ТЕМА ===== */
 body.dark-theme {
     background: linear-gradient(135deg, #1a1420, #241a2c);
     color: #eadfe8;
@@ -1093,19 +878,28 @@ body.dark-theme .count-footer {
     color: #d9a7c4;
 }
 
-/* ===== Круглые иконки-кнопки (музыка/выход) — светлая тема ===== */
+/* ===== ИСПРАВЛЕНИЕ: цвета комментариев в тёмной теме ===== */
+body.dark-theme .comment-card-text {
+    color: #eadfe8;
+}
+
+body.dark-theme .comment-card-header {
+    color: #d9a7c4;
+}
+
+/* Круглые иконки-кнопки (музыка/выход) — светлая тема */
 .icon-btn {
     border: 1px solid #ccc;
     background: #f9f9f9;
 }
 
-/* ===== Кнопка "Добавить тайтл" — светлая тема ===== */
+/* Кнопка "Добавить тайтл" — светлая тема */
 .btn-add-new {
     background: #e3f2fd !important;
     color: #0d47a1 !important;
 }
 
-/* ===== Поле поиска и его кнопки — светлая тема ===== */
+/* Поле поиска и его кнопки — светлая тема */
 .search-input-field {
     border: 1px solid #ccc;
     color: #9b4f70;
@@ -1167,7 +961,7 @@ body.dark-theme .btn-pink-style:hover {
     background-color: #5a2b3f !important;
 }
 
-/* "Чат" — фиолетовый, тёмный вариант */
+/* "Чат" / "Комментарии" — фиолетовый, тёмный вариант */
 body.dark-theme .btn-chat-purple {
     background: #35275a !important;
     color: #c9a6f2 !important;

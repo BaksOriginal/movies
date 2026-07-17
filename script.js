@@ -4,28 +4,21 @@ let titleCreatedAt = {}; // "Название (год)" -> дата добавл
 // ==========================================
 // TMDB (постеры фильмов/сериалов)
 // ==========================================
-// Получите бесплатный ключ на https://www.themoviedb.org/settings/api
-// и вставьте его сюда вместо заглушки.
 const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
 // ==========================================
 // СТИКЕРЫ ДЛЯ ЧАТА (хранятся в GitHub, не в БД)
 // ==========================================
-// Загрузите картинки стикеров (.png/.jpg/.jpeg/.webp/.gif) в папку "stickers"
-// вашего GitHub-репозитория и укажите ниже владельца/имя репозитория/ветку.
-// Список стикеров подтягивается динамически через GitHub API — просто
-// добавляйте новые файлы в папку, менять код не нужно.
 const GITHUB_STICKERS_OWNER = "BaksOriginal";
 const GITHUB_STICKERS_REPO = "movies";
 const GITHUB_STICKERS_BRANCH = "main";
 const GITHUB_STICKERS_PATH = "stickers";
-const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутри текстового поля message
+const STICKER_PREFIX = "[[STICKER]]";
 
-let isTransitioning = false; // Флаг: идет ли сейчас перерисовка экрана
+let isTransitioning = false;
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
-// Включаем временную блокировку кликов на 350мс
 function startTransitionLock() {
     isTransitioning = true;
     setTimeout(() => {
@@ -33,15 +26,13 @@ function startTransitionLock() {
     }, 350); 
 }
 
-// Перехватываем ВСЕ клики на сайте на стадии погружения
 document.addEventListener('click', (e) => {
     if (isTransitioning) {
         e.preventDefault();
         e.stopPropagation();
     }
-}, true); // true обязателен — это заставит событие обрабатываться в первую очередь
+}, true);
 
-// Функция для загрузки тайтлов из Supabase и сборки структуры
 async function loadCatalogFromDB() {
     const { data: titles, error } = await db
         .from('titles')
@@ -53,7 +44,6 @@ async function loadCatalogFromDB() {
         return;
     }
 
-    // Собираем плоский список из базы обратно в древовидную структуру для сайта
     const tempStructure = {};
     const tempCreatedAt = {};
 
@@ -68,7 +58,6 @@ async function loadCatalogFromDB() {
         if (!tempStructure[cat][gen]) tempStructure[cat][gen] = [];
 
         if (fran) {
-            // Ищем, есть ли уже такая франшиза внутри жанра
             let franchiseObj = tempStructure[cat][gen].find(
                 i => typeof i === 'object' && i !== null && i[fran]
             );
@@ -79,7 +68,6 @@ async function loadCatalogFromDB() {
             }
             franchiseObj[fran].push(titleWithYear);
         } else {
-            // Обычный фильм без франшизы
             tempStructure[cat][gen].push(titleWithYear);
         }
     });
@@ -88,7 +76,6 @@ async function loadCatalogFromDB() {
     titleCreatedAt = tempCreatedAt;
 }
 
-// Проверка: был ли тайтл добавлен в базу недавно (в течение 2 суток)
 function isRecentlyAdded(title) {
     const createdAt = titleCreatedAt[title];
     if (!createdAt) return false;
@@ -104,35 +91,44 @@ function isRecentlyAdded(title) {
 const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
 
-// Инициализируем клиент под именем db
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
 let currentUser = null;
-let watchedTitles = new Set(); // Общий список просмотренного у обоих пользователей
-let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
-let ratingsData = {}; // Оценки: { "Название (год)": [{ username, score, userId }, ...] }
+
+// ===== НОВАЯ СТРУКТУРА ПРОСМОТРЕННОГО =====
+let watchedByMe = new Set();
+let watchedByPartner = new Set();
+let watchedTogether = new Set();
+
+// Обратная совместимость: геттер для кода, который ожидает watchedTitles
+Object.defineProperty(window, 'watchedTitles', {
+    get: () => {
+        const result = new Set();
+        watchedByMe.forEach(t => result.add(t));
+        watchedTogether.forEach(t => result.add(t));
+        return result;
+    }
+});
+
+let wishlistTitles = new Set();
+let ratingsData = {};
 let history = [];
-let realtimeChannel = null; // Канал для мгновенных обновлений
+let realtimeChannel = null;
 
-// Текущие фильтры поиска
 let searchFilters = { category: "", genre: "", year: "", hasRating: "", minStars: "" };
-let lastSearchQuery = ""; // Запоминаем последний текстовый запрос, чтобы показывать его в строке поиска на экране результатов
+let lastSearchQuery = "";
 
-// Состояние чата
 let chatMessages = [];
 let isChatScreenOpen = false;
 let chatPollInterval = null;
-let chatReplyTarget = null; // Сообщение, на которое сейчас отвечаем (или null)
+let chatReplyTarget = null;
 
-// Состояние тёмной темы (сохраняется за пользователем)
 let isDarkTheme = false;
-
-// Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
-let currentCategoryName = null; 
+let currentCategoryName = null;
 
 // ==========================================
-// РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
+// РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ
 // ==========================================
 function saveSessionBackup(session) {
     if (session) {
@@ -148,7 +144,7 @@ function saveSessionBackup(session) {
 
 async function tryRestoreSession() {
     try {
-        const matches = document.cookie.match(new RegExp("(?:^|; )" + "sb_session_backup".replace(/([\.$?*|{}\(\)\[\]\\\/\+^])/g, '\\$1') + "=([^;]*)"));
+        const matches = document.cookie.match(new RegExp("(?:^|; )" + "sb_session_backup".replace(/([\.$?*|{}()\[\]\\\/\+^])/g, '\\$1') + "=([^;]*)"));
         if (matches) {
             const backupData = JSON.parse(decodeURIComponent(matches[1]));
             if (backupData && backupData.refresh_token) {
@@ -170,51 +166,33 @@ async function tryRestoreSession() {
     return false;
 }
 
-// Настоящий выход из аккаунта. Важно чистить резервную копию сессии
-// (cookie) ДО вызова signOut() — иначе обработчик события SIGNED_OUT
-// тут же находит валидный бэкап в cookie и восстанавливает сессию
-// обратно, и кнопка "Выход" фактически ничего не делает.
 async function performLogout() {
     saveSessionBackup(null);
     await db.auth.signOut();
 }
 
-// Флаг, который покажет, загрузилось ли приложение в первый раз
 let isAppInitialized = false;
 
-// Слушатель событий авторизации
 db.auth.onAuthStateChange(async (event, session) => {
-    // Supabase сам слушает возврат фокуса на вкладку / разблокировку экрана
-    // и переотправляет события авторизации (TOKEN_REFRESHED, повторный SIGNED_IN
-    // и т.п.), хотя пользователь на самом деле никуда не уходил.
-    // Если это тот же пользователь и приложение уже открыто — просто тихо
-    // обновляем токен в фоне и НЕ трогаем текущий экран.
     if (session && isAppInitialized && currentUser && currentUser.id === session.user.id) {
         currentUser = session.user;
         saveSessionBackup(session);
-        startShakeDetection(); // безопасно — функция сама не даст навесить слушатель дважды
+        startShakeDetection();
         return;
     }
 
     if (session) {
         currentUser = session.user;
-        saveSessionBackup(session); // Бэкапим сессию
-        startShakeDetection(); // На случай, если сессия восстановилась автоматически, а не через форму логина (функция сама защищена от повторного запуска)
+        saveSessionBackup(session);
+        startShakeDetection();
 
-        // Важно: помечаем инициализацию начатой СРАЗУ, синхронно, а не после
-        // загрузки данных. Иначе при первой загрузке страницы Supabase иногда
-        // присылает два события авторизации подряд (например INITIAL_SESSION
-        // и SIGNED_IN), и пока флаг ещё не выставлен, второе событие успевает
-        // запустить showHome() повторно — из-за этого один раз "моргает"
-        // при самом первом открытии страницы.
         const wasAlreadyInitialized = isAppInitialized;
         isAppInitialized = true;
-        
-        // Загружаем списки просмотренного, вишлиста и оценок одним запросом
+
         loadThemePreference();
         loadUserDataFromDB().then(() => {
             subscribeToChanges(); 
-            
+
             if (!wasAlreadyInitialized) {
                 showHome();
             } else {
@@ -222,12 +200,13 @@ db.auth.onAuthStateChange(async (event, session) => {
             }
         });
     } else {
-        // Пробуем восстановить из бэкапа перед тем как выкинуть
         const restored = await tryRestoreSession();
         if (restored) return;
 
         currentUser = null;
-        watchedTitles.clear();
+        watchedByMe.clear();
+        watchedByPartner.clear();
+        watchedTogether.clear();
         wishlistTitles.clear();
         ratingsData = {};
         chatMessages = [];
@@ -235,7 +214,7 @@ db.auth.onAuthStateChange(async (event, session) => {
         isAppInitialized = false;
         applyDarkTheme(false);
         saveSessionBackup(null);
-        
+
         if (realtimeChannel) {
             db.removeChannel(realtimeChannel);
             realtimeChannel = null;
@@ -244,26 +223,11 @@ db.auth.onAuthStateChange(async (event, session) => {
     }
 });
 
-// ==========================================
-// СТРАХОВКА ОТ ПУСТОЙ СТРАНИЦЫ
-// ==========================================
-// Обычно onAuthStateChange сам вызывает showHome() или showLoginScreen()
-// при загрузке страницы. Но если у Supabase не получается обновить
-// протухший refresh-токен (см. ошибку 400 на .../auth/v1/token в консоли),
-// в части случаев событие авторизации не приходит вообще — и страница
-// остаётся пустой навсегда, потому что её просто некому отрисовать.
-// Явно запрашиваем сессию сами и, если через 2 секунды приложение всё
-// ещё не проинициализировано, принудительно показываем экран входа.
 (async function bootstrapAuthWatchdog() {
     try {
         const { data, error } = await db.auth.getSession();
         if (error) {
             console.error("Ошибка получения сессии при загрузке:", error);
-        }
-        if (!data || !data.session) {
-            // Сессии нет — пробуем восстановиться из резервной копии,
-            // а если не выйдет, showLoginScreen() внутри onAuthStateChange
-            // должен был сработать сам. На всякий случай подстрахуемся ниже.
         }
     } catch (e) {
         console.error("Критическая ошибка при получении сессии:", e);
@@ -277,8 +241,6 @@ db.auth.onAuthStateChange(async (event, session) => {
     }, 2000);
 })();
 
-// Ловим необработанные ошибки (например, из фонового обновления токена),
-// чтобы они не оставляли страницу пустой без объяснений
 window.addEventListener("unhandledrejection", (event) => {
     console.error("Необработанная ошибка:", event.reason);
     if (!isAppInitialized && app && !app.innerHTML.trim()) {
@@ -286,18 +248,32 @@ window.addEventListener("unhandledrejection", (event) => {
     }
 });
 
-// Загрузка просмотренных тайтлов
+// ==========================================
+// ЗАГРУЗКА ДАННЫХ ПРОСМОТРЕННОГО (НОВАЯ СТРУКТУРА)
+// ==========================================
 async function loadWatchedFromDB() {
     if (!currentUser) return;
-    const { data, error } = await db.from('watched_items').select('title');
+    const { data, error } = await db.from('watched_items').select('title, watch_type, user_id');
     if (error) {
         console.error("Ошибка при загрузке списка просмотренного:", error);
         return;
     }
-    watchedTitles = new Set(data.map(item => item.title));
+
+    watchedByMe.clear();
+    watchedByPartner.clear();
+    watchedTogether.clear();
+
+    data.forEach(item => {
+        if (item.watch_type === 'together') {
+            watchedTogether.add(item.title);
+        } else if (item.user_id === currentUser.id) {
+            watchedByMe.add(item.title);
+        } else {
+            watchedByPartner.add(item.title);
+        }
+    });
 }
 
-// Загрузка вишлиста
 async function loadWishlistFromDB() {
     if (!currentUser) return;
     const { data, error } = await db.from('wishlist_items').select('title');
@@ -308,23 +284,18 @@ async function loadWishlistFromDB() {
     wishlistTitles = new Set(data.map(item => item.title));
 }
 
-// Проверка: относится ли категория к "секретным" (исключаются из фильтров и поиска)
 function isSecretCategory(catKey) {
     return catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️");
 }
 
 // =======================================================
-// ТЁМНАЯ ТЕМА (доступна из секретной категории, сохраняется за пользователем)
+// ТЁМНАЯ ТЕМА
 // =======================================================
-
-// Применяет/снимает класс тёмной темы с тела страницы
 function applyDarkTheme(enabled) {
     isDarkTheme = enabled;
     document.body.classList.toggle("dark-theme", enabled);
 }
 
-// Загружает сохранённую пользователем тему из базы (с мгновенным кэшем в localStorage,
-// чтобы тема не "мигала" при повторном открытии сайта до ответа сервера)
 async function loadThemePreference() {
     if (!currentUser) return;
 
@@ -350,7 +321,6 @@ async function loadThemePreference() {
     localStorage.setItem(cacheKey, String(enabled));
 }
 
-// Сохраняет выбор темы в базу и в локальный кэш
 async function saveThemePreference(enabled) {
     if (!currentUser) return;
     applyDarkTheme(enabled);
@@ -365,7 +335,6 @@ async function saveThemePreference(enabled) {
     }
 }
 
-// Строит переключатель тёмной темы для секретной категории
 function buildThemeToggle() {
     let row = document.createElement("div");
     row.className = "theme-toggle-row";
@@ -393,7 +362,6 @@ function buildThemeToggle() {
     return row;
 }
 
-// Загрузка оценок (видны обе оценки — и Asmoday, и Myakish)
 async function loadRatingsFromDB() {
     const { data, error } = await db.from('ratings').select('title, username, score, user_id');
     if (error) {
@@ -408,17 +376,26 @@ async function loadRatingsFromDB() {
     ratingsData = temp;
 }
 
-// Загружает watched/wishlist/ratings ОДНИМ запросом через SQL-функцию
-// get_watched_wishlist_ratings (нужно один раз создать её в Supabase, см.
-// инструкцию). Если функции ещё нет (или запрос упал) — тихо откатываемся
-// на прежний способ из трёх параллельных запросов, чтобы ничего не сломалось.
 async function loadUserDataFromDB() {
     if (!currentUser) return;
     try {
         const { data, error } = await db.rpc('get_watched_wishlist_ratings');
         if (error) throw error;
 
-        watchedTitles = new Set(data.watched || []);
+        watchedByMe.clear();
+        watchedByPartner.clear();
+        watchedTogether.clear();
+
+        (data.watched || []).forEach(item => {
+            if (item.watch_type === 'together') {
+                watchedTogether.add(item.title);
+            } else if (item.user_id === currentUser.id) {
+                watchedByMe.add(item.title);
+            } else {
+                watchedByPartner.add(item.title);
+            }
+        });
+
         wishlistTitles = new Set(data.wishlist || []);
 
         const temp = {};
@@ -432,24 +409,20 @@ async function loadUserDataFromDB() {
     }
 }
 
-// В системе всего 2 пользователя — сопоставляем email с красивым именем
 function getUsernameFromEmail(email) {
     if (email === "nowyouseemeinvi@gmail.com") return "Myakish";
     if (email === "unknownqsrll@gmail.com") return "Asmoday";
     return email || "Аноним";
 }
 
-// Считает среднюю оценку (среднее арифметическое) по тайтлу
 function getAverageRating(title) {
     const ratings = ratingsData[title];
     if (!ratings || ratings.length === 0) return null;
     const sum = ratings.reduce((acc, r) => acc + r.score, 0);
     const avg = sum / ratings.length;
-    // Показываем без .0, если оценка целая, иначе с одним знаком после запятой
     return Number.isInteger(avg) ? String(avg) : avg.toFixed(1);
 }
 
-// Форматирует строку с оценками для отображения под тайтлом
 function formatRatings(title) {
     const ratings = ratingsData[title];
     if (!ratings || ratings.length === 0) return "";
@@ -462,10 +435,8 @@ function formatRatings(title) {
 }
 
 // =======================================================
-// КОММЕНТАРИИ К ТАЙТЛАМ (1 пользователь — максимум 1 комментарий)
+// КОММЕНТАРИИ К ТАЙТЛАМ
 // =======================================================
-
-// Загружает все комментарии к конкретному тайтлу из базы
 async function loadCommentsForTitle(title) {
     const { data, error } = await db
         .from('comments')
@@ -480,7 +451,19 @@ async function loadCommentsForTitle(title) {
     return data || [];
 }
 
-// Лёгкое обновление только блоков с оценками (без полной перерисовки экрана)
+async function loadAllComments() {
+    const { data, error } = await db
+        .from('comments')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error("Ошибка при загрузке всех комментариев:", error);
+        return [];
+    }
+    return data || [];
+}
+
 async function refreshRatingsUI() {
     await loadRatingsFromDB();
     document.querySelectorAll(".movie-item").forEach(wrapper => {
@@ -492,31 +475,26 @@ async function refreshRatingsUI() {
     });
 }
 
-// Подписка на изменения базы данных в реальном времени (Websockets)
 function subscribeToChanges() {
     if (realtimeChannel) return; 
 
     realtimeChannel = db
         .channel('schema-db-changes')
-        // Следим за просмотренными
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'watched_items' },
             () => { updateUIOnLiveChange(); }
         )
-        // Следим за вишлистом
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'wishlist_items' },
             () => { updateUIOnLiveChange(); }
         )
-        // Следим за оценками
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'ratings' },
             () => { updateUIOnLiveChange(); }
         )
-        // Следим за чатом (отдельно от каталога, поиск это не затрагивает)
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'chat_messages' },
@@ -527,44 +505,46 @@ function subscribeToChanges() {
         .subscribe();
 }
 
-// Живое обновление интерфейса
 async function updateUIOnLiveChange() {
-    // Изменения в watched_items/wishlist_items/ratings не затрагивают сам каталог
-    // (таблицу titles) — раньше здесь зря перезагружался ВЕСЬ каталог при
-    // каждом таком изменении. Загружаем только то, что реально изменилось.
     await loadUserDataFromDB();
 
-    // 1. Обновляем счетчики на кнопках главного экрана
     let buttons = document.querySelectorAll("button");
     buttons.forEach(btn => {
-        if (btn.textContent.includes("Просмотрено")) {
-            btn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
+        if (btn.textContent.includes("Просмотрено мной")) {
+            btn.textContent = "🎬 Просмотрено мной (" + watchedByMe.size + ")";
+        }
+        if (btn.textContent.includes("Просмотрено партнёром")) {
+            btn.textContent = "🎬 Просмотрено партнёром (" + watchedByPartner.size + ")";
+        }
+        if (btn.textContent.includes("Просмотрено нами")) {
+            btn.textContent = "🎬 Просмотрено нами (" + watchedTogether.size + ")";
         }
         if (btn.textContent.includes("Будем смотреть")) {
             btn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
         }
     });
 
-    // 2. Обновляем иконки звездочек и оценки
     let rows = document.querySelectorAll(".item-row");
     rows.forEach(row => {
         let itemDiv = row.querySelector(".item");
         let watchBtn = row.querySelector(".btn-watch");
-        
+
         if (itemDiv && watchBtn) {
             let itemText = itemDiv.textContent.trim();
-            
+
             const isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
             let lookupText = itemText;
             if (isSecret && !itemText.includes("(2026)")) {
                 lookupText = itemText + " (2026)";
             }
 
-            // Очищаем классы перед переназначением
             watchBtn.className = "btn-watch";
 
-            if (watchedTitles.has(lookupText)) {
+            if (watchedByMe.has(lookupText) || watchedTogether.has(lookupText)) {
                 watchBtn.classList.add("watched");
+                watchBtn.textContent = "★";
+            } else if (watchedByPartner.has(lookupText)) {
+                watchBtn.classList.add("watched-partner");
                 watchBtn.textContent = "★";
             } else if (wishlistTitles.has(lookupText)) {
                 watchBtn.classList.add("wishlist-active");
@@ -575,7 +555,6 @@ async function updateUIOnLiveChange() {
         }
     });
 
-    // 3. Обновляем блоки с оценками
     document.querySelectorAll(".movie-item").forEach(wrapper => {
         let itemDiv = wrapper.querySelector(".item");
         let ratingsDiv = wrapper.querySelector(".item-ratings");
@@ -585,7 +564,6 @@ async function updateUIOnLiveChange() {
     });
 }
 
-// Мягкое обновление текущего экрана
 async function refreshCurrentScreen() {
     await loadCatalogFromDB();
     if (history.length > 0) {
@@ -597,30 +575,56 @@ async function refreshCurrentScreen() {
 }
 
 // =======================================================
-// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ (ВЫБОР КАТЕГОРИИ, ОЦЕНКА ИЛИ СНЯТИЕ)
+// НОВАЯ ЛОГИКА КЛИКА ПО ЗВЕЗДОЧКЕ
 // =======================================================
 async function handleStarClick(title) {
     if (!currentUser) return;
     showStarChoiceModal(title);
 }
 
-// Модальное окно выбора действия для звёздочки
+// Проверяет, есть ли у партнёра отметка "self" на этот тайтл
+async function checkPartnerWatchedSelf(title) {
+    if (!currentUser) return false;
+    const { data, error } = await db
+        .from('watched_items')
+        .select('user_id')
+        .eq('title', title)
+        .eq('watch_type', 'self')
+        .neq('user_id', currentUser.id)
+        .maybeSingle();
+
+    if (error) {
+        console.error("Ошибка проверки партнёра:", error);
+        return false;
+    }
+    return !!data;
+}
+
 function showStarChoiceModal(title) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "starChoiceModal";
 
-    const isWatched = watchedTitles.has(title);
+    const isWatchedByMe = watchedByMe.has(title) || watchedTogether.has(title);
+    const isWatchedByPartner = watchedByPartner.has(title);
+    const isWatchedTogether = watchedTogether.has(title);
     const isWishlisted = wishlistTitles.has(title);
 
     let optionsHtml = "";
-    if (isWatched) {
+
+    if (isWatchedTogether) {
         optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного</button>`;
+    } else if (isWatchedByMe) {
+        optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из просмотренного мной</button>`;
+    } else if (isWatchedByPartner) {
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
+        optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
     } else if (isWishlisted) {
         optionsHtml += `<button id="choiceRemove" class="btn-pink-style">❌ Убрать из вишлиста</button>`;
     } else {
         optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
-        optionsHtml += `<button id="choiceWatch" class="btn-pink-style">🎬 Просмотрено</button>`;
+        optionsHtml += `<button id="choiceWatchSelf" class="btn-pink-style">🎬 Просмотрено мной</button>`;
+        optionsHtml += `<button id="choiceWatchTogether" class="btn-pink-style">🎬 Просмотрено нами</button>`;
     }
     optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
     optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
@@ -641,8 +645,9 @@ function showStarChoiceModal(title) {
     if (removeBtn) {
         removeBtn.onclick = async () => {
             overlay.remove();
-            if (isWatched) {
-                watchedTitles.delete(title);
+            if (isWatchedTogether || isWatchedByMe) {
+                watchedByMe.delete(title);
+                watchedTogether.delete(title);
                 updateUIOnLiveChange();
                 await db.from('watched_items').delete().eq('title', title).eq('user_id', currentUser.id);
             } else if (isWishlisted) {
@@ -668,17 +673,65 @@ function showStarChoiceModal(title) {
         };
     }
 
-    const watchBtnEl = document.getElementById("choiceWatch");
-    if (watchBtnEl) {
-        watchBtnEl.onclick = async () => {
+    const watchSelfBtn = document.getElementById("choiceWatchSelf");
+    if (watchSelfBtn) {
+        watchSelfBtn.onclick = async () => {
             overlay.remove();
-            watchedTitles.add(title);
-            updateUIOnLiveChange();
-            const { error } = await db.from('watched_items').insert([{ user_id: currentUser.id, title: title }]);
-            if (error) {
-                watchedTitles.delete(title);
+
+            const partnerHasSelf = await checkPartnerWatchedSelf(title);
+
+            if (partnerHasSelf) {
+                watchedTogether.add(title);
+                watchedByPartner.delete(title);
                 updateUIOnLiveChange();
-                console.error("Ошибка при сохранении в просмотренное:", error);
+
+                await db.from('watched_items').delete().eq('title', title).eq('watch_type', 'self');
+                const { error } = await db.from('watched_items').insert([{ 
+                    user_id: currentUser.id, 
+                    title: title,
+                    watch_type: 'together'
+                }]);
+                if (error) {
+                    watchedTogether.delete(title);
+                    updateUIOnLiveChange();
+                    console.error("Ошибка при сохранении 'вместе':", error);
+                }
+            } else {
+                watchedByMe.add(title);
+                updateUIOnLiveChange();
+                const { error } = await db.from('watched_items').insert([{ 
+                    user_id: currentUser.id, 
+                    title: title,
+                    watch_type: 'self'
+                }]);
+                if (error) {
+                    watchedByMe.delete(title);
+                    updateUIOnLiveChange();
+                    console.error("Ошибка при сохранении 'сам':", error);
+                }
+            }
+        };
+    }
+
+    const watchTogetherBtn = document.getElementById("choiceWatchTogether");
+    if (watchTogetherBtn) {
+        watchTogetherBtn.onclick = async () => {
+            overlay.remove();
+            watchedTogether.add(title);
+            watchedByMe.delete(title);
+            watchedByPartner.delete(title);
+            updateUIOnLiveChange();
+
+            await db.from('watched_items').delete().eq('title', title);
+            const { error } = await db.from('watched_items').insert([{ 
+                user_id: currentUser.id, 
+                title: title,
+                watch_type: 'together'
+            }]);
+            if (error) {
+                watchedTogether.delete(title);
+                updateUIOnLiveChange();
+                console.error("Ошибка при сохранении 'вместе':", error);
             }
         };
     }
@@ -693,7 +746,6 @@ function showStarChoiceModal(title) {
     };
 }
 
-// Экран авторизации
 function showLoginScreen() {
     app.innerHTML = `
         <h1>Авторизация</h1>
@@ -730,7 +782,7 @@ function showLoginScreen() {
 }
 
 // =======================================================
-// ЛОГИКА ПОИСКА (ЛЕВЕНШТЕЙН / НЕЧЕТКИЙ ПОИСК)
+// ЛОГИКА ПОИСКА
 // =======================================================
 function getLevenshteinDistance(a, b) {
     const tmp = [];
@@ -748,7 +800,6 @@ function getLevenshteinDistance(a, b) {
     return tmp[alen][blen];
 }
 
-// Собирает доступные варианты для фильтров (категории/жанры/года), исключая "Секрет"
 function collectFilterOptions() {
     const categories = [];
     const genres = new Set();
@@ -789,12 +840,10 @@ function collectFilterOptions() {
     };
 }
 
-// Есть ли активные (не пустые) фильтры
 function hasActiveFilters(filters) {
     return !!(filters.category || filters.genre || filters.year || filters.hasRating || filters.minStars);
 }
 
-// Короткое текстовое описание примененных фильтров (для заголовка результатов)
 function buildFilterSummary(filters) {
     const parts = [];
     if (filters.category) parts.push(filters.category);
@@ -806,10 +855,6 @@ function buildFilterSummary(filters) {
     return parts.join(", ");
 }
 
-// Строит панель поиска (поле ввода + кнопка поиска + кнопка фильтров).
-// Вынесена в отдельную функцию, чтобы её можно было показывать не только
-// на главной, но и на экране результатов поиска — тогда можно искать
-// дальше, не возвращаясь на главную страницу.
 function buildSearchBar(prefillQuery = "") {
     let searchContainer = document.createElement("div");
     searchContainer.style.cssText = `
@@ -879,11 +924,6 @@ function buildSearchBar(prefillQuery = "") {
         }
     };
 
-    // Применение/сброс фильтров в модалке больше НЕ запускает поиск сам по
-    // себе — только сохраняет выбор и подсвечивает кнопку ⚙️. Сам поиск
-    // (по тексту, по фильтрам, или по тому и другому вместе — это уже
-    // учтено внутри performCatalogSearch) запускается только кнопкой 🔍
-    // или клавишей Enter.
     const refreshFilterButtonAppearance = () => {
         filterBtn.classList.toggle("active", hasActiveFilters(searchFilters));
     };
@@ -911,7 +951,7 @@ function performCatalogSearch(query, filters = {}) {
     if (!hasQuery && !hasActiveFilters(filters)) return;
 
     const results = [];
-    
+
     for (let catKey in dbData) {
         if (isSecretCategory(catKey)) {
             continue;
@@ -925,14 +965,12 @@ function performCatalogSearch(query, filters = {}) {
             const listOrObj = categoryData[genreKey];
 
             const processTitle = (fullTitle, franchiseName = null) => {
-                // Фильтр по году
                 if (filters.year) {
                     const m = fullTitle.match(/\((\d{4})\)$/);
                     const year = m ? m[1] : null;
                     if (year !== filters.year) return;
                 }
 
-                // Фильтр по наличию/отсутствию оценки и по минимальному количеству звёзд
                 const ratings = ratingsData[fullTitle] || [];
                 if (filters.hasRating === "yes" && ratings.length === 0) return;
                 if (filters.hasRating === "no" && ratings.length > 0) return;
@@ -943,14 +981,13 @@ function performCatalogSearch(query, filters = {}) {
                     if (!qualifies) return;
                 }
 
-                // Если текстового запроса нет — фильтров уже достаточно, добавляем как есть
                 if (!hasQuery) {
                     results.push({ title: fullTitle, score: 0 });
                     return;
                 }
 
                 const cleanTitle = fullTitle.replace(/\s*\(\d{4}\)$/, "").toLowerCase();
-                
+
                 if (cleanTitle.includes(searchStr) || 
                     (franchiseName && franchiseName.toLowerCase().includes(searchStr)) ||
                     genreKey.toLowerCase().includes(searchStr)) {
@@ -1027,7 +1064,6 @@ function performCatalogSearch(query, filters = {}) {
     openData(uniqueResults, true, displayTitle);
 }
 
-// Модальное окно фильтров поиска (кнопка-шестерёнка)
 function showFilterModal(onFiltersChanged) {
     const options = collectFilterOptions();
 
@@ -1122,7 +1158,9 @@ function showFilterModal(onFiltersChanged) {
     };
 }
 
-// Главная страница
+// =======================================================
+// ГЛАВНАЯ СТРАНИЦА
+// =======================================================
 async function showHome() {
     startTransitionLock();
     isChatScreenOpen = false;
@@ -1133,7 +1171,7 @@ async function showHome() {
     history = [];
     currentCategoryName = null;
     await loadCatalogFromDB();
-    
+
     let nav = document.querySelector(".navigation");
     if (nav) nav.remove();
 
@@ -1166,7 +1204,7 @@ async function showHome() {
         header.style.marginBottom = "15px";
 
         header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${getUsernameFromEmail(currentUser.email)}</span>`;
-        
+
         let controls = document.createElement("div");
         controls.style.display = "flex";
         controls.style.alignItems = "center";
@@ -1197,18 +1235,15 @@ async function showHome() {
         addBtn.style.marginBottom = "10px";
         addBtn.onclick = () => showAddEditModal();
         app.appendChild(addBtn);
-        
-        // Первый сплиттер HR (после "Добавить")
+
         let hr = document.createElement("hr");
         hr.style.border = "0";
         hr.style.borderTop = "2px solid #9b4f70"; 
         hr.style.margin = "15px 0";
         app.appendChild(hr);
 
-        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
         app.appendChild(buildSearchBar());
 
-        // Второй сплиттер HR (после Поиска)
         let hrAfterSearch = document.createElement("hr");
         hrAfterSearch.style.border = "0";
         hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
@@ -1216,10 +1251,8 @@ async function showHome() {
         app.appendChild(hrAfterSearch);
     }
 
-    // Рендерим кнопки категорий
     let secretDividerAdded = false;
     for (let key in dbData) {
-        // Разделитель ПЕРЕД секретной категорией (например между "Сериалы" и "Секрет")
         const isSecretKey = key.includes("Секрет") || key.includes("🔒") || key.includes("❤️");
         if (isSecretKey && !secretDividerAdded) {
             let hrBeforeSecret = document.createElement("hr");
@@ -1238,7 +1271,6 @@ async function showHome() {
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
 
-        // Третий сплиттер HR (после категории "Секрет")
         if (isSecretKey) {
             let hrAfterSecret = document.createElement("hr");
             hrAfterSecret.style.border = "0";
@@ -1258,16 +1290,36 @@ async function showHome() {
     };
     app.appendChild(wishlistBtn);
 
-    // Кнопка "Просмотрено" на главной
-    let watchedBtn = document.createElement("button");
-    watchedBtn.className = "btn-pink-style";
-    watchedBtn.textContent = "🎬 Просмотрено (" + watchedTitles.size + ")";
-    watchedBtn.onclick = () => {
-        const list = Array.from(watchedTitles);
-        currentCategoryName = "🎬 Просмотрено";
-        openData(list, true, "🎬 Просмотрено");
+    // ===== НОВЫЕ КНОПКИ ПРОСМОТРЕННОГО =====
+    let watchedMeBtn = document.createElement("button");
+    watchedMeBtn.className = "btn-pink-style";
+    watchedMeBtn.textContent = "🎬 Просмотрено мной (" + watchedByMe.size + ")";
+    watchedMeBtn.onclick = () => {
+        const list = Array.from(watchedByMe);
+        currentCategoryName = "🎬 Просмотрено мной";
+        openData(list, true, "🎬 Просмотрено мной");
     };
-    app.appendChild(watchedBtn);
+    app.appendChild(watchedMeBtn);
+
+    let watchedPartnerBtn = document.createElement("button");
+    watchedPartnerBtn.className = "btn-pink-style";
+    watchedPartnerBtn.textContent = "🎬 Просмотрено партнёром (" + watchedByPartner.size + ")";
+    watchedPartnerBtn.onclick = () => {
+        const list = Array.from(watchedByPartner);
+        currentCategoryName = "🎬 Просмотрено партнёром";
+        openData(list, true, "🎬 Просмотрено партнёром");
+    };
+    app.appendChild(watchedPartnerBtn);
+
+    let watchedTogetherBtn = document.createElement("button");
+    watchedTogetherBtn.className = "btn-pink-style";
+    watchedTogetherBtn.textContent = "🎬 Просмотрено нами (" + watchedTogether.size + ")";
+    watchedTogetherBtn.onclick = () => {
+        const list = Array.from(watchedTogether);
+        currentCategoryName = "🎬 Просмотрено нами";
+        openData(list, true, "🎬 Просмотрено нами");
+    };
+    app.appendChild(watchedTogetherBtn);
 
     if (currentUser) {
         let hrBeforeChat = document.createElement("hr");
@@ -1281,6 +1333,13 @@ async function showHome() {
         chatBtn.textContent = "💬 Чат";
         chatBtn.onclick = () => showChatScreen();
         app.appendChild(chatBtn);
+
+        // ===== КНОПКА КОММЕНТАРИЕВ =====
+        let commentsBtn = document.createElement("button");
+        commentsBtn.className = "btn-chat-purple";
+        commentsBtn.textContent = "💭 Комментарии";
+        commentsBtn.onclick = () => showGlobalCommentsScreen();
+        app.appendChild(commentsBtn);
     }
 
     let footer = document.createElement("p");
@@ -1292,7 +1351,9 @@ async function showHome() {
     app.appendChild(footer);
 }
 
-// Отрисовка строки элемента (тайтла)
+// =======================================================
+// ОТРИСОВКА ЭЛЕМЕНТА (ТАЙТЛА)
+// =======================================================
 function renderItemRow(itemText, container) {
     let wrapper = document.createElement("div");
     wrapper.className = "movie-item";
@@ -1302,9 +1363,9 @@ function renderItemRow(itemText, container) {
 
     let itemDiv = document.createElement("div");
     itemDiv.className = "item";
-    
+
     let isSecret = itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал");
-    
+
     if (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒") || currentCategoryName.includes("❤️"))) {
         isSecret = true;
     }
@@ -1331,7 +1392,7 @@ function renderItemRow(itemText, container) {
         itemDiv.style.cursor = "pointer";
         itemDiv.style.userSelect = "none";
         itemDiv.style.webkitUserSelect = "none";
-        
+
         let pressTimer = null;
         let isMoving = false;
         let startX = 0, startY = 0;
@@ -1389,16 +1450,18 @@ function renderItemRow(itemText, container) {
         }, { passive: false });
         itemDiv.addEventListener("touchcancel", cancelPress);
     }
-    
+
     row.appendChild(itemDiv);
 
     if (!isSecret) {
         let watchBtn = document.createElement("button");
         watchBtn.className = "btn-watch";
-        
-        // Установка правильного состояния звездочки на старте
-        if (watchedTitles.has(itemText)) {
+
+        if (watchedByMe.has(itemText) || watchedTogether.has(itemText)) {
             watchBtn.classList.add("watched");
+            watchBtn.textContent = "★";
+        } else if (watchedByPartner.has(itemText)) {
+            watchBtn.classList.add("watched-partner");
             watchBtn.textContent = "★";
         } else if (wishlistTitles.has(itemText)) {
             watchBtn.classList.add("wishlist-active");
@@ -1406,7 +1469,7 @@ function renderItemRow(itemText, container) {
         } else {
             watchBtn.textContent = "☆";
         }
-        
+
         watchBtn.onclick = () => handleStarClick(itemText);
         row.appendChild(watchBtn);
     }
@@ -1423,8 +1486,186 @@ function renderItemRow(itemText, container) {
     container.appendChild(wrapper);
 }
 
-// Всплывающее меню выбора действия
-// Ищет постер тайтла на TMDB (сначала как фильм, потом как сериал)
+// =======================================================
+// ГЛОБАЛЬНЫЙ ЭКРАН КОММЕНТАРИЕВ
+// =======================================================
+async function showGlobalCommentsScreen() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = null;
+
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = "💭 Комментарии";
+    app.appendChild(title);
+
+    let loading = document.createElement("p");
+    loading.style.textAlign = "center";
+    loading.style.color = "#999";
+    loading.textContent = "Загрузка...";
+    app.appendChild(loading);
+
+    const allComments = await loadAllComments();
+
+    loading.remove();
+
+    if (allComments.length === 0) {
+        let empty = document.createElement("p");
+        empty.style.textAlign = "center";
+        empty.style.color = "#999";
+        empty.style.marginTop = "20px";
+        empty.textContent = "Комментариев пока нет.";
+        app.appendChild(empty);
+    } else {
+        // Группируем комментарии по тайтлу
+        const byTitle = {};
+        allComments.forEach(c => {
+            if (!byTitle[c.title]) byTitle[c.title] = [];
+            byTitle[c.title].push(c);
+        });
+
+        for (let titleName in byTitle) {
+            let titleBlock = document.createElement("div");
+            titleBlock.style.marginBottom = "20px";
+            titleBlock.style.textAlign = "left";
+
+            let titleHeader = document.createElement("div");
+            titleHeader.style.fontWeight = "bold";
+            titleHeader.style.fontSize = "16px";
+            titleHeader.style.color = "#9b4f70";
+            titleHeader.style.marginBottom = "8px";
+            titleHeader.style.padding = "0 4px";
+            titleHeader.textContent = titleName;
+            titleBlock.appendChild(titleHeader);
+
+            byTitle[titleName].forEach(c => {
+                const card = document.createElement("div");
+                card.className = "comment-card";
+                const isMine = c.user_id === currentUser.id;
+                card.innerHTML = `
+                    <div class="comment-card-header"><span></span><span></span></div>
+                    <div class="comment-card-text"></div>
+                    ${isMine ? `<div class="comment-card-actions">
+                        <button class="btn-action-edit" data-act="edit">✏️ Изменить</button>
+                        <button class="btn-action-delete" data-act="delete">🗑️ Удалить</button>
+                    </div>` : ``}
+                `;
+                card.querySelector(".comment-card-header span:first-child").textContent = c.username;
+                card.querySelector(".comment-card-header span:last-child").textContent = formatChatTime(c.created_at);
+                card.querySelector(".comment-card-text").textContent = c.comment;
+
+                if (isMine) {
+                    card.querySelector('[data-act="edit"]').onclick = () => {
+                        showGlobalCommentEditForm(card, c, titleBlock);
+                    };
+                    card.querySelector('[data-act="delete"]').onclick = async () => {
+                        if (!confirm("Удалить ваш комментарий?")) return;
+                        const { error } = await db.from('comments').delete().eq('id', c.id);
+                        if (error) {
+                            alert("Не удалось удалить комментарий.");
+                            return;
+                        }
+                        card.remove();
+                        if (titleBlock.querySelectorAll('.comment-card').length === 0) {
+                            titleBlock.remove();
+                        }
+                    };
+                }
+
+                titleBlock.appendChild(card);
+            });
+
+            app.appendChild(titleBlock);
+        }
+    }
+
+    // Навигация
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+
+    let homeBtn = document.createElement("button");
+    homeBtn.textContent = "🏠 Домой";
+    homeBtn.onclick = () => {
+        showHome();
+    };
+
+    nav.appendChild(homeBtn);
+
+    let container = document.querySelector(".container");
+    if (container) {
+        container.insertBefore(nav, container.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
+}
+
+function showGlobalCommentEditForm(cardEl, comment, titleBlock) {
+    // Убираем старые формы редактирования
+    titleBlock.querySelectorAll('.global-comment-edit-form').forEach(f => f.remove());
+
+    const form = document.createElement("div");
+    form.className = "global-comment-edit-form";
+    form.style.cssText = `
+        background: white;
+        padding: 12px;
+        border-radius: 14px;
+        margin: 8px 0;
+        box-shadow: 0 4px 12px rgba(180,80,120,0.15);
+    `;
+    form.innerHTML = `
+        <input type="text" class="edit-comment-input" style="
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ffdce5;
+            border-radius: 10px;
+            font-size: 14px;
+            margin-bottom: 8px;
+            box-sizing: border-box;
+        " value="">
+        <div style="display: flex; gap: 8px;">
+            <button class="btn-save" style="flex: 1; padding: 8px;">Сохранить</button>
+            <button class="btn-cancel" style="flex: 1; padding: 8px;">Отмена</button>
+        </div>
+    `;
+
+    const input = form.querySelector('.edit-comment-input');
+    input.value = comment.comment;
+    input.focus();
+
+    form.querySelector('.btn-save').onclick = async () => {
+        const newText = input.value.trim();
+        if (!newText || newText === comment.comment) {
+            form.remove();
+            return;
+        }
+        const { error } = await db.from('comments').update({ comment: newText }).eq('id', comment.id);
+        if (error) {
+            alert("Не удалось изменить комментарий.");
+            return;
+        }
+        comment.comment = newText;
+        cardEl.querySelector('.comment-card-text').textContent = newText;
+        form.remove();
+    };
+
+    form.querySelector('.btn-cancel').onclick = () => {
+        form.remove();
+    };
+
+    cardEl.after(form);
+}
+
+// =======================================================
+// TMDB ПОСТЕРЫ
+// =======================================================
 async function fetchTmdbPoster(itemText) {
     if (!TMDB_API_KEY || TMDB_API_KEY.includes("ВСТАВЬТЕ")) return null;
 
@@ -1460,9 +1701,8 @@ async function fetchTmdbPoster(itemText) {
 // ==========================================
 // СТИКЕРЫ ЧАТА
 // ==========================================
-let cachedStickerList = null; // кэшируем на время сессии, чтобы не дергать GitHub API каждый раз
+let cachedStickerList = null;
 
-// Загружает список файлов-стикеров из папки stickers в GitHub-репозитории
 async function fetchStickerList() {
     if (cachedStickerList) return cachedStickerList;
 
@@ -1488,17 +1728,14 @@ async function fetchStickerList() {
     }
 }
 
-// Проверяет, является ли текст сообщения стикером
 function isStickerMessage(messageText) {
     return typeof messageText === "string" && messageText.startsWith(STICKER_PREFIX);
 }
 
-// Достает URL картинки стикера из текста сообщения
 function getStickerUrl(messageText) {
     return messageText.slice(STICKER_PREFIX.length);
 }
 
-// Модалка выбора стикера
 function showStickerPicker(onPick) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -1520,7 +1757,7 @@ function showStickerPicker(onPick) {
 
     fetchStickerList().then(list => {
         const grid = document.getElementById("stickerGrid");
-        if (!grid) return; // модалку уже закрыли, пока грузились стикеры
+        if (!grid) return;
 
         if (list.length === 0) {
             grid.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Стикеры не найдены. Проверьте настройки GITHUB_STICKERS_* в script.js</p>`;
@@ -1570,10 +1807,9 @@ function showActionMenu(itemText) {
     overlay.querySelector("#menuTitle").textContent = itemText;
     document.body.appendChild(overlay);
 
-    // Подгружаем постер асинхронно, не блокируя открытие меню
     const posterBox = overlay.querySelector("#posterBox");
     fetchTmdbPoster(itemText).then(url => {
-        if (!overlay.isConnected) return; // меню уже закрыли
+        if (!overlay.isConnected) return;
         if (url) {
             posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
         } else {
@@ -1581,7 +1817,6 @@ function showActionMenu(itemText) {
         }
     });
 
-    // Логика кнопки трейлера
     document.getElementById("actTrailer").onclick = () => {
         overlay.remove();
         const query = encodeURIComponent(itemText + " трейлер");
@@ -1608,7 +1843,6 @@ function showActionMenu(itemText) {
     };
 }
 
-// Модальное окно выставления/изменения/удаления оценки (10 кликабельных звёзд)
 function showRatingModal(itemText) {
     if (!currentUser) return;
 
@@ -1707,7 +1941,6 @@ function showRatingModal(itemText) {
     }
 }
 
-// Модальное окно комментариев к тайтлу (1 пользователь = максимум 1 комментарий)
 async function showCommentsModal(itemText) {
     if (!currentUser) return;
 
@@ -1780,8 +2013,6 @@ async function showCommentsModal(itemText) {
     function showCommentForm(existingComment) {
         formBox.innerHTML = "";
         if (existingComment && formBox.dataset.editing !== "1") {
-            // У пользователя уже есть комментарий и форма редактирования не открыта — формы не показываем,
-            // редактирование доступно через кнопку "Изменить" в карточке комментария
             return;
         }
 
@@ -1840,6 +2071,9 @@ async function showCommentsModal(itemText) {
     await refresh();
 }
 
+// =======================================================
+// ОТКРЫТИЕ ДАННЫХ (КАТЕГОРИИ/ЖАНРЫ/ФИЛЬМЫ)
+// =======================================================
 function openData(content, saveHistory = true, customTitle = null) {
     startTransitionLock();
     isChatScreenOpen = false;
@@ -1859,8 +2093,6 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(title);
     }
 
-    // На экране результатов поиска показываем ту же панель поиска —
-    // чтобы можно было искать дальше, не возвращаясь на главную
     if (currentCategoryName === "🔍 Результаты поиска" && currentUser) {
         app.appendChild(buildSearchBar(lastSearchQuery));
     }
@@ -1890,8 +2122,6 @@ function openData(content, saveHistory = true, customTitle = null) {
         }
     }
 
-    // Показываем общее количество тайтлов внизу экрана категории/жанра
-    // (кроме секретной категории — там подсчёт не нужен вовсе)
     const isInSecretCategory = currentCategoryName && isSecretCategory(currentCategoryName);
     const totalTitlesCount = getAllTitlesFromCategory(content).length;
     if (totalTitlesCount > 0 && !isInSecretCategory) {
@@ -1901,15 +2131,16 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(countFooter);
     }
 
-    // Тумблер тёмной темы — только внутри секретной категории
-    if (isInSecretCategory && currentUser) {
+    // ===== ИСПРАВЛЕНИЕ: тумблер темы ТОЛЬКО на уровне категории (history.length === 1) =====
+    // history.length === 1 означает, что мы только что кликнули по категории (первый уровень)
+    // и ещё не углубились в жанры/франшизы
+    if (isInSecretCategory && currentUser && history.length === 1) {
         app.appendChild(buildThemeToggle());
     }
 
     addNavigation();
 }
 
-// Навигационная панель Назад/Домой
 function addNavigation() {
     let oldNav = document.querySelector(".navigation");
     if (oldNav) {
@@ -1949,10 +2180,8 @@ function addNavigation() {
 }
 
 // =======================================================
-// ЧАТ МЕЖДУ ПОЛЬЗОВАТЕЛЯМИ (полностью изолирован от поиска/каталога)
+// ЧАТ
 // =======================================================
-
-// Загружает последние 150 сообщений из базы (в хронологическом порядке)
 async function loadChatMessages() {
     const { data, error } = await db
         .from('chat_messages')
@@ -1968,7 +2197,6 @@ async function loadChatMessages() {
     chatMessages = data.reverse();
 }
 
-// Реалтайм-обработчик изменений в чате
 async function onChatRealtimeChange() {
     await loadChatMessages();
     if (isChatScreenOpen) {
@@ -1976,11 +2204,6 @@ async function onChatRealtimeChange() {
     }
 }
 
-// =======================================================
-// ОТВЕТ НА СООБЩЕНИЕ (REPLY)
-// =======================================================
-
-// Устанавливает сообщение, на которое отвечаем, и показывает панель над полем ввода
 function setChatReplyTarget(msg) {
     chatReplyTarget = msg;
     renderChatReplyBar();
@@ -1993,7 +2216,6 @@ function clearChatReplyTarget() {
     renderChatReplyBar();
 }
 
-// Отрисовывает (или убирает) панель "Ответ на сообщение" над полем ввода чата
 function renderChatReplyBar() {
     const box = document.getElementById("chatReplyBarBox");
     if (!box) return;
@@ -2017,7 +2239,6 @@ function renderChatReplyBar() {
     box.querySelector("#chatReplyCancelBtn").onclick = () => clearChatReplyTarget();
 }
 
-// Форматирует дату и время сообщения
 function formatChatTime(isoString) {
     const d = new Date(isoString);
     const datePart = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
@@ -2025,7 +2246,6 @@ function formatChatTime(isoString) {
     return `${datePart}, ${timePart}`;
 }
 
-// Сообщение можно редактировать/удалять только в течение 24 часов после отправки
 const CHAT_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 function canModifyChatMessage(msg) {
     const createdTime = new Date(msg.created_at).getTime();
@@ -2033,21 +2253,18 @@ function canModifyChatMessage(msg) {
     return (Date.now() - createdTime) < CHAT_EDIT_WINDOW_MS;
 }
 
-// Обрезает текст цитаты ответа для превью
 function buildReplyPreviewText(msg) {
     if (isStickerMessage(msg.message)) return "🖼️ Стикер";
     const text = msg.message || "";
     return text.length > 60 ? text.slice(0, 60) + "…" : text;
 }
 
-// Создаёт один DOM-элемент сообщения (используется рендером ниже)
 function createChatBubble(msg) {
     let bubble = document.createElement("div");
     const isMine = currentUser && msg.user_id === currentUser.id;
     bubble.className = "chat-bubble " + (isMine ? "chat-bubble-mine" : "chat-bubble-theirs");
     bubble.dataset.msgId = msg.id;
 
-    // Цитата сообщения, на которое отвечали
     if (msg.reply_to_username) {
         let quote = document.createElement("div");
         quote.className = "chat-reply-quote";
@@ -2071,7 +2288,7 @@ function createChatBubble(msg) {
         img.alt = "стикер";
         img.className = "chat-sticker-img";
         img.draggable = false;
-        img.oncontextmenu = (e) => e.preventDefault(); // отключаем системное меню браузера на долгом тапе
+        img.oncontextmenu = (e) => e.preventDefault();
         text.appendChild(img);
     } else {
         text.textContent = msg.message;
@@ -2080,7 +2297,6 @@ function createChatBubble(msg) {
     bubble.appendChild(meta);
     bubble.appendChild(text);
 
-    // Реакция сердечком (если есть)
     if (msg.reaction) {
         let heart = document.createElement("div");
         heart.className = "chat-reaction-heart";
@@ -2088,11 +2304,9 @@ function createChatBubble(msg) {
         bubble.appendChild(heart);
     }
 
-    // Долгое нажатие — открывает меню (ответить, а для своих сообщений — ещё редактировать/удалить)
     bubble.style.cursor = "pointer";
     attachChatLongPress(bubble, msg, isMine);
 
-    // Двойной тап по сообщению СОБЕСЕДНИКА — реакция сердечком
     if (!isMine) {
         attachChatDoubleTap(bubble, msg);
     }
@@ -2100,12 +2314,7 @@ function createChatBubble(msg) {
     return bubble;
 }
 
-// Обновляет содержимое уже отрисованного пузыря сообщения, если текст
-// поменялся (например, сообщение отредактировали, или сообщение, на
-// которое ссылается ответ, было удалено)
 function updateChatBubbleContent(bubbleEl, msg) {
-    // Обновляем текст цитаты ответа (например, "Сообщение удалено"),
-    // если она есть — это нужно независимо от того, стикер это или нет
     const quoteTextEl = bubbleEl.querySelector(".chat-reply-quote-text");
     if (quoteTextEl) {
         const quoteText = msg.reply_to_text || "";
@@ -2114,7 +2323,7 @@ function updateChatBubbleContent(bubbleEl, msg) {
         }
     }
 
-    if (isStickerMessage(msg.message)) return; // стикеры не редактируются
+    if (isStickerMessage(msg.message)) return;
 
     const textEl = bubbleEl.querySelector(".chat-text");
     if (textEl && textEl.textContent !== msg.message) {
@@ -2126,7 +2335,6 @@ function updateChatBubbleContent(bubbleEl, msg) {
         metaEl.textContent = metaText;
     }
 
-    // Обновляем реакцию-сердечко, если она поменялась
     let heartEl = bubbleEl.querySelector(".chat-reaction-heart");
     if (msg.reaction) {
         if (!heartEl) {
@@ -2140,7 +2348,6 @@ function updateChatBubbleContent(bubbleEl, msg) {
     }
 }
 
-// Долгое нажатие на пузырь сообщения — открывает меню (ответить / редактировать / удалить)
 function attachChatLongPress(el, msg, isMine) {
     let pressTimer = null;
     let isMoving = false;
@@ -2187,7 +2394,6 @@ function attachChatLongPress(el, msg, isMine) {
     el.addEventListener("touchcancel", cancelPress);
 }
 
-// Двойной тап/клик по сообщению собеседника — ставит или снимает реакцию сердечком
 function attachChatDoubleTap(el, msg) {
     let lastTapTime = 0;
     const DOUBLE_TAP_MS = 300;
@@ -2210,7 +2416,6 @@ function attachChatDoubleTap(el, msg) {
     el.addEventListener("touchend", handleTap, { passive: false });
 }
 
-// Ставит/снимает реакцию сердечком на сообщение собеседника
 async function toggleHeartReaction(msg) {
     if (!currentUser) return;
     const alreadyMine = msg.reaction && msg.reaction_by === currentUser.id;
@@ -2219,7 +2424,6 @@ async function toggleHeartReaction(msg) {
 
     vibrate(20);
 
-    // Обновляем локально сразу для отзывчивости интерфейса
     const local = chatMessages.find(m => m.id === msg.id);
     if (local) {
         local.reaction = newReaction;
@@ -2236,7 +2440,6 @@ async function toggleHeartReaction(msg) {
     }
 }
 
-// Меню действий над сообщением (ответить — для любых сообщений; редактировать/удалить — только для своих)
 function showChatMessageMenu(msg, isMine) {
     const canModify = isMine && canModifyChatMessage(msg);
     const isSticker = isStickerMessage(msg.message);
@@ -2285,9 +2488,6 @@ function showChatMessageMenu(msg, isMine) {
         }
         if (!confirm("Удалить это сообщение?")) return;
 
-        // Сначала помечаем "удалено" во всех ответах, ссылающихся на это
-        // сообщение — иначе после удаления самого сообщения его текст
-        // навсегда останется висеть в чужих цитатах.
         const { error: replyUpdateError } = await db.from('chat_messages')
             .update({ reply_to_text: "Сообщение удалено" })
             .eq('reply_to_id', msg.id);
@@ -2301,9 +2501,7 @@ function showChatMessageMenu(msg, isMine) {
             alert("Не удалось удалить сообщение.");
             return;
         }
-        // Убираем сразу локально, не дожидаясь realtime-события
         chatMessages = chatMessages.filter(m => m.id !== msg.id);
-        // И сразу же обновляем локальные цитаты в ответах на него
         chatMessages.forEach(m => {
             if (m.reply_to_id === msg.id) m.reply_to_text = "Сообщение удалено";
         });
@@ -2311,7 +2509,6 @@ function showChatMessageMenu(msg, isMine) {
     };
 }
 
-// Модалка редактирования текста сообщения
 function showChatMessageEditModal(msg) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -2350,7 +2547,6 @@ function showChatMessageEditModal(msg) {
             alert("Не удалось изменить сообщение.");
             return;
         }
-        // Обновляем сразу локально, не дожидаясь realtime-события
         const local = chatMessages.find(m => m.id === msg.id);
         if (local) local.message = newText;
         overlay.remove();
@@ -2358,16 +2554,10 @@ function showChatMessageEditModal(msg) {
     };
 }
 
-// Отрисовка списка сообщений внутри открытого чата.
-// Важно: не пересоздаём весь список при каждом обновлении (это давало
-// "моргание" каждые несколько секунд из-за опроса/realtime), а только
-// добавляем новые сообщения и убираем удалённые — уже отрисованные
-// сообщения не трогаем (только обновляем текст на месте, если его отредактировали).
 function renderChatMessages() {
     const box = document.getElementById("chatBox");
     if (!box) return;
 
-    // Пустое состояние
     if (chatMessages.length === 0) {
         if (box.dataset.rendered !== "empty") {
             box.innerHTML = "";
@@ -2380,7 +2570,6 @@ function renderChatMessages() {
         return;
     }
 
-    // Если до этого показывалась заглушка "нет сообщений" — очищаем её один раз
     if (box.dataset.rendered === "empty") {
         box.innerHTML = "";
         box.dataset.rendered = "list";
@@ -2389,17 +2578,14 @@ function renderChatMessages() {
 
     const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
 
-    // Собираем уже отрисованные элементы по id
     const renderedEls = new Map();
     box.querySelectorAll("[data-msg-id]").forEach(el => renderedEls.set(el.dataset.msgId, el));
     const currentIds = new Set(chatMessages.map(m => String(m.id)));
 
-    // Удаляем из DOM сообщения, которых больше нет в данных (удалили)
     renderedEls.forEach((el, id) => {
         if (!currentIds.has(id)) el.remove();
     });
 
-    // Добавляем новые сообщения и обновляем текст уже существующих (если отредактировали)
     let addedNew = false;
     chatMessages.forEach(msg => {
         const idStr = String(msg.id);
@@ -2412,14 +2598,11 @@ function renderChatMessages() {
         }
     });
 
-    // Прокручиваем вниз только если появились новые сообщения и пользователь
-    // и так был у нижнего края (чтобы не сбивать чтение старых сообщений)
     if (addedNew && wasNearBottom) {
         box.scrollTop = box.scrollHeight;
     }
 }
 
-// Экран чата (не связан с историей навигации каталога/поиска)
 async function showChatScreen() {
     startTransitionLock();
     isChatScreenOpen = true;
@@ -2439,7 +2622,6 @@ async function showChatScreen() {
     chatBox.id = "chatBox";
     app.appendChild(chatBox);
 
-    // Панель "ответ на сообщение" (появляется, когда выбран reply)
     let replyBarBox = document.createElement("div");
     replyBarBox.id = "chatReplyBarBox";
     app.appendChild(replyBarBox);
@@ -2464,7 +2646,6 @@ async function showChatScreen() {
     sendBtn.id = "chatSendBtn";
     sendBtn.textContent = "➤";
 
-    // Общая отправка сообщения в БД — используется и для текста, и для стикеров
     const sendChatMessage = async (text) => {
         if (!text || !currentUser) return;
 
@@ -2490,7 +2671,6 @@ async function showChatScreen() {
 
         clearChatReplyTarget();
 
-        // Показываем сообщение сразу же, не дожидаясь realtime-события
         if (data) {
             chatMessages.push(data);
             if (chatMessages.length > 150) chatMessages.shift();
@@ -2529,7 +2709,6 @@ async function showChatScreen() {
     await loadChatMessages();
     renderChatMessages();
 
-    // Подстраховка на случай проблем с realtime: обновляем чат каждые 4 секунды
     if (chatPollInterval) clearInterval(chatPollInterval);
     chatPollInterval = setInterval(async () => {
         if (!isChatScreenOpen) return;
@@ -2537,7 +2716,6 @@ async function showChatScreen() {
         renderChatMessages();
     }, 4000);
 
-    // Собственная навигация чата — не трогает историю поиска/каталога
     let nav = document.createElement("div");
     nav.className = "navigation";
 
@@ -2565,7 +2743,9 @@ async function showChatScreen() {
     chatInput.focus();
 }
 
-// Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ
+// =======================================================
+// ДОБАВЛЕНИЕ/РЕДАКТИРОВАНИЕ/УДАЛЕНИЕ ТАЙТЛОВ
+// =======================================================
 function showAddEditModal(existingItem = null) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
@@ -2574,7 +2754,7 @@ function showAddEditModal(existingItem = null) {
     const categories = Object.keys(dbData).filter(cat => {
         return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
     });
-    
+
     overlay.innerHTML = `
         <div class="modal-content">
             <h3>${existingItem ? "Редактировать" : "Добавить фильм/серию"}</h3>
@@ -2614,7 +2794,6 @@ function showAddEditModal(existingItem = null) {
     const mGenre = document.getElementById("mGenre");
     const mFranchise = document.getElementById("mFranchise");
     const franchisesList = document.getElementById("franchisesList");
-
     const genresList = document.getElementById("genresList");
 
     function updateGenresDatalist() {
@@ -2642,7 +2821,7 @@ function showAddEditModal(existingItem = null) {
 
         if (dbData[selectedCategory] && dbData[selectedCategory][selectedGenre]) {
             const listOrObj = dbData[selectedCategory][selectedGenre];
-            
+
             if (Array.isArray(listOrObj)) {
                 listOrObj.forEach(item => {
                     if (typeof item === 'object' && item !== null) {
@@ -2712,7 +2891,6 @@ function showAddEditModal(existingItem = null) {
     };
 }
 
-// Обработка кнопки "Редактировать"
 async function handleEditClick(itemText) {
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
@@ -2736,7 +2914,6 @@ async function handleEditClick(itemText) {
     showAddEditModal(data);
 }
 
-// Обработка кнопки "Удалить"
 async function handleDeleteClick(itemText) {
     const match = itemText.match(/^(.*?)\s*\((\d{4})\)$/);
     if (!match) return;
@@ -2745,8 +2922,7 @@ async function handleDeleteClick(itemText) {
     const year = parseInt(match[2], 10);
 
     if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
-        
-        // Удаляем из просмотренных
+
         const { error: watchedError } = await db
             .from("watched_items")
             .delete()
@@ -2756,7 +2932,6 @@ async function handleDeleteClick(itemText) {
             console.error("Не удалось удалить из просмотренных:", watchedError.message);
         }
 
-        // Удаляем из вишлиста
         const { error: wishlistError } = await db
             .from("wishlist_items")
             .delete()
@@ -2780,16 +2955,15 @@ async function handleDeleteClick(itemText) {
     }
 }
 
-
 // =======================================================
-// ЛОГИКА ТРЯСКИ ТЕЛЕФОНА (SHAKE DETECTION)
+// ТРЯСКА ТЕЛЕФОНА (SHAKE DETECTION)
 // =======================================================
 const SHAKE_THRESHOLD = 15; 
 const SHAKE_TIMEOUT = 2500;  
 let lastX = null, lastY = null, lastZ = null;
 let lastShakeTime = 0;
 let isShakeModalOpen = false; 
-let shakeDetectionStarted = false; // чтобы не навешивать слушатель devicemotion повторно
+let shakeDetectionStarted = false;
 
 function getAllTitlesFromCategory(dataBranch) {
     let resultList = [];
@@ -2815,15 +2989,12 @@ function getAllTitlesFromCategory(dataBranch) {
     return resultList;
 }
 
-// Короткая вибрация (если поддерживается устройством/браузером)
 function vibrate(pattern) {
     if (navigator.vibrate) {
-        try { navigator.vibrate(pattern); } catch (e) { /* игнорируем, если браузер не разрешил */ }
+        try { navigator.vibrate(pattern); } catch (e) { }
     }
 }
 
-// Анимация "прокрутки" случайных названий перед финальным результатом —
-// как в игровом автомате: сначала быстро, затем замедляется
 function runSlotAnimation(el, pool, finalText, isSecretDisplay, onDone) {
     const displayOf = (t) => isSecretDisplay ? t.replace(/\s*\(\d{4}\)$/, "") : t;
     el.classList.add("slot-spin");
@@ -2835,7 +3006,7 @@ function runSlotAnimation(el, pool, finalText, isSecretDisplay, onDone) {
         if (step >= totalSteps) {
             el.classList.remove("slot-spin");
             el.textContent = displayOf(finalText);
-            vibrate([40, 30, 60]); // финальный "щелчок"
+            vibrate([40, 30, 60]);
             if (onDone) onDone();
             return;
         }
@@ -2844,7 +3015,6 @@ function runSlotAnimation(el, pool, finalText, isSecretDisplay, onDone) {
         el.textContent = displayOf(randomPick);
         step++;
 
-        // Замедление к концу прокрутки
         const delay = 45 + step * step * 2;
         setTimeout(tick, delay);
     }
@@ -2885,7 +3055,7 @@ function showRandomTitleModal(titleText, pool = []) {
     `;
 
     const titleEl = overlay.querySelector("#shakeRandomTitle");
-    let currentTitle = titleText; // тайтл, который сейчас показан (меняется при "Другой фильм")
+    let currentTitle = titleText;
 
     document.body.appendChild(overlay);
 
@@ -2900,7 +3070,6 @@ function showRandomTitleModal(titleText, pool = []) {
         const next = all[Math.floor(Math.random() * all.length)];
         vibrate(30);
         currentTitle = next;
-        // Скрываем постер прошлого тайтла — он больше не актуален после перепрокрутки
         const posterBox = overlay.querySelector("#shakePosterBox");
         if (posterBox) { posterBox.style.display = "none"; posterBox.innerHTML = ""; }
         runSlotAnimation(titleEl, all, next, isSecret);
@@ -2919,7 +3088,7 @@ function showRandomTitleModal(titleText, pool = []) {
             posterBox.style.display = "flex";
             posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Ищем постер...</p>`;
             const url = await fetchTmdbPoster(currentTitle);
-            if (!overlay.isConnected) return; // модалку уже закрыли, пока грузился постер
+            if (!overlay.isConnected) return;
             if (url) {
                 posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
             } else {
@@ -2950,7 +3119,7 @@ function onPhoneShake() {
 
     lastShakeTime = now;
     const randomTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
-    
+
     showRandomTitleModal(randomTitle, allTitles);
     isShakeModalOpen = true; 
 }
@@ -2975,7 +3144,7 @@ function handleMotion(event) {
     if ((deltaX > SHAKE_THRESHOLD && deltaY > SHAKE_THRESHOLD) || 
         (deltaX > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD) || 
         (deltaY > SHAKE_THRESHOLD && deltaZ > SHAKE_THRESHOLD)) {
-        
+
         onPhoneShake();
     }
 
@@ -2983,7 +3152,7 @@ function handleMotion(event) {
 }
 
 function startShakeDetection() {
-    if (shakeDetectionStarted) return; // уже запущено — не навешиваем слушатель второй раз
+    if (shakeDetectionStarted) return;
     shakeDetectionStarted = true;
 
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
@@ -3003,7 +3172,7 @@ function startShakeDetection() {
 
 function setupMusicAutoplay() {
     const audio = document.getElementById("bgMusic");
-    
+
     const playHandler = () => {
         if (isMusicPlaying) {
             audio.play().catch(e => console.log("Музыка не смогла запуститься"));
@@ -3013,9 +3182,8 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
-// Генератор бесконечных нежных сердечек на заднем фоне
+
 function initHeartsBackground() {
-    // Если контейнер уже почему-то существует, не создаем его заново
     if (document.querySelector('.hearts-background')) return;
 
     const container = document.createElement('div');
@@ -3025,40 +3193,31 @@ function initHeartsBackground() {
     function spawnHeart() {
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
-        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
+        heart.innerHTML = '❤️';
 
-        // Рандомизируем параметры для живого и естественного эффекта
-        const size = Math.random() * 18 + 12; // Размер от 12px до 30px
-        const startLeft = Math.random() * 100; // Позиция по горизонтали (в %)
-        const duration = Math.random() * 12 + 10; // Скорость подъема от 10 до 22 секунд (очень плавно)
-        const swayX = (Math.random() * 120 - 60) + 'px'; // Амплитуда покачивания влево/вправо
-        const rotateDeg = (Math.random() * 360) + 'deg'; // Случайный угол вращения
+        const size = Math.random() * 18 + 12;
+        const startLeft = Math.random() * 100;
+        const duration = Math.random() * 12 + 10;
+        const swayX = (Math.random() * 120 - 60) + 'px';
+        const rotateDeg = (Math.random() * 360) + 'deg';
 
-        // Применяем стили
         heart.style.fontSize = `${size}px`;
         heart.style.left = `${startLeft}%`;
         heart.style.animationDuration = `${duration}s`;
-        
-        // Передаем переменные покачивания во floatUp анимацию
         heart.style.setProperty('--sway-x', swayX);
         heart.style.setProperty('--rotate-deg', rotateDeg);
 
         container.appendChild(heart);
 
-        // Самоликвидация элемента из DOM после того, как он улетел, чтобы не грузить браузер
         setTimeout(() => {
             heart.remove();
         }, duration * 1000);
     }
 
-    // Создаем первое сердечко сразу
     spawnHeart();
-    
-    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
     setInterval(spawnHeart, 900);
 }
 
-// Запускаем магию!
 initHeartsBackground();
 setupMusicAutoplay();
 
@@ -3081,22 +3240,21 @@ style.textContent = `
         box-sizing: border-box !important;
         line-height: 1 !important;
     }
-    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
     .hearts-background {
         position: fixed;
         top: 0;
         left: 0;
         width: 100vw;
         height: 100vh;
-        pointer-events: none; /* Клики проходят сквозь них */
-        z-index: -1;          /* Строго на заднем фоне */
+        pointer-events: none;
+        z-index: -1;
         overflow: hidden;
     }
 
     .floating-heart {
         position: absolute;
-        bottom: -50px;        /* Появляются чуть ниже экрана */
-        color: #ff4081;       /* Малиново-розовый цвет */
+        bottom: -50px;
+        color: #ff4081;
         opacity: 0;
         pointer-events: none;
         user-select: none;
@@ -3109,24 +3267,27 @@ style.textContent = `
             opacity: 0;
         }
         10% {
-            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
+            opacity: 0.15;
         }
         90% {
             opacity: 0.15;
         }
         100% {
-            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
             transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
-            opacity: 0;       /* Полностью растворяются вверху */
+            opacity: 0;
         }
     }
-    /* Звёздочка для вишлиста (Красивый голубой) */
     .btn-watch.wishlist-active {
         color: #2196f3 !important;
         opacity: 1 !important;
     }
 
-    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
+    /* Звёздочка партнёра — фиолетовая */
+    .btn-watch.watched-partner {
+        color: #9c27b0 !important;
+        opacity: 1 !important;
+    }
+
     .btn-pink-style {
         background-color: #ffe3ec !important;
         color: #d81b60 !important;
@@ -3138,7 +3299,6 @@ style.textContent = `
         background-color: #ffd5e3 !important;
     }
 
-    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
     .btn-cancel-gray {
         background-color: #f0f0f0 !important;
         color: #333333 !important;
