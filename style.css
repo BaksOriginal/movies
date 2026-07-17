@@ -705,13 +705,14 @@ button:nth-child(6){
 
 .chat-input-row {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
 }
 
 .chat-input-row #chatInput {
     flex: 1;
-    padding: 14px 16px;
+    min-width: 0; /* без этого поле ввода не сжимается во флекс-контейнере и выталкивает кнопки за экран */
+    padding: 12px 14px;
     border: 2px solid #ffdce5;
     border-radius: 25px;
     font-size: 16px;
@@ -721,10 +722,10 @@ button:nth-child(6){
 }
 
 .chat-input-row #chatSendBtn {
-    width: 50px;
-    min-width: 50px;
-    min-height: 50px;
-    height: 50px;
+    width: 46px;
+    min-width: 46px;
+    min-height: 46px;
+    height: 46px;
     padding: 0;
     margin: 0;
     border-radius: 50%;
@@ -743,10 +744,10 @@ button:nth-child(6){
 
 /* Кнопка открытия стикеров рядом с полем ввода */
 .chat-input-row #chatStickerBtn {
-    width: 50px;
-    min-width: 50px;
-    min-height: 50px;
-    height: 50px;
+    width: 46px;
+    min-width: 46px;
+    min-height: 46px;
+    height: 46px;
     padding: 0;
     margin: 0;
     border-radius: 50%;
