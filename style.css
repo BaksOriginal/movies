@@ -142,6 +142,14 @@ button{
     font-weight:600;
 
 
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    text-align:center;
+    line-height:1;
+
+
     cursor:pointer;
 
 
@@ -733,6 +741,7 @@ button:nth-child(6){
 .dpad-btn {
     width: 56px;
     height: 56px;
+    padding: 0;
     border-radius: 12px;
     border: none;
     background: #f0f0f0;
