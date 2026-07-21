@@ -3732,7 +3732,7 @@ async function showGamesScreen() {
             <button id="playDoodleBtn" class="btn-games-green">▶️ Играть</button>
         </div>
         <div class="game-card">
-            <div class="game-card-header">🥦 Брокколи-раннер</div>
+            <div class="game-card-header">🥦 Бега Брокколи</div>
             ${buildLeaderboardHtml('runner')}
             <button id="playRunnerBtn" class="btn-games-green">▶️ Играть</button>
         </div>
@@ -4982,7 +4982,7 @@ function startRunnerGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🥦 Брокколи-раннер";
+    title.textContent = "🥦 Бега Брокколи";
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -5005,7 +5005,6 @@ function startRunnerGame() {
     wrap.innerHTML = `
         <div class="game-score-row">Счёт: <span id="runnerScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="runnerBest">${getMyBest('runner')}</span></div>
         <canvas id="runnerCanvas" width="${W}" height="${H}" class="game-canvas"></canvas>
-        <p class="game-hint">↑ / тап — прыжок через брокколи &nbsp;•&nbsp; ↓ — присесть под летучей мышью</p>
         <div class="dpad">
             <div class="dpad-mid">
                 <button class="dpad-btn dpad-duck" title="Присесть">⬇️</button>
@@ -5248,7 +5247,7 @@ function startRunnerGame() {
             ctx.fillStyle = "rgba(255,255,255,0.9)";
             ctx.font = "13px Arial";
             ctx.textAlign = "center";
-            ctx.fillText("Тапни или нажми ↑, чтобы начать", W / 2, H / 2 - 30);
+            ctx.fillText("Тапни чтобы начать", W / 2, H / 2 - 30);
         }
     }
 
