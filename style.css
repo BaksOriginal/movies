@@ -630,6 +630,121 @@ button:nth-child(6){
     background: #d5bdf2 !important;
 }
 
+/* Нежно-зелёная кнопка "Игры" */
+.btn-games-green {
+    background: #e3f7e6 !important;
+    color: #1b7a3d !important;
+}
+
+.btn-games-green:hover {
+    background: #d1f0d6 !important;
+}
+
+.btn-games-green:active {
+    background: #bfe8c7 !important;
+}
+
+/* ===== Экран "Игры": карточки игр и таблица лидеров ===== */
+.game-card {
+    background: #fff;
+    border-radius: 15px;
+    padding: 18px;
+    margin-bottom: 18px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    text-align: center;
+}
+
+.game-card-header {
+    font-size: 18px;
+    font-weight: 700;
+    color: #9b4f70;
+    margin-bottom: 10px;
+}
+
+.game-leaderboard-empty {
+    color: #999;
+    font-size: 13px;
+    margin: 8px 0 14px;
+}
+
+.leaderboard {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.leaderboard-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f7f0f3;
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 14px;
+}
+
+.leaderboard-leader {
+    background: linear-gradient(135deg, #fff3d6, #ffe9b3);
+    font-weight: 700;
+}
+
+.leaderboard-name { color: #4a3040; }
+.leaderboard-score { font-weight: 700; color: #9b4f70; }
+
+/* ===== Игровой экран (canvas + управление) ===== */
+.game-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.game-score-row {
+    font-size: 16px;
+    font-weight: 600;
+    color: #9b4f70;
+}
+
+.game-canvas {
+    border-radius: 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+    touch-action: none;
+}
+
+.game-hint {
+    font-size: 12px;
+    color: #999;
+    text-align: center;
+}
+
+.dpad {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.dpad-mid {
+    display: flex;
+    gap: 8px;
+}
+
+.dpad-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    border: none;
+    background: #f0f0f0;
+    font-size: 20px;
+    color: #4a3040;
+    cursor: pointer;
+}
+
+.dpad-btn:active {
+    background: #e0e0e0;
+}
+
 /* Синий кружок "недавно добавлено" (в течение 2 суток) */
 .new-title-dot {
     display: inline-block;
@@ -1177,6 +1292,41 @@ body.dark-theme .btn-chat-purple:hover {
 }
 body.dark-theme .btn-chat-purple:active {
     background: #2c2049 !important;
+}
+
+/* "Игры" — зелёная, тёмный вариант */
+body.dark-theme .btn-games-green {
+    background: #1b3a24 !important;
+    color: #7be89a !important;
+}
+body.dark-theme .btn-games-green:hover {
+    background: #234a2e !important;
+}
+body.dark-theme .btn-games-green:active {
+    background: #2c5a38 !important;
+}
+
+/* Карточки игр и таблица лидеров — тёмный вариант */
+body.dark-theme .game-card {
+    background: #2b2233 !important;
+    color: #eadfe8 !important;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.3) !important;
+}
+body.dark-theme .leaderboard-row {
+    background: #3a2e42 !important;
+}
+body.dark-theme .leaderboard-leader {
+    background: linear-gradient(135deg, #3a2f12, #4a3d18) !important;
+    color: #f0cf7a !important;
+}
+body.dark-theme .leaderboard-name { color: #eadfe8 !important; }
+body.dark-theme .leaderboard-score { color: #ffb3cf !important; }
+body.dark-theme .dpad-btn {
+    background: #2b2233 !important;
+    color: #eadfe8 !important;
+}
+body.dark-theme .dpad-btn:active {
+    background: #3a2e42 !important;
 }
 
 /* Серые кнопки "Отмена" — тёмный вариант */

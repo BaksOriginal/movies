@@ -439,7 +439,7 @@ function buildThemeToggle() {
 
     let label = document.createElement("span");
     label.className = "theme-toggle-label";
-    label.textContent = "🌙 Тёмная тема";
+    label.textContent = "🌙 Режим Эчпочмони";
 
     let switchLabel = document.createElement("label");
     switchLabel.className = "theme-switch";
@@ -1303,6 +1303,10 @@ async function showHome() {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
     }
+    if (activeGameCleanup) {
+        activeGameCleanup();
+        activeGameCleanup = null;
+    }
     history = [];
     currentCategoryName = null;
     await loadCatalogFromDB();
@@ -1460,6 +1464,19 @@ async function showHome() {
         allCommentsBtn.textContent = "🗨️ Комментарии";
         allCommentsBtn.onclick = () => showAllCommentsScreen();
         app.appendChild(allCommentsBtn);
+
+        // Сплиттер HR перед разделом игр
+        let hrBeforeGames = document.createElement("hr");
+        hrBeforeGames.style.border = "0";
+        hrBeforeGames.style.borderTop = "2px solid #9b4f70";
+        hrBeforeGames.style.margin = "20px 0";
+        app.appendChild(hrBeforeGames);
+
+        let gamesBtn = document.createElement("button");
+        gamesBtn.className = "btn-games-green";
+        gamesBtn.textContent = "🕹 Игры";
+        gamesBtn.onclick = () => showGamesScreen();
+        app.appendChild(gamesBtn);
     }
 
     let footer = document.createElement("p");
@@ -3519,6 +3536,502 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
+// =======================================================
+// ИГРЫ (Змейка / Flappy Bird) — общая таблица лидеров на двоих
+// =======================================================
+// Для работы нужна таблица в Supabase (создать один раз вручную, SQL editor):
+//
+// create table game_scores (
+//   user_id uuid references auth.users(id),
+//   username text,
+//   game text check (game in ('snake','flappy')),
+//   best_score integer default 0,
+//   updated_at timestamptz default now(),
+//   primary key (user_id, game)
+// );
+//
+// (RLS можно не включать, как и для остальных таблиц в этом проекте —
+// либо настроить так же, как у таблицы ratings/comments.)
+
+let gameScoresCache = { snake: [], flappy: [] };
+let activeGameCleanup = null; // остановка текущей запущенной игры (интервалы/rAF/слушатели), если она есть
+
+// Загружает лучшие результаты обоих игроков по обеим играм
+async function loadGameScores() {
+    const { data, error } = await db.from('game_scores').select('*');
+    if (error) {
+        console.error("Ошибка при загрузке рекордов игр:", error);
+        return;
+    }
+    gameScoresCache = { snake: [], flappy: [] };
+    (data || []).forEach(row => {
+        if (!gameScoresCache[row.game]) gameScoresCache[row.game] = [];
+        gameScoresCache[row.game].push({ userId: row.user_id, username: row.username, score: row.best_score });
+    });
+}
+
+// Возвращает личный текущий рекорд игрока в конкретной игре
+function getMyBest(game) {
+    if (!currentUser) return 0;
+    const mine = (gameScoresCache[game] || []).find(r => r.userId === currentUser.id);
+    return mine ? mine.score : 0;
+}
+
+// Сохраняет новый рекорд, только если он реально побит. Возвращает true, если это новый рекорд.
+async function saveGameScore(game, score) {
+    if (!currentUser) return false;
+    const list = gameScoresCache[game] || (gameScoresCache[game] = []);
+    const mine = list.find(r => r.userId === currentUser.id);
+    const prevBest = mine ? mine.score : 0;
+    if (score <= prevBest) return false;
+
+    const username = getUsernameFromEmail(currentUser.email);
+    const { error } = await db.from('game_scores').upsert(
+        { user_id: currentUser.id, username, game, best_score: score, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,game' }
+    );
+    if (error) {
+        console.error("Ошибка при сохранении рекорда игры:", error);
+        return false;
+    }
+    if (mine) mine.score = score;
+    else list.push({ userId: currentUser.id, username, score });
+    return true;
+}
+
+// Строит HTML таблицы лидеров (у нас всего 2 игрока — лидер сверху с короной)
+function buildLeaderboardHtml(game) {
+    const rows = (gameScoresCache[game] || []).slice().sort((a, b) => b.score - a.score);
+    if (rows.length === 0) {
+        return `<p class="game-leaderboard-empty">Рекордов пока нет — сыграйте первыми!</p>`;
+    }
+    return `<div class="leaderboard">` + rows.map((r, i) => `
+        <div class="leaderboard-row${i === 0 ? ' leaderboard-leader' : ''}">
+            <span class="leaderboard-name">${i === 0 ? '🏆 ' : ''}${r.username}</span>
+            <span class="leaderboard-score">${r.score}</span>
+        </div>
+    `).join('') + `</div>`;
+}
+
+// Единая навигация для экрана игр: "⬅️ Игры" (если внутри конкретной игры) + "🏠 Домой"
+function setGamesNav(showBackToMenu) {
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+
+    if (showBackToMenu) {
+        let backBtn = document.createElement("button");
+        backBtn.textContent = "⬅️ Игры";
+        backBtn.onclick = () => showGamesScreen();
+        nav.appendChild(backBtn);
+    }
+
+    let homeBtn = document.createElement("button");
+    homeBtn.textContent = "🏠 Домой";
+    homeBtn.onclick = () => showHome();
+    nav.appendChild(homeBtn);
+
+    let containerEl = document.querySelector(".container");
+    if (containerEl) {
+        containerEl.insertBefore(nav, containerEl.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
+}
+
+// Показывает окно "Игра окончена" с результатом и кнопками "Заново"/"К играм"
+function showGameOverModal(score, isRecord, onRestart) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "gameOverModal";
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3>${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</h3>
+            <p style="font-size: 22px; font-weight: bold; color:#9b4f70; margin: 10px 0 20px;">Счёт: ${score}</p>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="gameOverRestart" class="btn-pink-style">🔁 Заново</button>
+                <button id="gameOverMenu" class="btn-action-cancel">🕹 К играм</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#gameOverRestart").onclick = () => { overlay.remove(); onRestart(); };
+    overlay.querySelector("#gameOverMenu").onclick = () => { overlay.remove(); showGamesScreen(); };
+}
+
+// Экран выбора игры со сводными таблицами лидеров
+async function showGamesScreen() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    if (activeGameCleanup) {
+        activeGameCleanup();
+        activeGameCleanup = null;
+    }
+    currentCategoryName = null;
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    title.textContent = "🕹 Игры";
+    app.appendChild(title);
+
+    let container = document.createElement("div");
+    container.id = "gamesContainer";
+    container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Загрузка рекордов...</p>`;
+    app.appendChild(container);
+
+    setGamesNav(false);
+
+    await loadGameScores();
+    if (!container.isConnected) return;
+
+    container.innerHTML = `
+        <div class="game-card">
+            <div class="game-card-header">🐍 Змейка</div>
+            ${buildLeaderboardHtml('snake')}
+            <button id="playSnakeBtn" class="btn-games-green">▶️ Играть</button>
+        </div>
+        <div class="game-card">
+            <div class="game-card-header">🐤 Flappy Bird</div>
+            ${buildLeaderboardHtml('flappy')}
+            <button id="playFlappyBtn" class="btn-games-green">▶️ Играть</button>
+        </div>
+    `;
+
+    container.querySelector("#playSnakeBtn").onclick = () => startSnakeGame();
+    container.querySelector("#playFlappyBtn").onclick = () => startFlappyGame();
+}
+
+// ------------------------- ЗМЕЙКА -------------------------
+function startSnakeGame() {
+    if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+    setGamesNav(true);
+
+    app.innerHTML = "";
+    let title = document.createElement("h1");
+    title.textContent = "🐍 Змейка";
+    title.style.marginBottom = "5px";
+    app.appendChild(title);
+
+    const GRID = 15;
+    const CELL = 18;
+    const SIZE = GRID * CELL;
+
+    let wrap = document.createElement("div");
+    wrap.className = "game-wrap";
+    wrap.innerHTML = `
+        <div class="game-score-row">Счёт: <span id="snakeScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="snakeBest">${getMyBest('snake')}</span></div>
+        <canvas id="snakeCanvas" width="${SIZE}" height="${SIZE}" class="game-canvas"></canvas>
+        <div class="dpad">
+            <button class="dpad-btn dpad-up">▲</button>
+            <div class="dpad-mid">
+                <button class="dpad-btn dpad-left">◀</button>
+                <button class="dpad-btn dpad-down">▼</button>
+                <button class="dpad-btn dpad-right">▶</button>
+            </div>
+        </div>
+    `;
+    app.appendChild(wrap);
+
+    const canvas = wrap.querySelector("#snakeCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = wrap.querySelector("#snakeScore");
+    const bestEl = wrap.querySelector("#snakeBest");
+
+    let snake, dir, nextDir, food, score, tickInterval, gameOver;
+
+    function randomFood() {
+        let cell;
+        do {
+            cell = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) };
+        } while (snake.some(s => s.x === cell.x && s.y === cell.y));
+        return cell;
+    }
+
+    function resetState() {
+        snake = [{ x: 7, y: 7 }, { x: 6, y: 7 }, { x: 5, y: 7 }];
+        dir = { x: 1, y: 0 };
+        nextDir = { x: 1, y: 0 };
+        food = randomFood();
+        score = 0;
+        gameOver = false;
+        scoreEl.textContent = "0";
+    }
+
+    function draw() {
+        ctx.fillStyle = "#eef7ee";
+        ctx.fillRect(0, 0, SIZE, SIZE);
+
+        ctx.fillStyle = "#e91e63";
+        ctx.beginPath();
+        ctx.arc(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, CELL / 2.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        snake.forEach((seg, i) => {
+            ctx.fillStyle = i === 0 ? "#2e7d32" : "#4caf50";
+            ctx.fillRect(seg.x * CELL + 1, seg.y * CELL + 1, CELL - 2, CELL - 2);
+        });
+    }
+
+    function tick() {
+        if (gameOver) return;
+        dir = nextDir;
+        const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+        if (head.x < 0 || head.x >= GRID || head.y < 0 || head.y >= GRID ||
+            snake.some(s => s.x === head.x && s.y === head.y)) {
+            endGame();
+            return;
+        }
+
+        snake.unshift(head);
+
+        if (head.x === food.x && head.y === food.y) {
+            score++;
+            scoreEl.textContent = String(score);
+            food = randomFood();
+        } else {
+            snake.pop();
+        }
+
+        draw();
+    }
+
+    async function endGame() {
+        gameOver = true;
+        clearInterval(tickInterval);
+        const isRecord = await saveGameScore('snake', score);
+        if (isRecord) bestEl.textContent = String(score);
+        showGameOverModal(score, isRecord, () => {
+            resetState();
+            draw();
+            tickInterval = setInterval(tick, 140);
+        });
+    }
+
+    function setDirection(x, y) {
+        if (dir.x === -x && dir.y === -y) return; // запрещаем разворот на 180°
+        nextDir = { x, y };
+    }
+
+    function keyHandler(e) {
+        const map = {
+            ArrowUp: [0, -1], KeyW: [0, -1],
+            ArrowDown: [0, 1], KeyS: [0, 1],
+            ArrowLeft: [-1, 0], KeyA: [-1, 0],
+            ArrowRight: [1, 0], KeyD: [1, 0]
+        };
+        const move = map[e.code];
+        if (move) { e.preventDefault(); setDirection(move[0], move[1]); }
+    }
+    document.addEventListener("keydown", keyHandler);
+
+    wrap.querySelector(".dpad-up").onclick = () => setDirection(0, -1);
+    wrap.querySelector(".dpad-down").onclick = () => setDirection(0, 1);
+    wrap.querySelector(".dpad-left").onclick = () => setDirection(-1, 0);
+    wrap.querySelector(".dpad-right").onclick = () => setDirection(1, 0);
+
+    // Свайпы прямо по канвасу — как альтернатива D-pad'у на мобильных
+    let touchStartX = 0, touchStartY = 0;
+    canvas.addEventListener("touchstart", (e) => {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    canvas.addEventListener("touchend", (e) => {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            if (Math.abs(dx) > 20) setDirection(dx > 0 ? 1 : -1, 0);
+        } else {
+            if (Math.abs(dy) > 20) setDirection(0, dy > 0 ? 1 : -1);
+        }
+    }, { passive: true });
+
+    resetState();
+    draw();
+    tickInterval = setInterval(tick, 140);
+
+    activeGameCleanup = () => {
+        clearInterval(tickInterval);
+        document.removeEventListener("keydown", keyHandler);
+    };
+}
+
+// ------------------------- FLAPPY BIRD -------------------------
+function startFlappyGame() {
+    if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+    setGamesNav(true);
+
+    app.innerHTML = "";
+    let title = document.createElement("h1");
+    title.textContent = "🐤 Flappy Bird";
+    title.style.marginBottom = "5px";
+    app.appendChild(title);
+
+    const W = 300, H = 420;
+    const GROUND_H = 20;
+    const GRAVITY = 1500;   // px/с²
+    const JUMP_V = -420;    // px/с
+    const PIPE_W = 50;
+    const GAP = 130;
+    const PIPE_SPEED = 130;    // px/с
+    const PIPE_INTERVAL = 1500; // мс
+
+    let wrap = document.createElement("div");
+    wrap.className = "game-wrap";
+    wrap.innerHTML = `
+        <div class="game-score-row">Счёт: <span id="flappyScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="flappyBest">${getMyBest('flappy')}</span></div>
+        <canvas id="flappyCanvas" width="${W}" height="${H}" class="game-canvas"></canvas>
+        <p class="game-hint">Тапни по экрану / кликни / нажми Пробел, чтобы взлететь</p>
+    `;
+    app.appendChild(wrap);
+
+    const canvas = wrap.querySelector("#flappyCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = wrap.querySelector("#flappyScore");
+    const bestEl = wrap.querySelector("#flappyBest");
+
+    let birdY, birdV, pipes, score, gameOver, lastTime, rafId, spawnTimer, started;
+
+    function reset() {
+        birdY = H / 2;
+        birdV = 0;
+        pipes = [];
+        score = 0;
+        gameOver = false;
+        started = false;
+        spawnTimer = 0;
+        lastTime = null;
+        scoreEl.textContent = "0";
+    }
+
+    function spawnPipe() {
+        const minTop = 40;
+        const maxTop = H - GROUND_H - GAP - 40;
+        const gapY = minTop + Math.random() * (maxTop - minTop);
+        pipes.push({ x: W, gapY, passed: false });
+    }
+
+    function draw() {
+        ctx.fillStyle = "#cdeeff";
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = "#4caf50";
+        pipes.forEach(p => {
+            ctx.fillRect(p.x, 0, PIPE_W, p.gapY);
+            ctx.fillRect(p.x, p.gapY + GAP, PIPE_W, H - GROUND_H - (p.gapY + GAP));
+        });
+
+        ctx.fillStyle = "#8d6e63";
+        ctx.fillRect(0, H - GROUND_H, W, GROUND_H);
+
+        ctx.save();
+        ctx.translate(50, birdY);
+        ctx.rotate(Math.max(-0.4, Math.min(0.9, birdV / 600)));
+        ctx.fillStyle = "#fbc02d";
+        ctx.beginPath();
+        ctx.arc(0, 0, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        if (!started) {
+            ctx.fillStyle = "rgba(0,0,0,0.55)";
+            ctx.font = "14px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("Тапни, чтобы начать", W / 2, H / 2 - 40);
+        }
+    }
+
+    function checkCollision() {
+        const birdX = 50, r = 11;
+        if (birdY + r >= H - GROUND_H || birdY - r <= 0) return true;
+        return pipes.some(p =>
+            birdX + r > p.x && birdX - r < p.x + PIPE_W &&
+            (birdY - r < p.gapY || birdY + r > p.gapY + GAP)
+        );
+    }
+
+    function loop(time) {
+        if (gameOver) return;
+        if (!lastTime) lastTime = time;
+        const dt = Math.min(0.05, (time - lastTime) / 1000);
+        lastTime = time;
+
+        if (started) {
+            birdV += GRAVITY * dt;
+            birdY += birdV * dt;
+
+            spawnTimer += dt * 1000;
+            if (spawnTimer >= PIPE_INTERVAL) {
+                spawnTimer = 0;
+                spawnPipe();
+            }
+
+            pipes.forEach(p => { p.x -= PIPE_SPEED * dt; });
+            pipes = pipes.filter(p => p.x > -PIPE_W);
+
+            pipes.forEach(p => {
+                if (!p.passed && p.x + PIPE_W < 50) {
+                    p.passed = true;
+                    score++;
+                    scoreEl.textContent = String(score);
+                }
+            });
+
+            if (checkCollision()) {
+                endGame();
+                return;
+            }
+        }
+
+        draw();
+        rafId = requestAnimationFrame(loop);
+    }
+
+    async function endGame() {
+        gameOver = true;
+        cancelAnimationFrame(rafId);
+        const isRecord = await saveGameScore('flappy', score);
+        if (isRecord) bestEl.textContent = String(score);
+        showGameOverModal(score, isRecord, () => {
+            reset();
+            draw();
+            rafId = requestAnimationFrame(loop);
+        });
+    }
+
+    function jump() {
+        if (gameOver) return;
+        started = true;
+        birdV = JUMP_V;
+    }
+
+    function keyHandler(e) {
+        if (e.code === "Space") { e.preventDefault(); jump(); }
+    }
+    document.addEventListener("keydown", keyHandler);
+    canvas.addEventListener("mousedown", jump);
+    canvas.addEventListener("touchstart", (e) => { e.preventDefault(); jump(); }, { passive: false });
+
+    reset();
+    draw();
+    rafId = requestAnimationFrame(loop);
+
+    activeGameCleanup = () => {
+        gameOver = true;
+        cancelAnimationFrame(rafId);
+        document.removeEventListener("keydown", keyHandler);
+    };
+}
+
 // Генератор бесконечных нежных сердечек на заднем фоне
 function initHeartsBackground() {
     // Если контейнер уже почему-то существует, не создаем его заново
@@ -3531,7 +4044,8 @@ function initHeartsBackground() {
     function spawnHeart() {
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
-        heart.innerHTML = '❤️'; // Используем классический эмодзи сердечка
+        // В режиме Эчпочмони сердечки заменяются на озорной эмодзи 😈
+        heart.innerHTML = isDarkTheme ? '😈' : '❤️';
 
         // Рандомизируем параметры для живого и естественного эффекта
         const size = Math.random() * 18 + 12; // Размер от 12px до 30px
