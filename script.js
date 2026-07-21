@@ -3714,7 +3714,7 @@ async function showGamesScreen() {
             <button id="playSnakeBtn" class="btn-games-green">▶️ Играть</button>
         </div>
         <div class="game-card">
-            <div class="game-card-header">🐤 Эчпочмоня vs. Шоколадки</div>
+            <div class="game-card-header">🍫 Эчпочмоня vs. Шоколадки</div>
             ${buildLeaderboardHtml('flappy')}
             <button id="playFlappyBtn" class="btn-games-green">▶️ Играть</button>
         </div>
@@ -3980,7 +3980,7 @@ function startFlappyGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🐤 Flappy Bird";
+    title.textContent = "🍫 Эчпочмоня vs. Шоколадки";
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -4276,7 +4276,7 @@ function startDoodleGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🐰 Doodle Jump";
+    title.textContent = "👾 Doodle Jump";
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
