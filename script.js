@@ -4353,9 +4353,9 @@ function startDoodleGame() {
             // Изредка на платформе появляется бонус: чаще броня, очень редко — ракета
             if (!moving) {
                 const roll = Math.random();
-                if (roll < 0.012) {
+                if (roll < 0.025) {
                     powerups.push(makePowerup('rocket', plat));
-                } else if (roll < 0.09) {
+                } else if (roll < 0.16) {
                     powerups.push(makePowerup('armor', plat));
                 }
             }
@@ -4381,10 +4381,10 @@ function startDoodleGame() {
     }
 
     function maybeSpawnMonsters() {
-        while (monsterNextY > topmostY() - 20) {
+        while (monsterNextY > -80) {
             const spawnY = monsterNextY;
-            monsterNextY -= 260 + Math.random() * 320;
-            if (Math.random() < 0.5) {
+            monsterNextY -= 220 + Math.random() * 260;
+            if (Math.random() < 0.55) {
                 monsters.push(makeMonster(spawnY));
             }
         }
@@ -4435,7 +4435,7 @@ function startDoodleGame() {
         monsters = [];
         bullets = [];
         powerups = [];
-        monsterNextY = -180; // монстры не появляются в первые секунды игры
+        monsterNextY = -140; // монстры не появляются в первые секунды игры
         lastShotTime = -999;
 
         armorActive = false;
@@ -4805,6 +4805,7 @@ function startDoodleGame() {
             monsters.forEach(m => { m.baseY += dy; });
             powerups.forEach(pu => { pu.y += dy; });
             bullets.forEach(b => { b.y += dy; });
+            monsterNextY += dy;
             scrollTotal += dy;
             score = Math.floor(scrollTotal / 10);
             scoreEl.textContent = String(score);
