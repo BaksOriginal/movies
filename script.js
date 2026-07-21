@@ -3758,7 +3758,7 @@ function startSnakeGame() {
     const GRID = 15;
     const CELL = 18;
     const SIZE = GRID * CELL;
-    const TICK_MS = 170; // было 140 — чуть замедлили змейку, чтобы было комфортнее играть
+    const TICK_MS = 270; // было 140 — чуть замедлили змейку, чтобы было комфортнее играть
 
     let wrap = document.createElement("div");
     wrap.className = "game-wrap";
