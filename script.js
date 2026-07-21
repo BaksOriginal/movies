@@ -4288,6 +4288,15 @@ function startDoodleGame() {
     const DOODLER_W = 34, DOODLER_H = 34;
     const ANCHOR_Y = H * 0.42;  // выше этой линии экран "скроллится" вниз, а не герой лезет выше
 
+    // --- Новое: стрельба, монстры, броня, ракета ---
+    const BULLET_SPEED = 620;       // px/с — скорость полёта пули вверх
+    const SHOOT_COOLDOWN = 0.28;    // с — минимальный интервал между выстрелами
+    const ROCKET_SPEED = 900;       // px/с — скорость подъёма на ракете
+    const ROCKET_DURATION = 2.2;    // с — сколько длится полёт на ракете
+    const ARMOR_DURATION = 5;       // с — сколько живёт броня
+    const ARMOR_MAX_CHARGES = 5;    // сколько столкновений с монстрами держит броня
+    const ARMOR_BLINK_AT = 1.4;     // с — за сколько до конца брони начинать моргать
+
     let wrap = document.createElement("div");
     wrap.className = "game-wrap";
     wrap.innerHTML = `
@@ -4296,6 +4305,7 @@ function startDoodleGame() {
         <div class="dpad">
             <div class="dpad-mid">
                 <button class="dpad-btn dpad-left">◀</button>
+                <button class="dpad-btn dpad-shoot" title="Стрелять">🔫</button>
                 <button class="dpad-btn dpad-right">▶</button>
             </div>
         </div>
@@ -4308,6 +4318,13 @@ function startDoodleGame() {
     const bestEl = wrap.querySelector("#doodleBest");
 
     let x, y, vx, vy, facing, platforms, score, scrollTotal, gameOver, lastTime, rafId, movingLeft, movingRight;
+    let monsters, bullets, powerups, monsterNextY, lastShotTime;
+    let armorActive, armorCharges, armorTimer;
+    let rocketActive, rocketTimer;
+
+    function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
 
     function makePlatform(px, py, moving) {
         return {
@@ -4321,13 +4338,86 @@ function startDoodleGame() {
         return platforms.reduce((min, p) => Math.min(min, p.y), Infinity);
     }
 
+    function makePowerup(type, plat) {
+        return { type, x: plat.x + plat.w / 2, y: plat.y - 20, w: 20, h: 20, collected: false };
+    }
+
     function maybeSpawnPlatforms() {
         while (topmostY() > -20) {
             const py = topmostY() - (50 + Math.random() * 45);
             const px = 10 + Math.random() * (W - 20 - PLAT_W);
             const moving = Math.random() < 0.2;
-            platforms.push(makePlatform(px, py, moving));
+            const plat = makePlatform(px, py, moving);
+            platforms.push(plat);
+
+            // Изредка на платформе появляется бонус: чаще броня, очень редко — ракета
+            if (!moving) {
+                const roll = Math.random();
+                if (roll < 0.012) {
+                    powerups.push(makePowerup('rocket', plat));
+                } else if (roll < 0.09) {
+                    powerups.push(makePowerup('armor', plat));
+                }
+            }
         }
+    }
+
+    // ---- Монстры ----
+    function makeMonster(my) {
+        const types = ['bat', 'ghost', 'spiky'];
+        const type = types[Math.floor(Math.random() * types.length)];
+        const mx = 24 + Math.random() * (W - 48);
+        const m = { type, baseX: mx, baseY: my, x: mx, y: my, phase: Math.random() * Math.PI * 2 };
+        if (type === 'bat') {
+            m.vx = Math.random() < 0.5 ? -75 : 75;
+            m.w = 30; m.h = 20;
+        } else if (type === 'ghost') {
+            m.w = 26; m.h = 30;
+        } else {
+            m.vx = (Math.random() < 0.5 ? -1 : 1) * (55 + Math.random() * 45);
+            m.w = 26; m.h = 26;
+        }
+        return m;
+    }
+
+    function maybeSpawnMonsters() {
+        while (monsterNextY > topmostY() - 20) {
+            const spawnY = monsterNextY;
+            monsterNextY -= 260 + Math.random() * 320;
+            if (Math.random() < 0.5) {
+                monsters.push(makeMonster(spawnY));
+            }
+        }
+    }
+
+    function updateMonsters(dt) {
+        monsters.forEach(m => {
+            m.phase += dt;
+            if (m.type === 'bat') {
+                m.baseX += m.vx * dt;
+                if (m.baseX < 16) { m.baseX = 16; m.vx *= -1; }
+                if (m.baseX > W - 16) { m.baseX = W - 16; m.vx *= -1; }
+                m.x = m.baseX;
+                m.y = m.baseY + Math.sin(m.phase * 7) * 3;
+            } else if (m.type === 'ghost') {
+                m.x = m.baseX + Math.sin(m.phase * 1.3) * 22;
+                m.y = m.baseY + Math.sin(m.phase * 2) * 10;
+            } else {
+                m.baseX += m.vx * dt;
+                if (m.baseX < 15) { m.baseX = 15; m.vx *= -1; }
+                if (m.baseX > W - 15) { m.baseX = W - 15; m.vx *= -1; }
+                m.x = m.baseX;
+                m.y = m.baseY + Math.sin(m.phase * 3.4) * 14;
+            }
+        });
+    }
+
+    function shoot() {
+        if (gameOver) return;
+        const now = performance.now() / 1000;
+        if (now - lastShotTime < SHOOT_COOLDOWN) return;
+        lastShotTime = now;
+        bullets.push({ x, y: y - DOODLER_H / 2, vy: -BULLET_SPEED });
     }
 
     function reset() {
@@ -4341,6 +4431,18 @@ function startDoodleGame() {
         movingRight = false;
         lastTime = null;
         scoreEl.textContent = "0";
+
+        monsters = [];
+        bullets = [];
+        powerups = [];
+        monsterNextY = -180; // монстры не появляются в первые секунды игры
+        lastShotTime = -999;
+
+        armorActive = false;
+        armorCharges = 0;
+        armorTimer = 0;
+        rocketActive = false;
+        rocketTimer = 0;
 
         platforms = [makePlatform(x - PLAT_W / 2, H - 30, false)];
         maybeSpawnPlatforms();
@@ -4452,10 +4554,199 @@ function startDoodleGame() {
         }
     }
 
+    function drawMonster(m) {
+        ctx.save();
+        ctx.translate(m.x, m.y);
+        if (m.type === 'bat') {
+            const flap = Math.sin(m.phase * 10) * 6;
+            ctx.fillStyle = "#5b3a73";
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(-18, -6 - flap, -22, 4);
+            ctx.quadraticCurveTo(-10, 2, 0, 0);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(18, -6 - flap, 22, 4);
+            ctx.quadraticCurveTo(10, 2, 0, 0);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 10, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#ff5252";
+            ctx.beginPath();
+            ctx.arc(-3, -1, 1.6, 0, Math.PI * 2);
+            ctx.arc(3, -1, 1.6, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (m.type === 'ghost') {
+            ctx.fillStyle = "rgba(180, 220, 255, 0.88)";
+            ctx.beginPath();
+            ctx.arc(0, -2, 13, Math.PI, 0, false);
+            ctx.lineTo(13, 10);
+            ctx.lineTo(8, 4);
+            ctx.lineTo(3, 10);
+            ctx.lineTo(-3, 4);
+            ctx.lineTo(-8, 10);
+            ctx.lineTo(-13, 4);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#33445a";
+            ctx.beginPath();
+            ctx.arc(-5, -3, 2, 0, Math.PI * 2);
+            ctx.arc(5, -3, 2, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            ctx.rotate(m.phase * 2);
+            ctx.strokeStyle = "#e64a19";
+            ctx.lineWidth = 3;
+            for (let i = 0; i < 8; i++) {
+                const ang = (Math.PI / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(ang) * 9, Math.sin(ang) * 9);
+                ctx.lineTo(Math.cos(ang) * 15, Math.sin(ang) * 15);
+                ctx.stroke();
+            }
+            ctx.fillStyle = "#ff7043";
+            ctx.beginPath();
+            ctx.arc(0, 0, 9, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = "#3a2733";
+            ctx.beginPath();
+            ctx.arc(-3, -1, 1.6, 0, Math.PI * 2);
+            ctx.arc(3, -1, 1.6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawPowerup(pu) {
+        ctx.save();
+        ctx.translate(pu.x, pu.y);
+        if (pu.type === 'armor') {
+            ctx.fillStyle = "#42a5f5";
+            ctx.beginPath();
+            ctx.moveTo(0, -10);
+            ctx.lineTo(9, -6);
+            ctx.lineTo(9, 3);
+            ctx.quadraticCurveTo(9, 10, 0, 13);
+            ctx.quadraticCurveTo(-9, 10, -9, 3);
+            ctx.lineTo(-9, -6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = "#e3f2fd";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.fillStyle = "#e3f2fd";
+            ctx.beginPath();
+            ctx.moveTo(-3, 0);
+            ctx.lineTo(0, 4);
+            ctx.lineTo(5, -4);
+            ctx.lineTo(3, -4);
+            ctx.lineTo(0, 0);
+            ctx.lineTo(-1, -2);
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            ctx.fillStyle = "#ef5350";
+            ctx.beginPath();
+            ctx.moveTo(0, -13);
+            ctx.quadraticCurveTo(7, -2, 6, 8);
+            ctx.lineTo(-6, 8);
+            ctx.quadraticCurveTo(-7, -2, 0, -13);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#ffca28";
+            ctx.beginPath();
+            ctx.moveTo(-6, 8);
+            ctx.lineTo(-9, 13);
+            ctx.lineTo(-3, 9);
+            ctx.closePath();
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(6, 8);
+            ctx.lineTo(9, 13);
+            ctx.lineTo(3, 9);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#90caf9";
+            ctx.beginPath();
+            ctx.arc(0, -1, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawBullet(b) {
+        ctx.save();
+        const grad = ctx.createLinearGradient(b.x, b.y - 8, b.x, b.y + 6);
+        grad.addColorStop(0, "#fff59d");
+        grad.addColorStop(1, "#ff8a65");
+        ctx.fillStyle = grad;
+        roundedRect(b.x - 3, b.y - 8, 6, 14, 3);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Щит брони моргает перед истечением — отдельного таймера на экране нет,
+    // сам щит и есть индикатор
+    function drawArmorShield() {
+        const blinking = armorTimer < ARMOR_BLINK_AT;
+        const visible = !blinking || (Math.floor(armorTimer * 8) % 2 === 0);
+        if (!visible) return;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.fillStyle = "rgba(129, 212, 250, 0.18)";
+        ctx.beginPath();
+        ctx.arc(0, 0, DOODLER_W / 2 + 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(66, 165, 245, 0.9)";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawRocketFlame() {
+        ctx.save();
+        ctx.translate(x, y + DOODLER_H / 2);
+        const flicker = 8 + Math.random() * 6;
+        ctx.fillStyle = "#ffb300";
+        ctx.beginPath();
+        ctx.moveTo(-6, 0);
+        ctx.lineTo(6, 0);
+        ctx.lineTo(0, flicker + 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#ff7043";
+        ctx.beginPath();
+        ctx.moveTo(-3.5, 0);
+        ctx.lineTo(3.5, 0);
+        ctx.lineTo(0, flicker + 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawRocketShell() {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.strokeStyle = "rgba(255, 112, 67, 0.85)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, DOODLER_W / 2 + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+
     function draw() {
         drawBackground();
         platforms.forEach(drawPlatform);
+        powerups.forEach(drawPowerup);
+        monsters.forEach(drawMonster);
+        bullets.forEach(drawBullet);
+        if (rocketActive) drawRocketFlame();
         drawDoodler();
+        if (armorActive) drawArmorShield();
+        if (rocketActive) drawRocketShell();
     }
 
     function update(dt) {
@@ -4468,20 +4759,31 @@ function startDoodleGame() {
         if (x < -half) x = W + half;
         if (x > W + half) x = -half;
 
-        vy += GRAVITY * dt;
-        const prevY = y;
-        y += vy * dt;
+        if (rocketActive) {
+            // На ракете летим вверх быстро и без обычной физики/приземления
+            y -= ROCKET_SPEED * dt;
+            vy = -ROCKET_SPEED;
+            rocketTimer -= dt;
+            if (rocketTimer <= 0) {
+                rocketActive = false;
+                vy = JUMP_V * 0.7; // мягкий переход обратно в обычный полёт
+            }
+        } else {
+            vy += GRAVITY * dt;
+            const prevY = y;
+            y += vy * dt;
 
-        // приземление на платформу (только когда падаем вниз)
-        if (vy > 0) {
-            for (const p of platforms) {
-                const feetPrev = prevY + DOODLER_H / 2;
-                const feetNow = y + DOODLER_H / 2;
-                const withinX = x + half * 0.6 > p.x && x - half * 0.6 < p.x + p.w;
-                if (withinX && feetPrev <= p.y && feetNow >= p.y) {
-                    y = p.y - DOODLER_H / 2;
-                    vy = JUMP_V;
-                    break;
+            // приземление на платформу (только когда падаем вниз)
+            if (vy > 0) {
+                for (const p of platforms) {
+                    const feetPrev = prevY + DOODLER_H / 2;
+                    const feetNow = y + DOODLER_H / 2;
+                    const withinX = x + half * 0.6 > p.x && x - half * 0.6 < p.x + p.w;
+                    if (withinX && feetPrev <= p.y && feetNow >= p.y) {
+                        y = p.y - DOODLER_H / 2;
+                        vy = JUMP_V;
+                        break;
+                    }
                 }
             }
         }
@@ -4500,6 +4802,9 @@ function startDoodleGame() {
             const dy = ANCHOR_Y - y;
             y = ANCHOR_Y;
             platforms.forEach(p => { p.y += dy; });
+            monsters.forEach(m => { m.baseY += dy; });
+            powerups.forEach(pu => { pu.y += dy; });
+            bullets.forEach(b => { b.y += dy; });
             scrollTotal += dy;
             score = Math.floor(scrollTotal / 10);
             scoreEl.textContent = String(score);
@@ -4507,6 +4812,75 @@ function startDoodleGame() {
 
         platforms = platforms.filter(p => p.y < H + 20);
         maybeSpawnPlatforms();
+
+        updateMonsters(dt);
+        monsters = monsters.filter(m => m.y < H + 60);
+        maybeSpawnMonsters();
+
+        // подбор бонусов (броня/ракета)
+        powerups = powerups.filter(pu => pu.y < H + 20);
+        powerups.forEach(pu => {
+            if (pu.collected) return;
+            if (rectsOverlap(x - half * 0.8, y - DOODLER_H * 0.4, half * 1.6, DOODLER_H * 0.8, pu.x - pu.w / 2, pu.y - pu.h / 2, pu.w, pu.h)) {
+                pu.collected = true;
+                if (pu.type === 'armor') {
+                    armorActive = true;
+                    armorCharges = ARMOR_MAX_CHARGES;
+                    armorTimer = ARMOR_DURATION;
+                } else if (pu.type === 'rocket') {
+                    rocketActive = true;
+                    rocketTimer = ROCKET_DURATION;
+                }
+            }
+        });
+        powerups = powerups.filter(pu => !pu.collected);
+
+        // истечение брони по времени
+        if (armorActive) {
+            armorTimer -= dt;
+            if (armorTimer <= 0 || armorCharges <= 0) {
+                armorActive = false;
+            }
+        }
+
+        // пули
+        bullets.forEach(b => { b.y += b.vy * dt; });
+        bullets = bullets.filter(b => b.y > -20);
+
+        // пули сбивают монстров
+        for (let bi = bullets.length - 1; bi >= 0; bi--) {
+            const b = bullets[bi];
+            for (let mi = monsters.length - 1; mi >= 0; mi--) {
+                const m = monsters[mi];
+                if (rectsOverlap(b.x - 3, b.y - 7, 6, 14, m.x - m.w / 2, m.y - m.h / 2, m.w, m.h)) {
+                    monsters.splice(mi, 1);
+                    bullets.splice(bi, 1);
+                    score += 5;
+                    scoreEl.textContent = String(score);
+                    break;
+                }
+            }
+        }
+
+        // столкновения дудлика с монстрами
+        const dbx = x - half * 0.65, dbw = half * 1.3;
+        const dby = y - DOODLER_H * 0.325, dbh = DOODLER_H * 0.65;
+        for (let mi = monsters.length - 1; mi >= 0; mi--) {
+            const m = monsters[mi];
+            if (!rectsOverlap(dbx, dby, dbw, dbh, m.x - m.w / 2, m.y - m.h / 2, m.w, m.h)) continue;
+
+            if (rocketActive) {
+                // На ракете монстры не наносят урона — сбиваем их с пути
+                monsters.splice(mi, 1);
+            } else if (armorActive) {
+                monsters.splice(mi, 1);
+                armorCharges -= 1;
+                if (armorCharges <= 0) armorActive = false;
+            } else {
+                endGame();
+                return;
+            }
+        }
 
         if (y - DOODLER_H / 2 > H) {
             endGame();
@@ -4539,6 +4913,7 @@ function startDoodleGame() {
     function keyHandler(e) {
         if (e.code === "ArrowLeft" || e.code === "KeyA") { e.preventDefault(); movingLeft = true; }
         if (e.code === "ArrowRight" || e.code === "KeyD") { e.preventDefault(); movingRight = true; }
+        if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") { e.preventDefault(); shoot(); }
     }
     function keyUpHandler(e) {
         if (e.code === "ArrowLeft" || e.code === "KeyA") movingLeft = false;
@@ -4556,6 +4931,10 @@ function startDoodleGame() {
     }
     bindHold(wrap.querySelector(".dpad-left"), () => { movingLeft = true; }, () => { movingLeft = false; });
     bindHold(wrap.querySelector(".dpad-right"), () => { movingRight = true; }, () => { movingRight = false; });
+
+    const shootBtn = wrap.querySelector(".dpad-shoot");
+    shootBtn.addEventListener("mousedown", (e) => { e.preventDefault(); shoot(); });
+    shootBtn.addEventListener("touchstart", (e) => { e.preventDefault(); shoot(); }, { passive: false });
 
     // Тап по канвасу — тоже управление: держим левую/правую половину экрана
     canvas.addEventListener("touchstart", (e) => {
