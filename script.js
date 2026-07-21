@@ -3758,7 +3758,7 @@ function startSnakeGame() {
     const GRID = 15;
     const CELL = 18;
     const SIZE = GRID * CELL;
-    const TICK_MS = 170; // было 140 — чуть замедлили змейку, чтобы было комфортнее играть
+    const TICK_MS = 250; // было 140 — чуть замедлили змейку, чтобы было комфортнее играть
 
     let wrap = document.createElement("div");
     wrap.className = "game-wrap";
@@ -4982,7 +4982,7 @@ function startRunnerGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🥦 Брокколи-раннер";
+    title.textContent = "🥦 Эчпочмоня: бега брокколи";
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -5005,7 +5005,6 @@ function startRunnerGame() {
     wrap.innerHTML = `
         <div class="game-score-row">Счёт: <span id="runnerScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="runnerBest">${getMyBest('runner')}</span></div>
         <canvas id="runnerCanvas" width="${W}" height="${H}" class="game-canvas"></canvas>
-        <p class="game-hint">↑ / тап — прыжок через брокколи &nbsp;•&nbsp; ↓ — присесть под летучей мышью</p>
         <div class="dpad">
             <div class="dpad-mid">
                 <button class="dpad-btn dpad-duck" title="Присесть">⬇️</button>
