@@ -3758,7 +3758,7 @@ function startSnakeGame() {
     const GRID = 15;
     const CELL = 18;
     const SIZE = GRID * CELL;
-    const TICK_MS = 250; // было 140 — чуть замедлили змейку, чтобы было комфортнее играть
+    const TICK_MS = 170; // было 140 — чуть замедлили змейку, чтобы было комфортнее играть
 
     let wrap = document.createElement("div");
     wrap.className = "game-wrap";
@@ -4982,21 +4982,21 @@ function startRunnerGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🥦 Эчпочмоня: бега брокколи";
+    title.textContent = "🥦 Брокколи-раннер";
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
     const W = 300, H = 150;
     const GROUND_Y = H - 26;           // линия земли, на которую опираются ноги
-    const GRAVITY = 1700;              // px/с²
-    const JUMP_V = -440;               // px/с — импульс прыжка
+    const GRAVITY = 1800;              // px/с² (было 1700 — прыжок держит чуть дольше)
+    const JUMP_V = -480;               // px/с — импульс прыжка (было -440 — прыжок повыше)
     const BASE_SPEED = 190;            // px/с — начальная скорость мира
     const MAX_SPEED = 430;             // px/с — потолок скорости
     const SPEED_PER_PX = 0.018;        // рост скорости за каждый пройденный пиксель дистанции
     const CHAR_X = 54;                 // фиксированная позиция героя по X
-    const STAND_H = 60, STAND_W = 46;  // размеры героя стоя/в прыжке
+    const STAND_H = 60, STAND_W = 46;  // размеры героя стоя/в прыжке (визуальные, для отрисовки)
     const DUCK_H = 36, DUCK_W = 46;    // размеры героя в приседе (просто уменьшенный спрайт)
-    const BROC_MIN_H = 20, BROC_MAX_H = 32;
+    const BROC_MIN_H = 16, BROC_MAX_H = 26; // было 20-32 — брокколи пониже, чтобы прыжок гарантированно перекрывал их
     const BAT_TOP_BASE = GROUND_Y - 78; // верх зоны, где летает мышь (варьируется)
     const BAT_H = 26;
 
@@ -5005,6 +5005,7 @@ function startRunnerGame() {
     wrap.innerHTML = `
         <div class="game-score-row">Счёт: <span id="runnerScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="runnerBest">${getMyBest('runner')}</span></div>
         <canvas id="runnerCanvas" width="${W}" height="${H}" class="game-canvas"></canvas>
+        <p class="game-hint">↑ / тап — прыжок через брокколи &nbsp;•&nbsp; ↓ — присесть под летучей мышью</p>
         <div class="dpad">
             <div class="dpad-mid">
                 <button class="dpad-btn dpad-duck" title="Присесть">⬇️</button>
@@ -5060,7 +5061,7 @@ function startRunnerGame() {
             });
         } else {
             const h = BROC_MIN_H + Math.random() * (BROC_MAX_H - BROC_MIN_H);
-            const w = 22 + Math.random() * 10;
+            const w = 20 + Math.random() * 8;
             obstacles.push({ type: "broccoli", x: W + 10, w, h, top: GROUND_Y - h });
         }
     }
@@ -5253,12 +5254,16 @@ function startRunnerGame() {
 
     function checkCollision() {
         const box = currentCharBox();
-        const left = CHAR_X - box.w / 2, right = CHAR_X + box.w / 2;
+        // Хитбокс намеренно уже и ниже, чем весь спрайт (руки/волосы на фото не должны
+        // засчитываться как столкновение) — иначе перепрыгнуть препятствия почти нереально.
+        const insetX = 8, insetTop = 6, insetBottom = 2;
+        const left = CHAR_X - box.w / 2 + insetX, right = CHAR_X + box.w / 2 - insetX;
+        const top = box.top + insetTop, bottom = box.bottom - insetBottom;
         return obstacles.some(o => {
             if (right < o.x || left > o.x + o.w) return false;
-            const oTop = o.type === "broccoli" ? o.top : o.top;
+            const oTop = o.top;
             const oBottom = o.type === "broccoli" ? GROUND_Y : o.top + o.h;
-            return box.top < oBottom && box.bottom > oTop;
+            return top < oBottom && bottom > oTop;
         });
     }
 
