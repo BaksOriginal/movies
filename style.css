@@ -16,6 +16,16 @@ button, .item, .btn-watch, .btn-edit, .btn-delete, .item-row, .rating-star{
     touch-action: manipulation;
 }
 
+/* Раздел "Игры": полностью убираем возможность выделения текста (в т.ч. долгим тапом),
+   чтобы это не мешало свайпам/тапам во время игрового процесса */
+body.games-screen-active,
+body.games-screen-active * {
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+}
+
 
 body{
 
