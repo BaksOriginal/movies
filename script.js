@@ -5501,7 +5501,6 @@ function startNinjaGame() {
     wrap.innerHTML = `
         <div class="game-score-row">Счёт: <span id="ninjaScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="ninjaBest">${getMyBest('ninja')}</span> &nbsp;•&nbsp; Жизни: <span id="ninjaLives">${START_LIVES}</span></div>
         <canvas id="ninjaCanvas" width="${W}" height="${H}" class="game-canvas"></canvas>
-        <div class="game-hint">Проведите пальцем (или мышью) по эмодзи, чтобы разрезать их. 💣 резать нельзя!</div>
     `;
     app.appendChild(wrap);
 
