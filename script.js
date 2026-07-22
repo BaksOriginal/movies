@@ -3812,7 +3812,7 @@ async function showGamesScreen() {
             <button id="playRunnerBtn" class="btn-games-green">▶️ Играть</button>
         </div>
         <div class="game-card">
-            <div class="game-card-header">🐱‍👤 Эмодзи Ниндзя</div>
+            <div class="game-card-header">⚔ Эмодзи Ниндзя</div>
             ${buildLeaderboardHtml('ninja')}
             <button id="playNinjaBtn" class="btn-games-green">▶️ Играть</button>
         </div>
@@ -5482,7 +5482,7 @@ function startNinjaGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🐱‍👤 Эмодзи Ниндзя";
+    title.textContent = "⚔ Эмодзи Ниндзя";
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
