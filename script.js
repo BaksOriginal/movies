@@ -3758,6 +3758,32 @@ function showGameOverModal(score, isRecord, onRestart) {
     overlay.querySelector("#gameOverMenu").onclick = () => { overlay.remove(); showGamesScreen(); };
 }
 
+// Единая "заливка" с кнопкой "▶️ Играть" ровно по центру canvas — показывается перед
+// стартом любой игры вместо разных текстов вида "Тапни, чтобы начать". Заливка всегда
+// точно совпадает по размеру с конкретным canvas игры, какой бы он ни был.
+function showPlayOverlay(canvas, onPlay) {
+    // Оборачиваем canvas в отдельный контейнер (если он ещё не обёрнут), чтобы заливка
+    // растягивалась ровно на размер canvas, а не на всю колонку .game-wrap целиком
+    let holder = canvas.parentElement;
+    if (!holder || !holder.classList.contains("game-canvas-wrap")) {
+        holder = document.createElement("div");
+        holder.className = "game-canvas-wrap";
+        canvas.parentNode.insertBefore(holder, canvas);
+        holder.appendChild(canvas);
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "game-start-overlay";
+    overlay.innerHTML = `<button type="button" class="game-play-btn">▶️ Играть</button>`;
+    holder.appendChild(overlay);
+
+    overlay.querySelector(".game-play-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        overlay.remove();
+        onPlay();
+    });
+}
+
 // Экран выбора игры со сводными таблицами лидеров
 async function showGamesScreen() {
     startTransitionLock();
@@ -4062,7 +4088,9 @@ function startSnakeGame() {
 
     resetState();
     draw();
-    tickInterval = setInterval(tick, TICK_MS);
+    showPlayOverlay(canvas, () => {
+        tickInterval = setInterval(tick, TICK_MS);
+    });
 
     activeGameCleanup = () => {
         clearInterval(tickInterval);
@@ -4272,13 +4300,6 @@ function startFlappyGame() {
             ctx.fill();
         }
         ctx.restore();
-
-        if (!started) {
-            ctx.fillStyle = "rgba(0,0,0,0.55)";
-            ctx.font = "14px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText("Тапни, чтобы начать", W / 2, H / 2 - 40);
-        }
     }
 
     function checkCollision() {
@@ -4358,7 +4379,10 @@ function startFlappyGame() {
 
     reset();
     draw();
-    rafId = requestAnimationFrame(loop);
+    showPlayOverlay(canvas, () => {
+        started = true;
+        rafId = requestAnimationFrame(loop);
+    });
 
     activeGameCleanup = () => {
         gameOver = true;
@@ -5051,7 +5075,9 @@ function startDoodleGame() {
 
     reset();
     draw();
-    rafId = requestAnimationFrame(loop);
+    showPlayOverlay(canvas, () => {
+        rafId = requestAnimationFrame(loop);
+    });
 
     activeGameCleanup = () => {
         gameOver = true;
@@ -5332,13 +5358,6 @@ function startRunnerGame() {
         drawGround();
         drawDust();
         drawChar();
-
-        if (!started) {
-            ctx.fillStyle = "rgba(255,255,255,0.9)";
-            ctx.font = "13px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText("Тапни чтобы начать", W / 2, H / 2 - 30);
-        }
     }
 
     function checkCollision() {
@@ -5462,7 +5481,10 @@ function startRunnerGame() {
 
     reset();
     draw();
-    rafId = requestAnimationFrame(loop);
+    showPlayOverlay(canvas, () => {
+        started = true;
+        rafId = requestAnimationFrame(loop);
+    });
 
     activeGameCleanup = () => {
         gameOver = true;
@@ -5746,7 +5768,9 @@ function startNinjaGame() {
 
     reset();
     draw();
-    rafId = requestAnimationFrame(loop);
+    showPlayOverlay(canvas, () => {
+        rafId = requestAnimationFrame(loop);
+    });
 
     activeGameCleanup = () => {
         gameOver = true;
