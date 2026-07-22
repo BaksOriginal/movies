@@ -1307,6 +1307,10 @@ async function showHome() {
         activeGameCleanup();
         activeGameCleanup = null;
     }
+    if (document.body.classList.contains("games-screen-active")) {
+        resumeMusicAfterGames();
+    }
+    document.body.classList.remove("games-screen-active");
     history = [];
     currentCategoryName = null;
     await loadCatalogFromDB();
@@ -3544,24 +3548,72 @@ function setupMusicAutoplay() {
 // create table game_scores (
 //   user_id uuid references auth.users(id),
 //   username text,
-//   game text check (game in ('snake','flappy','doodle','runner')),
+//   game text check (game in ('snake','flappy','doodle','runner','ninja')),
 //   best_score integer default 0,
 //   updated_at timestamptz default now(),
 //   primary key (user_id, game)
 // );
 //
-// Если таблица у вас уже создана под старую версию (без 'runner'),
-// добавить новую игру "Брокколи-раннер" в таблицу лидеров можно так
-// (выполнить один раз в SQL editor):
+// Если таблица у вас уже создана под старую версию (без 'runner'/'ninja'),
+// добавить новые игры "Брокколи-раннер" и "Эмодзи Ниндзя" в таблицу лидеров
+// можно так (выполнить один раз в SQL editor):
 //
 // alter table game_scores drop constraint game_scores_game_check;
-// alter table game_scores add constraint game_scores_game_check check (game in ('snake','flappy','doodle','runner'));
+// alter table game_scores add constraint game_scores_game_check check (game in ('snake','flappy','doodle','runner','ninja'));
 //
 // (RLS можно не включать, как и для остальных таблиц в этом проекте —
 // либо настроить так же, как у таблицы ratings/comments.)
 
-let gameScoresCache = { snake: [], flappy: [], doodle: [], runner: [] };
+let gameScoresCache = { snake: [], flappy: [], doodle: [], runner: [], ninja: [] };
 let activeGameCleanup = null; // остановка текущей запущенной игры (интервалы/rAF/слушатели), если она есть
+
+// ==========================================
+// 8-БИТНЫЕ ЗВУКИ ДЛЯ ИГР
+// ==========================================
+// Звуки генерируются на лету через Web Audio API (простые "чиповые" бипы),
+// без каких-либо аудиофайлов — это НЕ музыка, а короткие игровые эффекты
+// (прыжок/еда/очко/столкновение и т.п.), которые работают одинаково во всех играх.
+let gameAudioCtx = null;
+function getGameAudioCtx() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!gameAudioCtx) gameAudioCtx = new AC();
+    if (gameAudioCtx.state === "suspended") gameAudioCtx.resume();
+    return gameAudioCtx;
+}
+
+// Один короткий "чиповый" бип. type — форма волны (square/triangle/sawtooth — придают тот самый 8-битный характер).
+function beep(freq, durationMs, type = "square", volume = 0.15, delayMs = 0) {
+    try {
+        const ctx = getGameAudioCtx();
+        if (!ctx) return;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        const startAt = ctx.currentTime + delayMs / 1000;
+        const endAt = startAt + durationMs / 1000;
+        gain.gain.setValueAtTime(volume, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.001, endAt);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startAt);
+        osc.stop(endAt);
+    } catch (e) { /* звук не критичен для игры — молча игнорируем сбои аудио */ }
+}
+
+// Готовые звуковые эффекты для всех игр на сайте — вызываются по имени из игровой логики
+function playSound(name) {
+    switch (name) {
+        case "jump":     beep(520, 90, "square", 0.15); break;
+        case "point":    beep(880, 80, "square", 0.15); break;
+        case "eat":      beep(660, 70, "square", 0.15); beep(990, 70, "square", 0.12, 60); break;
+        case "shoot":    beep(1100, 50, "square", 0.1); break;
+        case "gameover": beep(400, 120, "square", 0.16); beep(300, 120, "square", 0.16, 130); beep(200, 220, "square", 0.16, 260); break;
+        case "slice":    beep(1300, 35, "triangle", 0.11); beep(750, 55, "triangle", 0.09, 25); break;
+        case "bomb":     beep(90, 260, "sawtooth", 0.25); beep(55, 320, "square", 0.2, 40); break;
+    }
+}
 
 // ------------------------- СПРАЙТ ПТИЧКИ ДЛЯ FLAPPY BIRD -------------------------
 // Голова с фото профиля (вырезана, фон убран) — используется как спрайт птички.
@@ -3585,7 +3637,7 @@ async function loadGameScores() {
         console.error("Ошибка при загрузке рекордов игр:", error);
         return;
     }
-    gameScoresCache = { snake: [], flappy: [], doodle: [] };
+    gameScoresCache = { snake: [], flappy: [], doodle: [], runner: [], ninja: [] };
     (data || []).forEach(row => {
         if (!gameScoresCache[row.game]) gameScoresCache[row.game] = [];
         gameScoresCache[row.game].push({ userId: row.user_id, username: row.username, score: row.best_score });
@@ -3635,8 +3687,31 @@ function buildLeaderboardHtml(game) {
     `).join('') + `</div>`;
 }
 
+// Ставим фоновую музыку сайта на паузу, пока пользователь находится в разделе "Игры",
+// и запоминаем, играла ли она до этого — чтобы аккуратно возобновить при выходе.
+let musicWasPlayingBeforeGames = false;
+function pauseMusicForGames() {
+    const audio = document.getElementById("bgMusic");
+    musicWasPlayingBeforeGames = !!(audio && !audio.paused);
+    if (audio && !audio.paused) audio.pause();
+}
+function resumeMusicAfterGames() {
+    const audio = document.getElementById("bgMusic");
+    if (audio && musicWasPlayingBeforeGames && isMusicPlaying) {
+        audio.play().catch(() => {});
+    }
+    musicWasPlayingBeforeGames = false;
+}
+
 // Единая навигация для экрана игр: "⬅️ Игры" (если внутри конкретной игры) + "🏠 Домой"
 function setGamesNav(showBackToMenu) {
+    // Ставим музыку на паузу и блокируем выделение текста только один раз, при входе в раздел
+    // "Игры" (а не при каждом переключении между играми внутри раздела).
+    if (!document.body.classList.contains("games-screen-active")) {
+        pauseMusicForGames();
+    }
+    document.body.classList.add("games-screen-active");
+
     let oldNav = document.querySelector(".navigation");
     if (oldNav) oldNav.remove();
 
@@ -3736,12 +3811,18 @@ async function showGamesScreen() {
             ${buildLeaderboardHtml('runner')}
             <button id="playRunnerBtn" class="btn-games-green">▶️ Играть</button>
         </div>
+        <div class="game-card">
+            <div class="game-card-header">🐱‍👤 Эмодзи Ниндзя</div>
+            ${buildLeaderboardHtml('ninja')}
+            <button id="playNinjaBtn" class="btn-games-green">▶️ Играть</button>
+        </div>
     `;
 
     container.querySelector("#playSnakeBtn").onclick = () => startSnakeGame();
     container.querySelector("#playFlappyBtn").onclick = () => startFlappyGame();
     container.querySelector("#playDoodleBtn").onclick = () => startDoodleGame();
     container.querySelector("#playRunnerBtn").onclick = () => startRunnerGame();
+    container.querySelector("#playNinjaBtn").onclick = () => startNinjaGame();
 }
 
 // ------------------------- ЗМЕЙКА -------------------------
@@ -3920,6 +4001,7 @@ function startSnakeGame() {
             score++;
             scoreEl.textContent = String(score);
             food = randomFood();
+            playSound("eat");
         } else {
             snake.pop();
         }
@@ -3929,6 +4011,7 @@ function startSnakeGame() {
 
     async function endGame() {
         gameOver = true;
+        playSound("gameover");
         clearInterval(tickInterval);
         const isRecord = await saveGameScore('snake', score);
         if (isRecord) bestEl.textContent = String(score);
@@ -4232,6 +4315,7 @@ function startFlappyGame() {
                     p.passed = true;
                     score++;
                     scoreEl.textContent = String(score);
+                    playSound("point");
                 }
             });
 
@@ -4247,6 +4331,7 @@ function startFlappyGame() {
 
     async function endGame() {
         gameOver = true;
+        playSound("gameover");
         cancelAnimationFrame(rafId);
         const isRecord = await saveGameScore('flappy', score);
         if (isRecord) bestEl.textContent = String(score);
@@ -4261,6 +4346,7 @@ function startFlappyGame() {
         if (gameOver) return;
         started = true;
         birdV = JUMP_V;
+        playSound("jump");
     }
 
     function keyHandler(e) {
@@ -4432,6 +4518,7 @@ function startDoodleGame() {
         if (now - lastShotTime < SHOOT_COOLDOWN) return;
         lastShotTime = now;
         bullets.push({ x, y: y - DOODLER_H / 2, vy: -BULLET_SPEED });
+        playSound("shoot");
     }
 
     function reset() {
@@ -4796,6 +4883,7 @@ function startDoodleGame() {
                     if (withinX && feetPrev <= p.y && feetNow >= p.y) {
                         y = p.y - DOODLER_H / 2;
                         vy = JUMP_V;
+                        playSound("jump");
                         break;
                     }
                 }
@@ -4872,6 +4960,7 @@ function startDoodleGame() {
                     bullets.splice(bi, 1);
                     score += 5;
                     scoreEl.textContent = String(score);
+                    playSound("point");
                     break;
                 }
             }
@@ -4915,6 +5004,7 @@ function startDoodleGame() {
 
     async function endGame() {
         gameOver = true;
+        playSound("gameover");
         cancelAnimationFrame(rafId);
         const isRecord = await saveGameScore('doodle', score);
         if (isRecord) bestEl.textContent = String(score);
@@ -5319,6 +5409,7 @@ function startRunnerGame() {
 
     async function endGame() {
         gameOver = true;
+        playSound("gameover");
         cancelAnimationFrame(rafId);
         const isRecord = await saveGameScore('runner', score);
         if (isRecord) bestEl.textContent = String(score);
@@ -5335,6 +5426,7 @@ function startRunnerGame() {
         if (footY >= GROUND_Y - 0.5 && !ducking) {
             vy = JUMP_V;
             footY = GROUND_Y - 0.01;
+            playSound("jump");
         }
     }
 
@@ -5377,6 +5469,295 @@ function startRunnerGame() {
         cancelAnimationFrame(rafId);
         document.removeEventListener("keydown", keyHandler);
         document.removeEventListener("keyup", keyUpHandler);
+    };
+}
+
+// ------------------------- ЭМОДЗИ НИНДЗЯ (аналог Fruit Ninja) -------------------------
+// Эмодзи подлетают снизу вверх по дуге под гравитацией, их нужно "разрезать"
+// проведя пальцем/мышью по экрану. Бомбу 💣 резать нельзя — игра сразу заканчивается.
+// Пропустил (не разрезал) обычный эмодзи, улетевший вниз за край экрана — теряешь жизнь.
+function startNinjaGame() {
+    if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+    setGamesNav(true);
+
+    app.innerHTML = "";
+    let title = document.createElement("h1");
+    title.textContent = "🐱‍👤 Эмодзи Ниндзя";
+    title.style.marginBottom = "5px";
+    app.appendChild(title);
+
+    const W = 300, H = 420;
+    const TARGET_EMOJIS = ["😈", "❤️", "⭐", "🍫", "💖"];
+    const BOMB_EMOJI = "💣";
+    const GRAVITY = 780;          // px/с²
+    const START_LIVES = 3;
+    const OBJ_R = 20;             // радиус для попадания среза
+    const FONT_SIZE = 34;
+    const BOMB_CHANCE = 0.16;
+    let SPAWN_MIN = 750, SPAWN_MAX = 1250; // мс между волнами (сужается по ходу игры)
+
+    let wrap = document.createElement("div");
+    wrap.className = "game-wrap";
+    wrap.innerHTML = `
+        <div class="game-score-row">Счёт: <span id="ninjaScore">0</span> &nbsp;•&nbsp; Рекорд: <span id="ninjaBest">${getMyBest('ninja')}</span> &nbsp;•&nbsp; Жизни: <span id="ninjaLives">${START_LIVES}</span></div>
+        <canvas id="ninjaCanvas" width="${W}" height="${H}" class="game-canvas"></canvas>
+        <div class="game-hint">Проведите пальцем (или мышью) по эмодзи, чтобы разрезать их. 💣 резать нельзя!</div>
+    `;
+    app.appendChild(wrap);
+
+    const canvas = wrap.querySelector("#ninjaCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = wrap.querySelector("#ninjaScore");
+    const bestEl = wrap.querySelector("#ninjaBest");
+    const livesEl = wrap.querySelector("#ninjaLives");
+
+    let objects, score, lives, gameOver, lastTime, rafId, spawnTimer, nextSpawnIn, trail, isDown, particles;
+
+    function reset() {
+        objects = [];
+        particles = [];
+        trail = [];
+        score = 0;
+        lives = START_LIVES;
+        gameOver = false;
+        isDown = false;
+        spawnTimer = 0;
+        nextSpawnIn = 600;
+        SPAWN_MIN = 750; SPAWN_MAX = 1250;
+        scoreEl.textContent = "0";
+        livesEl.textContent = String(lives);
+    }
+
+    function spawnWave() {
+        const count = Math.random() < 0.3 ? 2 : 1;
+        for (let i = 0; i < count; i++) {
+            const isBomb = Math.random() < BOMB_CHANCE;
+            const x = 40 + Math.random() * (W - 80);
+            const vy = -(560 + Math.random() * 170);
+            const vx = (Math.random() - 0.5) * 90;
+            objects.push({
+                emoji: isBomb ? BOMB_EMOJI : TARGET_EMOJIS[Math.floor(Math.random() * TARGET_EMOJIS.length)],
+                isBomb,
+                x, y: H + 20,
+                vx, vy,
+                rot: 0, vr: (Math.random() - 0.5) * 4,
+                sliced: false,
+                r: OBJ_R
+            });
+        }
+        // Постепенно ускоряем игру по мере роста счёта
+        SPAWN_MIN = Math.max(380, 750 - score * 4);
+        SPAWN_MAX = Math.max(650, 1250 - score * 6);
+    }
+
+    function spawnParticles(x, y, color) {
+        for (let i = 0; i < 8; i++) {
+            const angle = (Math.PI * 2 * i) / 8;
+            particles.push({
+                x, y,
+                vx: Math.cos(angle) * (80 + Math.random() * 60),
+                vy: Math.sin(angle) * (80 + Math.random() * 60),
+                life: 0.4,
+                color
+            });
+        }
+    }
+
+    function distToSegment(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1, dy = y2 - y1;
+        const lenSq = dx * dx + dy * dy;
+        let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const cx = x1 + t * dx, cy = y1 + t * dy;
+        return Math.hypot(px - cx, py - cy);
+    }
+
+    function sliceCheck(x1, y1, x2, y2) {
+        if (gameOver) return;
+        objects.forEach(o => {
+            if (o.sliced) return;
+            if (distToSegment(o.x, o.y, x1, y1, x2, y2) <= o.r) {
+                o.sliced = true;
+                if (o.isBomb) {
+                    playSound("bomb");
+                    spawnParticles(o.x, o.y, "#444");
+                    endGame();
+                } else {
+                    playSound("slice");
+                    score++;
+                    scoreEl.textContent = String(score);
+                    spawnParticles(o.x, o.y, "#ff6fa5");
+                }
+            }
+        });
+    }
+
+    function draw() {
+        // Фон — мягкое ночное небо в тон стилю сайта
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, "#2b1f3d");
+        grad.addColorStop(1, "#553459");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+
+        // След от пальца/мыши
+        if (trail.length > 1) {
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            for (let i = 1; i < trail.length; i++) {
+                const p0 = trail[i - 1], p1 = trail[i];
+                const alpha = i / trail.length;
+                ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.9})`;
+                ctx.lineWidth = 4 * alpha + 1;
+                ctx.beginPath();
+                ctx.moveTo(p0.x, p0.y);
+                ctx.lineTo(p1.x, p1.y);
+                ctx.stroke();
+            }
+        }
+
+        // Эмодзи-объекты
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = `${FONT_SIZE}px sans-serif`;
+        objects.forEach(o => {
+            if (o.sliced) return;
+            ctx.save();
+            ctx.translate(o.x, o.y);
+            ctx.rotate(o.rot);
+            ctx.fillText(o.emoji, 0, 0);
+            ctx.restore();
+        });
+
+        // Частицы разлёта
+        particles.forEach(p => {
+            ctx.globalAlpha = Math.max(0, p.life / 0.4);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        });
+    }
+
+    function update(dt) {
+        spawnTimer += dt * 1000;
+        if (spawnTimer >= nextSpawnIn) {
+            spawnTimer = 0;
+            nextSpawnIn = SPAWN_MIN + Math.random() * (SPAWN_MAX - SPAWN_MIN);
+            spawnWave();
+        }
+
+        objects.forEach(o => {
+            o.vy += GRAVITY * dt;
+            o.x += o.vx * dt;
+            o.y += o.vy * dt;
+            o.rot += o.vr * dt;
+        });
+
+        // Пропущенные (упавшие вниз, не разрезанные) обычные эмодзи — минус жизнь
+        for (let i = objects.length - 1; i >= 0; i--) {
+            const o = objects[i];
+            if (o.y - o.r > H) {
+                if (!o.sliced && !o.isBomb) {
+                    lives--;
+                    livesEl.textContent = String(lives);
+                    if (lives <= 0) { objects.splice(i, 1); endGame(); continue; }
+                }
+                objects.splice(i, 1);
+            } else if (o.sliced) {
+                objects.splice(i, 1);
+            }
+        }
+
+        particles.forEach(p => {
+            p.life -= dt;
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.vy += GRAVITY * 0.4 * dt;
+        });
+        particles = particles.filter(p => p.life > 0);
+    }
+
+    function loop(time) {
+        if (gameOver) return;
+        if (!lastTime) lastTime = time;
+        const dt = Math.min(0.05, (time - lastTime) / 1000);
+        lastTime = time;
+
+        update(dt);
+        draw();
+        rafId = requestAnimationFrame(loop);
+    }
+
+    async function endGame() {
+        if (gameOver) return;
+        gameOver = true;
+        playSound("gameover");
+        cancelAnimationFrame(rafId);
+        const isRecord = await saveGameScore('ninja', score);
+        if (isRecord) bestEl.textContent = String(score);
+        showGameOverModal(score, isRecord, () => {
+            reset();
+            draw();
+            lastTime = 0;
+            rafId = requestAnimationFrame(loop);
+        });
+    }
+
+    function canvasPoint(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left) * (W / rect.width),
+            y: (clientY - rect.top) * (H / rect.height)
+        };
+    }
+
+    function pointerDown(clientX, clientY) {
+        if (gameOver) return;
+        isDown = true;
+        trail = [canvasPoint(clientX, clientY)];
+    }
+    function pointerMove(clientX, clientY) {
+        if (!isDown || gameOver) return;
+        const p = canvasPoint(clientX, clientY);
+        const prev = trail[trail.length - 1];
+        trail.push(p);
+        if (trail.length > 12) trail.shift();
+        if (prev) sliceCheck(prev.x, prev.y, p.x, p.y);
+    }
+    function pointerUp() {
+        isDown = false;
+        trail = [];
+    }
+
+    function mouseDownHandler(e) { pointerDown(e.clientX, e.clientY); }
+    function mouseMoveHandler(e) { pointerMove(e.clientX, e.clientY); }
+    function mouseUpHandler() { pointerUp(); }
+    function touchStartHandler(e) { e.preventDefault(); const t = e.touches[0]; pointerDown(t.clientX, t.clientY); }
+    function touchMoveHandler(e) { e.preventDefault(); const t = e.touches[0]; pointerMove(t.clientX, t.clientY); }
+    function touchEndHandler(e) { e.preventDefault(); pointerUp(); }
+
+    canvas.addEventListener("mousedown", mouseDownHandler);
+    canvas.addEventListener("mousemove", mouseMoveHandler);
+    window.addEventListener("mouseup", mouseUpHandler);
+    canvas.addEventListener("touchstart", touchStartHandler, { passive: false });
+    canvas.addEventListener("touchmove", touchMoveHandler, { passive: false });
+    canvas.addEventListener("touchend", touchEndHandler, { passive: false });
+
+    reset();
+    draw();
+    rafId = requestAnimationFrame(loop);
+
+    activeGameCleanup = () => {
+        gameOver = true;
+        cancelAnimationFrame(rafId);
+        canvas.removeEventListener("mousedown", mouseDownHandler);
+        canvas.removeEventListener("mousemove", mouseMoveHandler);
+        window.removeEventListener("mouseup", mouseUpHandler);
+        canvas.removeEventListener("touchstart", touchStartHandler);
+        canvas.removeEventListener("touchmove", touchMoveHandler);
+        canvas.removeEventListener("touchend", touchEndHandler);
     };
 }
 
