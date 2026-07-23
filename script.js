@@ -1678,24 +1678,33 @@ let cachedStickerList = null; // кэшируем на время сессии, 
 async function fetchStickerList() {
     if (cachedStickerList) return cachedStickerList;
 
+    // Как и с треками ритм-игры: раньше тянули через api.github.com/.../contents/,
+    // а у него общий лимит 60 запросов/час на IP на ВЕСЬ api.github.com — то есть
+    // стикеры и треки делили один бюджет и могли "гасить" друг друга. Переходим
+    // на jsDelivr, у него лимиты намного мягче.
     try {
-        const apiUrl = `https://api.github.com/repos/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}/contents/${GITHUB_STICKERS_PATH}?ref=${GITHUB_STICKERS_BRANCH}`;
+        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}@${GITHUB_STICKERS_BRANCH}?structure=flat`;
         const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error("GitHub API вернул статус " + res.status);
+        if (!res.ok) throw new Error("jsDelivr API вернул статус " + res.status);
         const json = await res.json();
-        if (!Array.isArray(json)) return [];
+        const files = Array.isArray(json.files) ? json.files : [];
 
+        const prefix = `/${GITHUB_STICKERS_PATH}/`;
         const imageExtRe = /\.(png|jpe?g|gif|webp)$/i;
-        cachedStickerList = json
-            .filter(f => f.type === "file" && imageExtRe.test(f.name))
-            .map(f => ({
-                name: f.name,
-                url: `https://raw.githubusercontent.com/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}/${GITHUB_STICKERS_BRANCH}/${GITHUB_STICKERS_PATH}/${f.name}`
-            }));
+
+        cachedStickerList = files
+            .filter(f => typeof f.name === "string" && f.name.startsWith(prefix) && imageExtRe.test(f.name))
+            .map(f => {
+                const encodedPath = f.name.split("/").map(encodeURIComponent).join("/");
+                return {
+                    name: f.name.slice(prefix.length),
+                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}@${GITHUB_STICKERS_BRANCH}${encodedPath}`
+                };
+            });
 
         return cachedStickerList;
     } catch (e) {
-        console.error("Ошибка при загрузке списка стикеров с GitHub:", e);
+        console.error("Ошибка при загрузке списка стикеров (jsDelivr):", e);
         return [];
     }
 }
@@ -5827,26 +5836,43 @@ let cachedRhythmTrackList = null;
 async function fetchRhythmTrackList(forceRefresh = false) {
     if (cachedRhythmTrackList && !forceRefresh) return cachedRhythmTrackList;
 
+    // Раньше список тянулся через api.github.com/.../contents/ — у него жёсткий
+    // лимит 60 запросов/час НА IP для неавторизованных запросов, и он общий
+    // на всех посетителей с одного IP/VPN/NAT. При активном тестировании или
+    // нескольких игроках подряд лимит быстро исчерпывается (403 "rate limit
+    // exceeded"), и список треков становится пустым для всех сразу.
+    //
+    // Вместо этого используем jsDelivr — бесплатный CDN-прокси поверх GitHub
+    // с гораздо более мягкими лимитами и без токена. Он же отдаёт и сами
+    // .ogg-файлы (быстрее и без нагрузки на GitHub).
     try {
-        const apiUrl = `https://api.github.com/repos/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}/contents/${GITHUB_RHYTHM_PATH}?ref=${GITHUB_RHYTHM_BRANCH}`;
+        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${GITHUB_RHYTHM_BRANCH}?structure=flat`;
         const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error("GitHub API вернул статус " + res.status);
+        if (!res.ok) throw new Error("jsDelivr API вернул статус " + res.status);
         const json = await res.json();
-        if (!Array.isArray(json)) return [];
+        const files = Array.isArray(json.files) ? json.files : [];
 
+        const prefix = `/${GITHUB_RHYTHM_PATH}/`;
         const oggExtRe = /\.ogg$/i;
-        cachedRhythmTrackList = json
-            .filter(f => f.type === "file" && oggExtRe.test(f.name))
-            .map(f => ({
-                key: f.name, // стабильный ID трека — используется как primary key в БД
-                label: f.name.replace(oggExtRe, "").replace(/[_-]+/g, " ").trim(),
-                url: `https://raw.githubusercontent.com/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}/${GITHUB_RHYTHM_BRANCH}/${GITHUB_RHYTHM_PATH}/${f.name}`
-            }))
+
+        cachedRhythmTrackList = files
+            .filter(f => typeof f.name === "string" && f.name.startsWith(prefix) && oggExtRe.test(f.name))
+            .map(f => {
+                const fileName = f.name.slice(prefix.length); // имя файла без пути к папке
+                // Кодируем каждый сегмент пути отдельно — так пробелы, скобки,
+                // "#", "&" и т.п. в названии трека не сломают URL.
+                const encodedPath = f.name.split("/").map(encodeURIComponent).join("/");
+                return {
+                    key: fileName, // стабильный ID трека — используется как primary key в БД
+                    label: fileName.replace(oggExtRe, "").replace(/[_-]+/g, " ").trim(),
+                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${GITHUB_RHYTHM_BRANCH}${encodedPath}`
+                };
+            })
             .sort((a, b) => a.label.localeCompare(b.label, "ru"));
 
         return cachedRhythmTrackList;
     } catch (e) {
-        console.error("Ошибка при загрузке списка треков ритм-игры с GitHub:", e);
+        console.error("Ошибка при загрузке списка треков ритм-игры (jsDelivr):", e);
         return [];
     }
 }
