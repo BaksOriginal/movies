@@ -22,6 +22,18 @@ const GITHUB_STICKERS_BRANCH = "main";
 const GITHUB_STICKERS_PATH = "stickers";
 const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутри текстового поля message
 
+// ==========================================
+// РИТМ-АРКАДА (6-я игра): ТРЕКИ ХРАНЯТСЯ В GITHUB, НЕ В БД
+// ==========================================
+// Загрузите .ogg-треки в папку "rhytm_game" вашего GitHub-репозитория —
+// список подтягивается динамически через GitHub API при каждом заходе
+// в раздел, так же как со стикерами. Уровни НЕ хранятся заранее нигде —
+// они строятся на лету анализом самого аудиофайла (см. секцию ниже).
+const GITHUB_RHYTHM_OWNER = "BaksOriginal";
+const GITHUB_RHYTHM_REPO = "movies";
+const GITHUB_RHYTHM_BRANCH = "main";
+const GITHUB_RHYTHM_PATH = "rhytm_game";
+
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
 // Раньше здесь была функция startTransitionLock(), которая на 350мс блокировала
@@ -3842,6 +3854,11 @@ async function showGamesScreen() {
             ${buildLeaderboardHtml('ninja')}
             <button id="playNinjaBtn" class="btn-games-green">▶️ Играть</button>
         </div>
+        <div class="game-card rhythm-game-card">
+            <div class="game-card-header">🎵 Ритм-Аркада</div>
+            <p class="rhythm-card-desc">Уровни строятся сами по любому треку из папки rhytm_game на GitHub — жми в такт, пока музыка не разгонится!</p>
+            <button id="playRhythmBtn" class="btn-games-green">▶️ Играть</button>
+        </div>
     `;
 
     container.querySelector("#playSnakeBtn").onclick = () => startSnakeGame();
@@ -3849,6 +3866,7 @@ async function showGamesScreen() {
     container.querySelector("#playDoodleBtn").onclick = () => startDoodleGame();
     container.querySelector("#playRunnerBtn").onclick = () => startRunnerGame();
     container.querySelector("#playNinjaBtn").onclick = () => startNinjaGame();
+    container.querySelector("#playRhythmBtn").onclick = () => showRhythmMenu();
 }
 
 // ------------------------- ЗМЕЙКА -------------------------
@@ -5781,6 +5799,561 @@ function startNinjaGame() {
         canvas.removeEventListener("touchstart", touchStartHandler);
         canvas.removeEventListener("touchmove", touchMoveHandler);
         canvas.removeEventListener("touchend", touchEndHandler);
+    };
+}
+
+// =======================================================
+// РИТМ-АРКАДА — 6-я игра. Уровни НЕ прописаны заранее: они строятся
+// на лету анализом самого аудиофайла (энергетический onset-детектор
+// ищет резкие всплески громкости — то есть "биты"). Список треков
+// подтягивается динамически из папки GITHUB_RHYTHM_PATH на GitHub.
+// =======================================================
+//
+// Нужно один раз создать отдельную таблицу в Supabase (SQL editor) —
+// рекорды тут хранятся ПО КАЖДОМУ ТРЕКУ отдельно, а не одной строкой
+// на игру, как в game_scores у остальных 5 игр:
+//
+// create table rhythm_scores (
+//   user_id uuid references auth.users(id),
+//   username text,
+//   track_name text,
+//   best_score integer default 0,
+//   updated_at timestamptz default now(),
+//   primary key (user_id, track_name)
+// );
+
+// ----------------- Список треков из GitHub -----------------
+let cachedRhythmTrackList = null;
+
+async function fetchRhythmTrackList(forceRefresh = false) {
+    if (cachedRhythmTrackList && !forceRefresh) return cachedRhythmTrackList;
+
+    try {
+        const apiUrl = `https://api.github.com/repos/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}/contents/${GITHUB_RHYTHM_PATH}?ref=${GITHUB_RHYTHM_BRANCH}`;
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error("GitHub API вернул статус " + res.status);
+        const json = await res.json();
+        if (!Array.isArray(json)) return [];
+
+        const oggExtRe = /\.ogg$/i;
+        cachedRhythmTrackList = json
+            .filter(f => f.type === "file" && oggExtRe.test(f.name))
+            .map(f => ({
+                key: f.name, // стабильный ID трека — используется как primary key в БД
+                label: f.name.replace(oggExtRe, "").replace(/[_-]+/g, " ").trim(),
+                url: `https://raw.githubusercontent.com/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}/${GITHUB_RHYTHM_BRANCH}/${GITHUB_RHYTHM_PATH}/${f.name}`
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+
+        return cachedRhythmTrackList;
+    } catch (e) {
+        console.error("Ошибка при загрузке списка треков ритм-игры с GitHub:", e);
+        return [];
+    }
+}
+
+// ----------------- Рекорды: отдельно по каждому треку -----------------
+let rhythmScoresCache = {}; // { trackKey: [{userId, username, score}, ...] }
+
+async function loadRhythmScores(trackKeys) {
+    if (!trackKeys || trackKeys.length === 0) { rhythmScoresCache = {}; return; }
+    const { data, error } = await db.from('rhythm_scores').select('*').in('track_name', trackKeys);
+    if (error) {
+        console.error("Ошибка при загрузке рекордов ритм-игры:", error);
+        return;
+    }
+    rhythmScoresCache = {};
+    trackKeys.forEach(k => { rhythmScoresCache[k] = []; });
+    (data || []).forEach(row => {
+        if (!rhythmScoresCache[row.track_name]) rhythmScoresCache[row.track_name] = [];
+        rhythmScoresCache[row.track_name].push({ userId: row.user_id, username: row.username, score: row.best_score });
+    });
+}
+
+function getMyRhythmBest(trackKey) {
+    if (!currentUser) return 0;
+    const mine = (rhythmScoresCache[trackKey] || []).find(r => r.userId === currentUser.id);
+    return mine ? mine.score : 0;
+}
+
+// Сохраняет новый рекорд для конкретного трека, только если он реально побит
+async function saveRhythmScore(trackKey, score) {
+    if (!currentUser) return false;
+    const list = rhythmScoresCache[trackKey] || (rhythmScoresCache[trackKey] = []);
+    const mine = list.find(r => r.userId === currentUser.id);
+    const prevBest = mine ? mine.score : 0;
+    if (score <= prevBest) return false;
+
+    const username = getUsernameFromEmail(currentUser.email);
+    const { error } = await db.from('rhythm_scores').upsert(
+        { user_id: currentUser.id, username, track_name: trackKey, best_score: score, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,track_name' }
+    );
+    if (error) {
+        console.error("Ошибка при сохранении рекорда ритм-игры:", error);
+        return false;
+    }
+    if (mine) mine.score = score;
+    else list.push({ userId: currentUser.id, username, score });
+    return true;
+}
+
+function buildRhythmLeaderboardHtml(trackKey) {
+    const rows = (rhythmScoresCache[trackKey] || []).slice().sort((a, b) => b.score - a.score);
+    if (rows.length === 0) {
+        return `<p class="game-leaderboard-empty">Рекордов пока нет — сыграйте первыми!</p>`;
+    }
+    return `<div class="leaderboard">` + rows.map((r, i) => `
+        <div class="leaderboard-row${i === 0 ? ' leaderboard-leader' : ''}">
+            <span class="leaderboard-name">${i === 0 ? '🏆 ' : ''}${r.username}</span>
+            <span class="leaderboard-score">${r.score}</span>
+        </div>
+    `).join('') + `</div>`;
+}
+
+// ----------------- Детерминированный "случайный" сид по имени файла -----------------
+// Один и тот же трек всегда даёт одну и ту же карту нот — иначе рекорды
+// между заходами было бы невозможно сравнивать.
+function hashStringToSeed(str) {
+    let h = 2166136261; // FNV-1a
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+}
+function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+const RHYTHM_LANES = 4;
+// Максимум 4 ступени ускорения: обычный темп, затем 3 разгона после каждого
+// полного проигрывания трека (см. advanceSpeedTierAndLoop).
+const RHYTHM_SPEED_TIERS = [1.0, 1.15, 1.3, 1.5];
+
+// Строит карту нот прямо по декодированному аудио — простой энергетический
+// onset-детектор (ищем резкие всплески громкости относительно локального
+// "фона"). Это не полноценный частотный BPM-анализ, как в профессиональных
+// чарт-редакторах osu!, но на треках с чётким битом даёт вполне играбельный
+// и, что важно, детерминированный результат.
+function buildBeatmapFromAudioBuffer(audioBuffer, seedKey) {
+    const sampleRate = audioBuffer.sampleRate;
+    const numCh = audioBuffer.numberOfChannels;
+    const length = audioBuffer.length;
+
+    const channelsData = [];
+    for (let c = 0; c < numCh; c++) channelsData.push(audioBuffer.getChannelData(c));
+    const mono = new Float32Array(length);
+    for (let i = 0; i < length; i++) {
+        let sum = 0;
+        for (let c = 0; c < numCh; c++) sum += channelsData[c][i];
+        mono[i] = sum / numCh;
+    }
+
+    const windowSize = Math.max(256, Math.round(sampleRate * 0.04)); // ~40мс
+    const hop = Math.max(1, Math.round(windowSize / 2));             // 50% перекрытие
+    const numWindows = Math.max(0, Math.floor((length - windowSize) / hop) + 1);
+
+    const energy = new Float32Array(numWindows);
+    const times = new Float32Array(numWindows);
+    for (let w = 0; w < numWindows; w++) {
+        const start = w * hop;
+        let sum = 0;
+        for (let i = start; i < start + windowSize; i++) sum += mono[i] * mono[i];
+        energy[w] = Math.sqrt(sum / windowSize);
+        times[w] = (start + windowSize / 2) / sampleRate;
+    }
+
+    const flux = new Float32Array(numWindows);
+    for (let w = 1; w < numWindows; w++) {
+        const d = energy[w] - energy[w - 1];
+        flux[w] = d > 0 ? d : 0;
+    }
+
+    const secToWindows = (sec) => Math.max(1, Math.round((sec * sampleRate) / hop));
+    const localSpan = secToWindows(1.0); // адаптивный порог по последней ~1 сек
+    const minGap = secToWindows(0.16);   // ноты не чаще, чем раз в ~160мс
+
+    const rng = mulberry32(hashStringToSeed(seedKey));
+    const notes = [];
+    let lastPickW = -Infinity;
+    let lastLane = -1;
+    let sameLaneStreak = 0;
+
+    for (let w = 2; w < numWindows - 1; w++) {
+        const from = Math.max(0, w - localSpan);
+        let sum = 0;
+        for (let k = from; k < w; k++) sum += flux[k];
+        const localMean = (w - from) > 0 ? sum / (w - from) : 0;
+        const threshold = localMean * 1.6 + 0.002;
+
+        const isPeak = flux[w] > threshold && flux[w] >= flux[w - 1] && flux[w] >= flux[w + 1];
+        if (isPeak && (w - lastPickW) >= minGap) {
+            let lane = Math.floor(rng() * RHYTHM_LANES);
+            if (lane === lastLane) {
+                sameLaneStreak++;
+                if (sameLaneStreak >= 2) {
+                    lane = (lane + 1 + Math.floor(rng() * (RHYTHM_LANES - 1))) % RHYTHM_LANES;
+                    sameLaneStreak = 0;
+                }
+            } else {
+                sameLaneStreak = 0;
+            }
+            lastLane = lane;
+
+            notes.push({ time: times[w], lane, hit: false, missed: false });
+            lastPickW = w;
+        }
+    }
+
+    return { duration: audioBuffer.duration, notes };
+}
+
+// Экран выбора трека — список подтягивается с GitHub заново при каждом заходе
+async function showRhythmMenu() {
+    if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+    setGamesNav(true);
+
+    app.innerHTML = "";
+    let title = document.createElement("h1");
+    title.textContent = "🎵 Ритм-Аркада";
+    app.appendChild(title);
+
+    let container = document.createElement("div");
+    container.id = "rhythmMenuContainer";
+    container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Загружаем список треков с GitHub...</p>`;
+    app.appendChild(container);
+
+    const tracks = await fetchRhythmTrackList(true); // переспрашиваем список заново при каждом заходе
+    if (!container.isConnected) return;
+
+    if (tracks.length === 0) {
+        container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Треков не найдено. Загрузите .ogg-файлы в папку "${GITHUB_RHYTHM_PATH}" репозитория ${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}.</p>`;
+        return;
+    }
+
+    await loadRhythmScores(tracks.map(t => t.key));
+    if (!container.isConnected) return;
+
+    container.innerHTML = tracks.map((t, i) => `
+        <div class="rhythm-track-card">
+            <div class="rhythm-track-card-header">🎧 ${t.label}</div>
+            ${buildRhythmLeaderboardHtml(t.key)}
+            <button type="button" class="btn-games-green rhythm-play-btn" data-idx="${i}">▶️ Играть</button>
+        </div>
+    `).join("");
+
+    container.querySelectorAll(".rhythm-play-btn").forEach(btn => {
+        btn.onclick = () => {
+            const track = tracks[Number(btn.dataset.idx)];
+            if (track) startRhythmLevel(track);
+        };
+    });
+}
+
+// Модалка окончания ритм-игры — со своей навигацией (назад к списку треков, не к общим играм)
+function showRhythmGameOverModal(score, isRecord, onRestart, onMenu) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "rhythmGameOverModal";
+    overlay.innerHTML = `
+        <div class="modal-content rhythm-gameover-modal" style="text-align: center;">
+            <h3>${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</h3>
+            <p style="font-size: 22px; font-weight: bold; color:#9b4f70; margin: 10px 0 20px;">Счёт: ${score}</p>
+            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="rhythmGameOverRestart" class="btn-pink-style">🔁 Заново</button>
+                <button id="rhythmGameOverMenu" class="btn-action-cancel">🎵 К трекам</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#rhythmGameOverRestart").onclick = () => { overlay.remove(); onRestart(); };
+    overlay.querySelector("#rhythmGameOverMenu").onclick = () => { overlay.remove(); onMenu(); };
+}
+
+// ------------------------- САМА ИГРА -------------------------
+async function startRhythmLevel(track) {
+    if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+    setGamesNav(true);
+
+    app.innerHTML = "";
+    let title = document.createElement("h1");
+    title.textContent = "🎵 " + track.label;
+    title.style.marginBottom = "5px";
+    app.appendChild(title);
+
+    let wrap = document.createElement("div");
+    wrap.className = "game-wrap rhythm-wrap";
+    wrap.innerHTML = `<div class="rhythm-status" id="rhythmStatus">Загружаем трек...</div>`;
+    app.appendChild(wrap);
+
+    let audioBuffer, chart, objectUrl;
+    try {
+        const res = await fetch(track.url);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const arrayBuffer = await res.arrayBuffer();
+        objectUrl = URL.createObjectURL(new Blob([arrayBuffer.slice(0)], { type: "audio/ogg" }));
+
+        const statusEl = wrap.querySelector("#rhythmStatus");
+        if (statusEl) statusEl.textContent = "Анализируем биты...";
+
+        const ctx = getGameAudioCtx();
+        audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        chart = buildBeatmapFromAudioBuffer(audioBuffer, track.key);
+    } catch (e) {
+        console.error("Ошибка загрузки/анализа трека:", e);
+        if (wrap.isConnected) {
+            wrap.innerHTML = `<p style="text-align:center;color:#999;">Не удалось загрузить трек 😔<br>Проверьте, что файл лежит в папке "${GITHUB_RHYTHM_PATH}" и доступен по ссылке.</p>
+                <button class="btn-action-cancel" id="rhythmBackErr" style="margin-top:12px;">🎵 Назад</button>`;
+            wrap.querySelector("#rhythmBackErr").onclick = () => showRhythmMenu();
+        }
+        return;
+    }
+    if (!wrap.isConnected) return; // пока грузили — успели уйти с экрана
+
+    if (!chart.notes.length) {
+        wrap.innerHTML = `<p style="text-align:center;color:#999;">Не получилось найти чёткий ритм в этом треке 😕<br>Попробуйте другой трек.</p>
+            <button class="btn-action-cancel" id="rhythmBackNoNotes" style="margin-top:12px;">🎵 Назад</button>`;
+        wrap.querySelector("#rhythmBackNoNotes").onclick = () => showRhythmMenu();
+        return;
+    }
+
+    const LANE_KEYS = ["D", "F", "J", "K"];
+    wrap.innerHTML = `
+        <div class="rhythm-topbar">
+            <div class="rhythm-stat">Счёт: <span id="rhythmScore">0</span></div>
+            <div class="rhythm-speed-chip" id="rhythmSpeedChip">x1</div>
+            <div class="rhythm-stat rhythm-lives" id="rhythmLives"></div>
+        </div>
+        <div class="rhythm-combo-wrap"><div class="rhythm-combo" id="rhythmCombo"></div></div>
+        <div class="rhythm-arena" id="rhythmArena">
+            ${LANE_KEYS.map((k, i) => `<div class="rhythm-lane" data-lane="${i}"><div class="rhythm-hitline"></div></div>`).join("")}
+            <div class="rhythm-judgement" id="rhythmJudgement"></div>
+            <div class="rhythm-countdown" id="rhythmCountdown"></div>
+        </div>
+        <div class="rhythm-keys">
+            ${LANE_KEYS.map((k, i) => `<button type="button" class="rhythm-key" data-lane="${i}">${k}</button>`).join("")}
+        </div>
+    `;
+
+    const arena = wrap.querySelector("#rhythmArena");
+    const laneEls = Array.from(wrap.querySelectorAll(".rhythm-lane"));
+    const scoreEl = wrap.querySelector("#rhythmScore");
+    const comboEl = wrap.querySelector("#rhythmCombo");
+    const speedChipEl = wrap.querySelector("#rhythmSpeedChip");
+    const livesEl = wrap.querySelector("#rhythmLives");
+    const judgementEl = wrap.querySelector("#rhythmJudgement");
+    const countdownEl = wrap.querySelector("#rhythmCountdown");
+    const keyBtns = Array.from(wrap.querySelectorAll(".rhythm-key"));
+
+    const audio = new Audio();
+    audio.src = objectUrl;
+    audio.preload = "auto";
+
+    const LOOKAHEAD = 1.1;      // сек (в шкале трека) — за сколько до удара тайл появляется сверху
+    const WINDOW_PERFECT = 0.055;
+    const MISS_CUTOFF = 0.14;   // после этого промежутка нота засчитывается пропущенной
+    const START_LIVES = 3;
+
+    let score = 0, combo = 0;
+    let lives = START_LIVES;
+    let tierIndex = 0;
+    let gameOver = false;
+    let paused = true;
+    let rafId = null;
+    let activeTiles = []; // { note, el }
+    let spawnCursor = 0;
+
+    function renderLives() {
+        livesEl.textContent = "❤️".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, START_LIVES - lives));
+    }
+    function renderSpeedChip() {
+        const v = RHYTHM_SPEED_TIERS[tierIndex];
+        speedChipEl.textContent = "x" + (Number.isInteger(v) ? v.toFixed(0) : v.toString());
+    }
+    renderLives();
+    renderSpeedChip();
+
+    function showJudgement(text, cls) {
+        judgementEl.textContent = text;
+        judgementEl.className = "rhythm-judgement " + cls;
+        void judgementEl.offsetWidth; // форсируем reflow, чтобы анимация перезапускалась при частых попаданиях
+        judgementEl.classList.add("rhythm-judgement-anim");
+    }
+    function popCombo() {
+        comboEl.textContent = combo > 0 ? combo + "x" : "";
+        comboEl.classList.remove("rhythm-combo-pop");
+        void comboEl.offsetWidth;
+        comboEl.classList.add("rhythm-combo-pop");
+    }
+    function resetChartState() {
+        chart.notes.forEach(n => { n.hit = false; n.missed = false; });
+        activeTiles.forEach(t => t.el.remove());
+        activeTiles = [];
+        spawnCursor = 0;
+    }
+
+    function endGame() {
+        if (gameOver) return;
+        gameOver = true;
+        paused = true;
+        cancelAnimationFrame(rafId);
+        audio.pause();
+        playSound("gameover");
+        saveRhythmScore(track.key, score).then(isRecord => {
+            showRhythmGameOverModal(score, isRecord, () => startRhythmLevel(track), () => showRhythmMenu());
+        });
+    }
+
+    function registerMiss(note) {
+        if (note.hit || note.missed) return;
+        note.missed = true;
+        combo = 0;
+        popCombo();
+        lives--;
+        renderLives();
+        showJudgement("МИМО", "rhythm-judge-miss");
+        if (lives <= 0) endGame();
+    }
+
+    // Трек доиграл целиком — небольшая пауза, затем разгон и повтор той же карты нот
+    function advanceSpeedTierAndLoop() {
+        paused = true;
+        cancelAnimationFrame(rafId);
+        audio.pause();
+        resetChartState();
+
+        if (tierIndex < RHYTHM_SPEED_TIERS.length - 1) tierIndex++;
+        renderSpeedChip();
+
+        let count = 2;
+        countdownEl.textContent = "🔥 Ускорение! " + count;
+        countdownEl.classList.add("rhythm-countdown-show");
+        const iv = setInterval(() => {
+            count--;
+            if (count <= 0) {
+                clearInterval(iv);
+                countdownEl.classList.remove("rhythm-countdown-show");
+                audio.currentTime = 0;
+                audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
+                audio.play().catch(() => {});
+                paused = false;
+                rafId = requestAnimationFrame(loop);
+            } else {
+                countdownEl.textContent = "🔥 Ускорение! " + count;
+            }
+        }, 1000);
+    }
+
+    // Расстояние (px), которое тайл должен пройти от своей стартовой позиции
+    // (top: -40px в CSS) до линии удара — считаем один раз по факту вёрстки,
+    // чтобы прогресс=1 всегда совпадал с моментом note.time, а не проскакивал линию.
+    let tileTravelPx = null;
+    function getTileTravelPx() {
+        if (tileTravelPx !== null) return tileTravelPx;
+        const hitline = laneEls[0].querySelector(".rhythm-hitline");
+        const laneHeight = laneEls[0].clientHeight;
+        const hitlineTop = hitline ? hitline.offsetTop : laneHeight - 46;
+        tileTravelPx = hitlineTop + 40; // +40 компенсирует стартовый top:-40px тайла
+        return tileTravelPx;
+    }
+
+    function loop() {
+        if (gameOver || paused) return;
+        const t = audio.currentTime;
+        const travel = getTileTravelPx();
+
+        while (spawnCursor < chart.notes.length && chart.notes[spawnCursor].time - t <= LOOKAHEAD) {
+            const note = chart.notes[spawnCursor];
+            const el = document.createElement("div");
+            el.className = "rhythm-tile";
+            laneEls[note.lane].appendChild(el);
+            activeTiles.push({ note, el });
+            spawnCursor++;
+        }
+
+        for (let i = activeTiles.length - 1; i >= 0; i--) {
+            const { note, el } = activeTiles[i];
+            const progress = 1 - (note.time - t) / LOOKAHEAD;
+            const y = progress * travel;
+            el.style.transform = `translateY(${y}px)`;
+
+            if (!note.hit && !note.missed && (t - note.time) > MISS_CUTOFF) {
+                registerMiss(note);
+            }
+            if (note.hit || note.missed) {
+                el.remove();
+                activeTiles.splice(i, 1);
+            }
+        }
+
+        if (t >= chart.duration - 0.05) {
+            chart.notes.forEach(n => registerMiss(n)); // всё, что не успели ударить — в промах
+            if (!gameOver) advanceSpeedTierAndLoop();
+            return;
+        }
+
+        rafId = requestAnimationFrame(loop);
+    }
+
+    function tryHitLane(lane) {
+        if (gameOver || paused) return;
+        const t = audio.currentTime;
+        let bestNote = null, bestDiff = Infinity;
+        for (const note of chart.notes) {
+            if (note.hit || note.missed || note.lane !== lane) continue;
+            const diff = Math.abs(t - note.time);
+            if (diff <= MISS_CUTOFF && diff < bestDiff) { bestNote = note; bestDiff = diff; }
+        }
+
+        const keyEl = keyBtns[lane];
+        if (keyEl) {
+            keyEl.classList.add("rhythm-key-active");
+            setTimeout(() => keyEl.classList.remove("rhythm-key-active"), 120);
+        }
+
+        if (!bestNote) return; // мимо такта — без штрафа, просто ничего не происходит
+
+        bestNote.hit = true;
+        const isPerfect = bestDiff <= WINDOW_PERFECT;
+        combo++;
+        const multiplier = Math.min(4, 1 + Math.floor(combo / 10));
+        score += (isPerfect ? 300 : 100) * multiplier;
+        scoreEl.textContent = score;
+        popCombo();
+        showJudgement(isPerfect ? "ИДЕАЛЬНО" : "ХОРОШО", isPerfect ? "rhythm-judge-perfect" : "rhythm-judge-good");
+        playSound("point");
+    }
+
+    keyBtns.forEach((btn, i) => {
+        btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tryHitLane(i); });
+    });
+    function keyHandler(e) {
+        const idx = LANE_KEYS.indexOf(e.key.toUpperCase());
+        if (idx !== -1) tryHitLane(idx);
+    }
+    window.addEventListener("keydown", keyHandler);
+
+    showPlayOverlay(arena, () => {
+        paused = false;
+        audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
+        audio.play().catch(() => {});
+        rafId = requestAnimationFrame(loop);
+    });
+
+    activeGameCleanup = () => {
+        gameOver = true;
+        paused = true;
+        cancelAnimationFrame(rafId);
+        audio.pause();
+        window.removeEventListener("keydown", keyHandler);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
 }
 
