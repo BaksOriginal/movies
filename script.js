@@ -32,7 +32,7 @@ const STICKER_PREFIX = "[[STICKER]]"; // маркер стикера внутр�
 const GITHUB_RHYTHM_OWNER = "BaksOriginal";
 const GITHUB_RHYTHM_REPO = "movies";
 const GITHUB_RHYTHM_BRANCH = "main";
-const GITHUB_RHYTHM_PATH = "rhytm_game";
+const GITHUB_RHYTHM_PATH = "rhythm_game";
 
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
