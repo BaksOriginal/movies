@@ -6191,7 +6191,43 @@ async function startRhythmLevel(track) {
 
     const LOOKAHEAD = 1.1;      // сек (в шкале трека) — за сколько до удара тайл появляется сверху
     const WINDOW_PERFECT = 0.055;
-    const MISS_CUTOFF = 0.14;   // после этого промежутка нота засчитывается пропущенной
+
+    // Реальные размеры тайла зависят от ширины дорожки (в CSS задан aspect-ratio
+    // 1/3 — длина тайла всегда в 3 раза больше его ширины), поэтому меряем их
+    // один раз здесь, через невидимый тайл-зонд, сразу как только арена появилась
+    // в вёрстке. От этого зависит: (1) на сколько тайл прячем над ареной перед
+    // стартом, (2) сколько px он должен пройти, чтобы к моменту note.time его
+    // центр совпал с центром линии удара, (3) насколько широкое окно тайминга
+    // дать тапу — чем длиннее тайл (или шире экран), тем дольше он физически
+    // находится рядом с линией, и тап по нему должен засчитываться всё это время
+    // (иначе с длинными тайлами тапы по их верхней/нижней части не считывались бы).
+    const rhythmProbe = document.createElement("div");
+    rhythmProbe.className = "rhythm-tile";
+    rhythmProbe.style.visibility = "hidden";
+    rhythmProbe.style.top = "0px";
+    laneEls[0].appendChild(rhythmProbe);
+    const TILE_HEIGHT_PX = rhythmProbe.offsetHeight || 46;
+    rhythmProbe.remove();
+
+    const rhythmHitline = laneEls[0].querySelector(".rhythm-hitline");
+    const rhythmLaneHeight = laneEls[0].clientHeight;
+    const TILE_HITLINE_TOP = rhythmHitline ? rhythmHitline.offsetTop : rhythmLaneHeight - 46;
+    const TILE_HITLINE_HEIGHT = rhythmHitline ? rhythmHitline.offsetHeight : 3;
+    const TILE_TRAVEL_PX = TILE_HITLINE_TOP + TILE_HITLINE_HEIGHT / 2 + TILE_HEIGHT_PX / 2;
+    const TILE_SPEED_PX_PER_SEC = TILE_TRAVEL_PX / LOOKAHEAD;
+
+    // Половина времени, которое тайл физически проводит рядом с линией удара
+    // (пока хотя бы часть его длины перекрывает линию), плюс небольшой запас —
+    // само окно, за пределами которого нота считается пропущенной. Зажато
+    // снизу и сверху, чтобы не стать ни слишком жёстким, ни тривиально лёгким.
+    const MISS_CUTOFF = Math.min(0.4, Math.max(0.14, (TILE_HEIGHT_PX / 2) / TILE_SPEED_PX_PER_SEC + 0.05));
+
+    // Минимальный зазор по времени между двумя нотами на ОДНОЙ дорожке, при
+    // котором их тайлы ещё не наезжают друг на друга визуально — используется
+    // при спавне (см. resolveLaneForNote), чтобы разводить слишком тесные
+    // ноты по соседним дорожкам вместо наложения.
+    const MIN_LANE_GAP_SEC = TILE_HEIGHT_PX / TILE_SPEED_PX_PER_SEC;
+
     const START_LIVES = 3;
 
     let score = 0, combo = 0;
@@ -6284,44 +6320,33 @@ async function startRhythmLevel(track) {
         }, 1000);
     }
 
-    // Реальная высота тайла теперь зависит от ширины дорожки (в CSS задан
-    // aspect-ratio 1/3.5 — длина тайла всегда в 3.5 раза больше его ширины),
-    // поэтому меряем её один раз по факту вёрстки через невидимый тайл-зонд.
-    // travelPx считаем так, чтобы к моменту note.time именно ЦЕНТР тайла
-    // совпадал с центром линии удара — с длинными тайлами так удобнее целиться.
-    let tileMetrics = null;
-    function getTileMetrics() {
-        if (tileMetrics !== null) return tileMetrics;
-        const probe = document.createElement("div");
-        probe.className = "rhythm-tile";
-        probe.style.visibility = "hidden";
-        probe.style.top = "0px";
-        laneEls[0].appendChild(probe);
-        const heightPx = probe.offsetHeight || 46;
-        probe.remove();
-
-        const hitline = laneEls[0].querySelector(".rhythm-hitline");
-        const laneHeight = laneEls[0].clientHeight;
-        const hitlineTop = hitline ? hitline.offsetTop : laneHeight - 46;
-        const hitlineHeight = hitline ? hitline.offsetHeight : 3;
-
-        tileMetrics = {
-            heightPx,
-            travelPx: hitlineTop + hitlineHeight / 2 + heightPx / 2
-        };
-        return tileMetrics;
+    // Если на дорожке note.lane уже есть активный (не пойманный/пропущенный)
+    // тайл, который выйдет слишком близко по времени — тайлы наложатся друг
+    // на друга визуально, и более ранний окажется под более поздним, не
+    // ловя тапы. Разводим такую ноту на ближайшую свободную дорожку.
+    function resolveLaneForNote(note) {
+        const hasConflict = (lane) => activeTiles.some(a =>
+            a.note.lane === lane && !a.note.hit && !a.note.missed &&
+            Math.abs(a.note.time - note.time) < MIN_LANE_GAP_SEC
+        );
+        if (!hasConflict(note.lane)) return note.lane;
+        for (let offset = 1; offset < RHYTHM_LANES; offset++) {
+            const candidate = (note.lane + offset) % RHYTHM_LANES;
+            if (!hasConflict(candidate)) return candidate;
+        }
+        return note.lane; // все дорожки заняты — очень редкий случай, оставляем как есть
     }
 
     function loop() {
         if (gameOver || paused) return;
         const t = audio.currentTime;
-        const { heightPx, travelPx } = getTileMetrics();
 
         while (spawnCursor < chart.notes.length && chart.notes[spawnCursor].time - t <= LOOKAHEAD) {
             const note = chart.notes[spawnCursor];
+            note.lane = resolveLaneForNote(note);
             const el = document.createElement("div");
             el.className = "rhythm-tile";
-            el.style.top = (-heightPx) + "px"; // прячем тайл целиком над ареной перед стартом
+            el.style.top = (-TILE_HEIGHT_PX) + "px"; // прячем тайл целиком над ареной перед стартом
             // Попадание — прямым тапом/кликом по самому тайлу (мобильная игра,
             // без отдельных кнопок внизу). pointerdown, а не click — заметно
             // меньше задержка на тач-экранах. Тап именно по тайлу — точное
@@ -6339,7 +6364,7 @@ async function startRhythmLevel(track) {
         for (let i = activeTiles.length - 1; i >= 0; i--) {
             const { note, el } = activeTiles[i];
             const progress = 1 - (note.time - t) / LOOKAHEAD;
-            const y = progress * travelPx;
+            const y = progress * TILE_TRAVEL_PX;
             el.style.transform = `translateY(${y}px)`;
 
             if (!note.hit && !note.missed && (t - note.time) > MISS_CUTOFF) {
