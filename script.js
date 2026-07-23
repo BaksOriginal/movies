@@ -3856,7 +3856,6 @@ async function showGamesScreen() {
         </div>
         <div class="game-card rhythm-game-card">
             <div class="game-card-header">🎵 Ритм-Аркада</div>
-            <p class="rhythm-card-desc">Уровни строятся сами по любому треку из папки rhytm_game на GitHub — жми в такт, пока музыка не разгонится!</p>
             <button id="playRhythmBtn" class="btn-games-green">▶️ Играть</button>
         </div>
     `;
