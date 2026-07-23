@@ -6466,7 +6466,6 @@ async function startRhythmLevel(track) {
         scoreEl.textContent = score;
         popCombo();
         showJudgement(judgeText, judgeCls);
-        playSound("point");
     }
 
     function tryHitTile(note, el, onLine) {
