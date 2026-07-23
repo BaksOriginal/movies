@@ -6284,35 +6284,52 @@ async function startRhythmLevel(track) {
         }, 1000);
     }
 
-    // Расстояние (px), которое тайл должен пройти от своей стартовой позиции
-    // (top: -50px в CSS) до линии удара — считаем один раз по факту вёрстки,
-    // чтобы прогресс=1 всегда совпадал с моментом note.time, а не проскакивал линию.
-    let tileTravelPx = null;
-    function getTileTravelPx() {
-        if (tileTravelPx !== null) return tileTravelPx;
+    // Реальная высота тайла теперь зависит от ширины дорожки (в CSS задан
+    // aspect-ratio 1/3.5 — длина тайла всегда в 3.5 раза больше его ширины),
+    // поэтому меряем её один раз по факту вёрстки через невидимый тайл-зонд.
+    // travelPx считаем так, чтобы к моменту note.time именно ЦЕНТР тайла
+    // совпадал с центром линии удара — с длинными тайлами так удобнее целиться.
+    let tileMetrics = null;
+    function getTileMetrics() {
+        if (tileMetrics !== null) return tileMetrics;
+        const probe = document.createElement("div");
+        probe.className = "rhythm-tile";
+        probe.style.visibility = "hidden";
+        probe.style.top = "0px";
+        laneEls[0].appendChild(probe);
+        const heightPx = probe.offsetHeight || 46;
+        probe.remove();
+
         const hitline = laneEls[0].querySelector(".rhythm-hitline");
         const laneHeight = laneEls[0].clientHeight;
         const hitlineTop = hitline ? hitline.offsetTop : laneHeight - 46;
-        tileTravelPx = hitlineTop + 50; // +50 компенсирует стартовый top:-50px тайла
-        return tileTravelPx;
+        const hitlineHeight = hitline ? hitline.offsetHeight : 3;
+
+        tileMetrics = {
+            heightPx,
+            travelPx: hitlineTop + hitlineHeight / 2 + heightPx / 2
+        };
+        return tileMetrics;
     }
 
     function loop() {
         if (gameOver || paused) return;
         const t = audio.currentTime;
-        const travel = getTileTravelPx();
+        const { heightPx, travelPx } = getTileMetrics();
 
         while (spawnCursor < chart.notes.length && chart.notes[spawnCursor].time - t <= LOOKAHEAD) {
             const note = chart.notes[spawnCursor];
             const el = document.createElement("div");
             el.className = "rhythm-tile";
+            el.style.top = (-heightPx) + "px"; // прячем тайл целиком над ареной перед стартом
             // Попадание — прямым тапом/кликом по самому тайлу (мобильная игра,
             // без отдельных кнопок внизу). pointerdown, а не click — заметно
-            // меньше задержка на тач-экранах.
+            // меньше задержка на тач-экранах. Тап именно по тайлу — точное
+            // попадание "по линии" (больше очков, см. tryHitTile/registerHit).
             el.addEventListener("pointerdown", (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                tryHitTile(note, el);
+                tryHitTile(note, el, true);
             });
             laneEls[note.lane].appendChild(el);
             activeTiles.push({ note, el });
@@ -6322,7 +6339,7 @@ async function startRhythmLevel(track) {
         for (let i = activeTiles.length - 1; i >= 0; i--) {
             const { note, el } = activeTiles[i];
             const progress = 1 - (note.time - t) / LOOKAHEAD;
-            const y = progress * travel;
+            const y = progress * travelPx;
             el.style.transform = `translateY(${y}px)`;
 
             if (!note.hit && !note.missed && (t - note.time) > MISS_CUTOFF) {
@@ -6343,27 +6360,40 @@ async function startRhythmLevel(track) {
         rafId = requestAnimationFrame(loop);
     }
 
-    // Основной способ попадания на телефоне — тап прямо по тайлу-ноте
-    // (вешается на каждый тайл при спавне в loop(), см. выше).
-    function registerHit(note, diff) {
+    // Попадание засчитывается двумя способами: тап прямо по тайлу-ноте
+    // (onLine=true — точный тап "по линии", вешается на каждый тайл при
+    // спавне в loop() выше) и тап в любом другом месте экрана (onLine=false,
+    // см. handleAnywhereTap ниже) — тот тоже засчитывается, но приносит
+    // меньше очков, чем точное попадание по тайлу.
+    function registerHit(note, diff, onLine) {
         note.hit = true;
-        const isPerfect = diff <= WINDOW_PERFECT;
         combo++;
         const multiplier = Math.min(4, 1 + Math.floor(combo / 10));
-        score += (isPerfect ? 300 : 100) * multiplier;
+        let base, judgeText, judgeCls;
+        if (onLine) {
+            const isPerfect = diff <= WINDOW_PERFECT;
+            base = isPerfect ? 300 : 100;
+            judgeText = isPerfect ? "ИДЕАЛЬНО" : "ХОРОШО";
+            judgeCls = isPerfect ? "rhythm-judge-perfect" : "rhythm-judge-good";
+        } else {
+            base = 60;
+            judgeText = "ЕСТЬ";
+            judgeCls = "rhythm-judge-anywhere";
+        }
+        score += base * multiplier;
         scoreEl.textContent = score;
         popCombo();
-        showJudgement(isPerfect ? "ИДЕАЛЬНО" : "ХОРОШО", isPerfect ? "rhythm-judge-perfect" : "rhythm-judge-good");
+        showJudgement(judgeText, judgeCls);
         playSound("point");
     }
 
-    function tryHitTile(note, el) {
+    function tryHitTile(note, el, onLine) {
         if (gameOver || paused) return;
         if (note.hit || note.missed) return;
         const diff = Math.abs(audio.currentTime - note.time);
         if (diff > MISS_CUTOFF) return; // тайл ещё далеко от такта — тап без эффекта
 
-        registerHit(note, diff);
+        registerHit(note, diff, onLine);
 
         // Убираем тайл из общего цикла отрисовки сразу (иначе loop() тут же
         // удалит его как "note.hit" за один кадр), но даём короткому
@@ -6377,6 +6407,31 @@ async function startRhythmLevel(track) {
         setTimeout(() => el.remove(), 180);
     }
 
+    // Ближайшая по времени активная (ещё не пойманная и не пропущенная) нота —
+    // среди ВСЕХ дорожек. Используется тапами в любом месте экрана.
+    function findNearestActiveNote() {
+        const t = audio.currentTime;
+        let best = null, bestDiff = Infinity;
+        for (const entry of activeTiles) {
+            if (entry.note.hit || entry.note.missed) continue;
+            const diff = Math.abs(t - entry.note.time);
+            if (diff <= MISS_CUTOFF && diff < bestDiff) { bestDiff = diff; best = entry; }
+        }
+        return best;
+    }
+
+    // Тап в любом месте экрана (не по самому тайлу) — засчитывается по
+    // ближайшей активной ноте, чтобы не нужно было точно попадать по тайлу.
+    // Срабатывает только если тап не был уже обработан самим тайлом — у его
+    // обработчика стоит e.stopPropagation(), так что до сюда он не доходит.
+    function handleAnywhereTap() {
+        if (gameOver || paused) return;
+        const entry = findNearestActiveNote();
+        if (!entry) return; // рядом ничего не звучит — тап просто без эффекта
+        tryHitTile(entry.note, entry.el, false);
+    }
+    wrap.addEventListener("pointerdown", handleAnywhereTap);
+
     // Резервный способ — физическая клавиатура (для тестирования на десктопе).
     // Бьёт по ближайшей по времени ноте в соответствующей дорожке.
     function tryHitLane(lane) {
@@ -6389,7 +6444,7 @@ async function startRhythmLevel(track) {
             if (diff <= MISS_CUTOFF && diff < bestDiff) { bestNote = note; bestDiff = diff; }
         }
         if (!bestNote) return; // мимо такта — без штрафа, просто ничего не происходит
-        registerHit(bestNote, bestDiff);
+        registerHit(bestNote, bestDiff, true);
     }
 
     function keyHandler(e) {
