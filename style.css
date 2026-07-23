@@ -1569,10 +1569,18 @@ body.dark-theme .btn-filter-icon.active {
     will-change: transform;
     touch-action: none;
     cursor: pointer;
-    transition: transform 0.18s ease, opacity 0.18s ease;
+    /* transition ПЕРЕЕХАЛ в .rhythm-tile-hit — см. комментарий там */
 }
 .rhythm-tile-hit {
     pointer-events: none; /* защита от повторного тапа, пока доигрывает анимация */
+    /* Transition только для "попа" при попадании (scale+fade в tryHitTile).
+       Раньше он висел на базовом .rhythm-tile и ловил КАЖДОЕ обновление
+       style.transform в игровом цикле loop() (~60 раз/сек, translateY для
+       падения тайла). Из-за этого каждое положение начинало доигрывать
+       0.18s ease-переход к следующему, толком не успевая — тайлы визуально
+       "тормозили"/тянулись друг за другом и на глаз выглядели слипшимися
+       кучкой сверху, вместо ровного одиночного падения по дорожке. */
+    transition: transform 0.18s ease, opacity 0.18s ease;
 }
 
 .rhythm-hitline {
