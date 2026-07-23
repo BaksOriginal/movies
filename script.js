@@ -5966,6 +5966,9 @@ const RHYTHM_LANES = 4;
 // Максимум 4 ступени ускорения: обычный темп, затем 3 разгона после каждого
 // полного проигрывания трека (см. advanceSpeedTierAndLoop).
 const RHYTHM_SPEED_TIERS = [1.0, 1.15, 1.3, 1.5];
+// Первые 2 секунды трека — без нот: время оглядеться и приготовиться,
+// вместо того чтобы бить по такту с первой же секунды.
+const RHYTHM_START_GAP_SEC = 2.0;
 
 // Строит карту нот прямо по декодированному аудио — простой энергетический
 // onset-детектор (ищем резкие всплески громкости относительно локального
@@ -6024,7 +6027,7 @@ function buildBeatmapFromAudioBuffer(audioBuffer, seedKey) {
         const threshold = localMean * 1.6 + 0.002;
 
         const isPeak = flux[w] > threshold && flux[w] >= flux[w - 1] && flux[w] >= flux[w + 1];
-        if (isPeak && (w - lastPickW) >= minGap) {
+        if (isPeak && times[w] >= RHYTHM_START_GAP_SEC && (w - lastPickW) >= minGap) {
             let lane = Math.floor(rng() * RHYTHM_LANES);
             if (lane === lastLane) {
                 sameLaneStreak++;
@@ -6282,7 +6285,7 @@ async function startRhythmLevel(track) {
     }
 
     // Расстояние (px), которое тайл должен пройти от своей стартовой позиции
-    // (top: -40px в CSS) до линии удара — считаем один раз по факту вёрстки,
+    // (top: -50px в CSS) до линии удара — считаем один раз по факту вёрстки,
     // чтобы прогресс=1 всегда совпадал с моментом note.time, а не проскакивал линию.
     let tileTravelPx = null;
     function getTileTravelPx() {
@@ -6290,7 +6293,7 @@ async function startRhythmLevel(track) {
         const hitline = laneEls[0].querySelector(".rhythm-hitline");
         const laneHeight = laneEls[0].clientHeight;
         const hitlineTop = hitline ? hitline.offsetTop : laneHeight - 46;
-        tileTravelPx = hitlineTop + 40; // +40 компенсирует стартовый top:-40px тайла
+        tileTravelPx = hitlineTop + 50; // +50 компенсирует стартовый top:-50px тайла
         return tileTravelPx;
     }
 
