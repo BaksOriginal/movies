@@ -737,6 +737,15 @@ button:nth-child(6){
     line-height: 0; /* убирает лишний зазор под canvas как у инлайн-элемента */
 }
 
+/* Модификатор для игр, где вместо <canvas> используется div с CSS-шириной
+   (например, ритм-аркада) — обычный inline-block тут схлопывает ширину,
+   т.к. width:100% ребёнка не может резолвиться от auto-ширины родителя. */
+.game-canvas-wrap-fluid {
+    display: block;
+    width: 100%;
+    line-height: normal;
+}
+
 .game-start-overlay {
     position: absolute;
     inset: 0;
@@ -746,6 +755,12 @@ button:nth-child(6){
     background: rgba(20, 8, 22, 0.55);
     border-radius: 10px; /* совпадает с радиусом .game-canvas */
     animation: gameOverlayFadeIn 0.15s ease;
+}
+
+/* У ритм-арены скругление 16px (см. .rhythm-arena), а не 10px, как у canvas
+   остальных игр — иначе по углам будет проглядывать фон арены. */
+.game-canvas-wrap-fluid .game-start-overlay {
+    border-radius: 16px;
 }
 
 @keyframes gameOverlayFadeIn {
@@ -1553,6 +1568,12 @@ body.dark-theme .btn-filter-icon.active {
     top: -40px;
     border-radius: 8px;
     will-change: transform;
+    touch-action: none;
+    cursor: pointer;
+    transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.rhythm-tile-hit {
+    pointer-events: none; /* защита от повторного тапа, пока доигрывает анимация */
 }
 
 .rhythm-hitline {

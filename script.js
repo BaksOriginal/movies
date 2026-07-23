@@ -3788,7 +3788,12 @@ function showPlayOverlay(canvas, onPlay) {
     let holder = canvas.parentElement;
     if (!holder || !holder.classList.contains("game-canvas-wrap")) {
         holder = document.createElement("div");
-        holder.className = "game-canvas-wrap";
+        // .game-canvas-wrap рассчитан на настоящий <canvas> с "внутренним" пиксельным
+        // размером (inline-block аккуратно сжимается по нему). В ритм-игре сюда
+        // приходит div с шириной через CSS (width:100%) — для него добавляем
+        // модификатор -fluid, иначе inline-block+width:100% дают циклическую
+        // неопределённость ширины, и арена схлопывается в тонкую полоску.
+        holder.className = "game-canvas-wrap" + (canvas.tagName !== "CANVAS" ? " game-canvas-wrap-fluid" : "");
         canvas.parentNode.insertBefore(holder, canvas);
         holder.appendChild(canvas);
     }
@@ -6162,10 +6167,11 @@ async function startRhythmLevel(track) {
             <div class="rhythm-judgement" id="rhythmJudgement"></div>
             <div class="rhythm-countdown" id="rhythmCountdown"></div>
         </div>
-        <div class="rhythm-keys">
-            ${LANE_KEYS.map((k, i) => `<button type="button" class="rhythm-key" data-lane="${i}">${k}</button>`).join("")}
-        </div>
     `;
+    // Ряд кнопок D/F/J/K под ареной убран — игра заточена под телефон, и
+    // попадание по ноте теперь происходит тапом прямо по самому тайлу
+    // (см. tryHitTile ниже), а не по фиксированной кнопке снизу.
+    // LANE_KEYS оставлен только для физической клавиатуры (десктоп, см. keyHandler).
 
     const arena = wrap.querySelector("#rhythmArena");
     const laneEls = Array.from(wrap.querySelectorAll(".rhythm-lane"));
@@ -6175,7 +6181,6 @@ async function startRhythmLevel(track) {
     const livesEl = wrap.querySelector("#rhythmLives");
     const judgementEl = wrap.querySelector("#rhythmJudgement");
     const countdownEl = wrap.querySelector("#rhythmCountdown");
-    const keyBtns = Array.from(wrap.querySelectorAll(".rhythm-key"));
 
     const audio = new Audio();
     audio.src = objectUrl;
@@ -6298,6 +6303,14 @@ async function startRhythmLevel(track) {
             const note = chart.notes[spawnCursor];
             const el = document.createElement("div");
             el.className = "rhythm-tile";
+            // Попадание — прямым тапом/кликом по самому тайлу (мобильная игра,
+            // без отдельных кнопок внизу). pointerdown, а не click — заметно
+            // меньше задержка на тач-экранах.
+            el.addEventListener("pointerdown", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                tryHitTile(note, el);
+            });
             laneEls[note.lane].appendChild(el);
             activeTiles.push({ note, el });
             spawnCursor++;
@@ -6327,26 +6340,11 @@ async function startRhythmLevel(track) {
         rafId = requestAnimationFrame(loop);
     }
 
-    function tryHitLane(lane) {
-        if (gameOver || paused) return;
-        const t = audio.currentTime;
-        let bestNote = null, bestDiff = Infinity;
-        for (const note of chart.notes) {
-            if (note.hit || note.missed || note.lane !== lane) continue;
-            const diff = Math.abs(t - note.time);
-            if (diff <= MISS_CUTOFF && diff < bestDiff) { bestNote = note; bestDiff = diff; }
-        }
-
-        const keyEl = keyBtns[lane];
-        if (keyEl) {
-            keyEl.classList.add("rhythm-key-active");
-            setTimeout(() => keyEl.classList.remove("rhythm-key-active"), 120);
-        }
-
-        if (!bestNote) return; // мимо такта — без штрафа, просто ничего не происходит
-
-        bestNote.hit = true;
-        const isPerfect = bestDiff <= WINDOW_PERFECT;
+    // Основной способ попадания на телефоне — тап прямо по тайлу-ноте
+    // (вешается на каждый тайл при спавне в loop(), см. выше).
+    function registerHit(note, diff) {
+        note.hit = true;
+        const isPerfect = diff <= WINDOW_PERFECT;
         combo++;
         const multiplier = Math.min(4, 1 + Math.floor(combo / 10));
         score += (isPerfect ? 300 : 100) * multiplier;
@@ -6356,9 +6354,41 @@ async function startRhythmLevel(track) {
         playSound("point");
     }
 
-    keyBtns.forEach((btn, i) => {
-        btn.addEventListener("pointerdown", (e) => { e.preventDefault(); tryHitLane(i); });
-    });
+    function tryHitTile(note, el) {
+        if (gameOver || paused) return;
+        if (note.hit || note.missed) return;
+        const diff = Math.abs(audio.currentTime - note.time);
+        if (diff > MISS_CUTOFF) return; // тайл ещё далеко от такта — тап без эффекта
+
+        registerHit(note, diff);
+
+        // Убираем тайл из общего цикла отрисовки сразу (иначе loop() тут же
+        // удалит его как "note.hit" за один кадр), но даём короткому
+        // transition (см. CSS .rhythm-tile) доиграть "поп" ровно с той
+        // позиции, где тайл был в момент тапа — без прыжка.
+        const idx = activeTiles.findIndex(a => a.note === note);
+        if (idx !== -1) activeTiles.splice(idx, 1);
+        el.classList.add("rhythm-tile-hit");
+        el.style.transform = (el.style.transform || "") + " scale(1.4)";
+        el.style.opacity = "0";
+        setTimeout(() => el.remove(), 180);
+    }
+
+    // Резервный способ — физическая клавиатура (для тестирования на десктопе).
+    // Бьёт по ближайшей по времени ноте в соответствующей дорожке.
+    function tryHitLane(lane) {
+        if (gameOver || paused) return;
+        const t = audio.currentTime;
+        let bestNote = null, bestDiff = Infinity;
+        for (const note of chart.notes) {
+            if (note.hit || note.missed || note.lane !== lane) continue;
+            const diff = Math.abs(t - note.time);
+            if (diff <= MISS_CUTOFF && diff < bestDiff) { bestNote = note; bestDiff = diff; }
+        }
+        if (!bestNote) return; // мимо такта — без штрафа, просто ничего не происходит
+        registerHit(bestNote, bestDiff);
+    }
+
     function keyHandler(e) {
         const idx = LANE_KEYS.indexOf(e.key.toUpperCase());
         if (idx !== -1) tryHitLane(idx);
