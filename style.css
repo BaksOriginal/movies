@@ -1564,9 +1564,9 @@ body.dark-theme .btn-filter-icon.active {
     position: absolute;
     left: 12%;
     width: 76%;
-    height: 32px;
-    top: -40px;
-    border-radius: 8px;
+    height: 46px;
+    top: -50px;
+    border-radius: 10px;
     will-change: transform;
     touch-action: none;
     cursor: pointer;
@@ -1657,5 +1657,5 @@ body.dark-theme .btn-filter-icon.active {
 
 @media (max-width: 380px) {
     .rhythm-arena { height: 52vh; min-height: 280px; }
-    .rhythm-tile { height: 28px; }
+    .rhythm-tile { height: 40px; }
 }
