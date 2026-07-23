@@ -34,6 +34,57 @@ const GITHUB_RHYTHM_REPO = "movies";
 const GITHUB_RHYTHM_BRANCH = "main";
 const GITHUB_RHYTHM_PATH = "rhythm_game";
 
+// ==========================================
+// АКТУАЛЬНЫЙ SHA ВЕТКИ (обход кэша jsDelivr по "@branch")
+// ==========================================
+// jsDelivr кэширует ответы по "@main" с заметной задержкой (листинг файлов
+// может не обновляться часами после коммита, а ручного Purge для листинга
+// data.jsdelivr.com не существует). Ответы же по конкретному commit SHA
+// иммутабельны — такой кэш не может "протухнуть": либо там сразу верные
+// данные, либо jsDelivr ещё не видел этот SHA и сходит за ним заново.
+//
+// Поэтому вместо "@main" в URL к data.jsdelivr.com/cdn.jsdelivr.net
+// подставляем SHA текущего HEAD ветки. Сам SHA берём с api.github.com —
+// это единственное место, где мы всё ещё используем GitHub API напрямую
+// (легкий запрос refs/heads, не листинг файлов), и кэшируем результат в
+// localStorage на SHA_CACHE_TTL_MS, чтобы не тратить его лимит (60 запросов
+// в час на IP) при каждом заходе пользователя на сайт.
+const SHA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 минут
+
+async function getGithubBranchSha(owner, repo, branch) {
+    const cacheKey = `ghSha:${owner}/${repo}@${branch}`;
+    try {
+        const cachedRaw = localStorage.getItem(cacheKey);
+        if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            if (cached && cached.sha && (Date.now() - cached.savedAt) < SHA_CACHE_TTL_MS) {
+                return cached.sha;
+            }
+        }
+    } catch (e) { /* битый кэш в localStorage — просто идём за свежим SHA */ }
+
+    try {
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`);
+        if (!res.ok) throw new Error("GitHub API вернул статус " + res.status);
+        const json = await res.json();
+        const sha = json && json.object && json.object.sha;
+        if (!sha) throw new Error("Не удалось получить SHA ветки из ответа GitHub API");
+
+        try {
+            localStorage.setItem(cacheKey, JSON.stringify({ sha, savedAt: Date.now() }));
+        } catch (e) { /* localStorage недоступен/переполнен — не критично, просто не кэшируем */ }
+
+        return sha;
+    } catch (e) {
+        // Не удалось получить SHA (лимит GitHub API исчерпан, сеть и т.п.) —
+        // откатываемся на имя ветки напрямую, как было раньше. Это безопасный
+        // фолбэк: просто возвращается риск устаревшего кэша jsDelivr, без
+        // поломки сайта.
+        console.error(`Не удалось получить актуальный SHA ветки ${owner}/${repo}@${branch}, используем branch напрямую:`, e);
+        return branch;
+    }
+}
+
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
 // Раньше здесь была функция startTransitionLock(), которая на 350мс блокировала
@@ -1683,7 +1734,10 @@ async function fetchStickerList() {
     // стикеры и треки делили один бюджет и могли "гасить" друг друга. Переходим
     // на jsDelivr, у него лимиты намного мягче.
     try {
-        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}@${GITHUB_STICKERS_BRANCH}?structure=flat`;
+        // SHA вместо имени ветки — см. комментарий у getGithubBranchSha() —
+        // чтобы листинг и сами файлы не зависели от протухшего кэша "@main".
+        const ref = await getGithubBranchSha(GITHUB_STICKERS_OWNER, GITHUB_STICKERS_REPO, GITHUB_STICKERS_BRANCH);
+        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}@${ref}?structure=flat`;
         const res = await fetch(apiUrl);
         if (!res.ok) throw new Error("jsDelivr API вернул статус " + res.status);
         const json = await res.json();
@@ -1698,7 +1752,7 @@ async function fetchStickerList() {
                 const encodedPath = f.name.split("/").map(encodeURIComponent).join("/");
                 return {
                     name: f.name.slice(prefix.length),
-                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}@${GITHUB_STICKERS_BRANCH}${encodedPath}`
+                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_STICKERS_OWNER}/${GITHUB_STICKERS_REPO}@${ref}${encodedPath}`
                 };
             });
 
@@ -5851,7 +5905,10 @@ async function fetchRhythmTrackList(forceRefresh = false) {
     // с гораздо более мягкими лимитами и без токена. Он же отдаёт и сами
     // .ogg-файлы (быстрее и без нагрузки на GitHub).
     try {
-        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${GITHUB_RHYTHM_BRANCH}?structure=flat`;
+        // SHA вместо имени ветки — см. комментарий у getGithubBranchSha() —
+        // чтобы листинг и сами файлы не зависели от протухшего кэша "@main".
+        const ref = await getGithubBranchSha(GITHUB_RHYTHM_OWNER, GITHUB_RHYTHM_REPO, GITHUB_RHYTHM_BRANCH);
+        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${ref}?structure=flat`;
         const res = await fetch(apiUrl);
         if (!res.ok) throw new Error("jsDelivr API вернул статус " + res.status);
         const json = await res.json();
@@ -5870,7 +5927,7 @@ async function fetchRhythmTrackList(forceRefresh = false) {
                 return {
                     key: fileName, // стабильный ID трека — используется как primary key в БД
                     label: fileName.replace(oggExtRe, "").replace(/[_-]+/g, " ").trim(),
-                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${GITHUB_RHYTHM_BRANCH}${encodedPath}`
+                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${ref}${encodedPath}`
                 };
             })
             .sort((a, b) => a.label.localeCompare(b.label, "ru"));
