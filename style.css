@@ -1564,7 +1564,7 @@ body.dark-theme .btn-filter-icon.active {
     position: absolute;
     left: 12%;
     width: 76%;
-    aspect-ratio: 1 / 3.5; /* длина тайла = 3.5 его ширины, для любого размера экрана */
+    aspect-ratio: 1 / 3; /* длина тайла = 3 его ширины, для любого размера экрана */
     border-radius: 10px;
     will-change: transform;
     touch-action: none;
