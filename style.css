@@ -1538,9 +1538,9 @@ body.dark-theme .btn-filter-icon.active {
 .rhythm-arena {
     position: relative;
     width: 100%;
-    height: 58vh;
-    max-height: 440px;
-    min-height: 320px;
+    height: 70vh;
+    max-height: 560px;
+    min-height: 400px;
     background: radial-gradient(ellipse at 50% 0%, #200f38 0%, #0a0614 75%);
     border-radius: 16px;
     display: flex;
@@ -1564,8 +1564,7 @@ body.dark-theme .btn-filter-icon.active {
     position: absolute;
     left: 12%;
     width: 76%;
-    height: 46px;
-    top: -50px;
+    aspect-ratio: 1 / 3.5; /* длина тайла = 3.5 его ширины, для любого размера экрана */
     border-radius: 10px;
     will-change: transform;
     touch-action: none;
@@ -1605,6 +1604,7 @@ body.dark-theme .btn-filter-icon.active {
 .rhythm-judge-perfect { color: #7cf7ff; text-shadow: 0 0 12px rgba(124,247,255,0.9); }
 .rhythm-judge-good { color: #ffd740; text-shadow: 0 0 12px rgba(255,215,64,0.85); }
 .rhythm-judge-miss { color: #ff5470; text-shadow: 0 0 12px rgba(255,84,112,0.85); }
+.rhythm-judge-anywhere { color: #8ef0c0; text-shadow: 0 0 12px rgba(142,240,192,0.85); }
 
 .rhythm-countdown {
     position: absolute; inset: 0;
@@ -1656,6 +1656,5 @@ body.dark-theme .btn-filter-icon.active {
 }
 
 @media (max-width: 380px) {
-    .rhythm-arena { height: 52vh; min-height: 280px; }
-    .rhythm-tile { height: 40px; }
+    .rhythm-arena { height: 62vh; min-height: 360px; }
 }
