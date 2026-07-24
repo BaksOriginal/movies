@@ -495,15 +495,23 @@ button:nth-child(6){
 
 .movie-time-inner {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: center;
     white-space: nowrap;
-    min-height: 1.3em;
+    /* Фиксированная высота (под максимальный размер шрифта 30px из JS) —
+       когда fitPlateText() уменьшает шрифт под длинную фразу, высота
+       плашки (и всего, что ниже неё на странице) не меняется ни на пиксель.
+       Раньше здесь стояло "1.3em", но это "em" считался от НЕ заданного на
+       этом элементе font-size (т.е. наследовался от родителя, а не от
+       реального размера текста внутри) — из-за этого блок не держал форму
+       и весь сайт "дёргался" при смене шрифта. */
+    height: 42px;
 }
 
 .movie-time-text {
     display: inline-block;
     white-space: nowrap;
+    line-height: 1;
     font-size: 30px;
     font-weight: 900;
     color: #ffffff;
@@ -513,6 +521,7 @@ button:nth-child(6){
 
 .movie-time-cursor {
     display: inline-block;
+    line-height: 1;
     font-size: 30px;
     font-weight: 700;
     color: #ffffff;
