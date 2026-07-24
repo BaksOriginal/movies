@@ -203,9 +203,6 @@ let isChatScreenOpen = false;
 let chatPollInterval = null;
 let chatReplyTarget = null; // Сообщение, на которое сейчас отвечаем (или null)
 
-// Состояние тёмной темы (сохраняется за пользователем)
-let isDarkTheme = false;
-
 // Переменная, хранящая название текущей открытой категории первого уровня ("🎥 Фильмы" и т.д.)
 let currentCategoryName = null; 
 
@@ -297,7 +294,6 @@ db.auth.onAuthStateChange(async (event, session) => {
         isAppInitialized = true;
         
         // Загружаем списки просмотренного, вишлиста и оценок одним запросом
-        loadThemePreference();
         loadUserDataFromDB().then(() => {
             subscribeToChanges(); 
             
@@ -323,7 +319,6 @@ db.auth.onAuthStateChange(async (event, session) => {
         chatMessages = [];
         isChatScreenOpen = false;
         isAppInitialized = false;
-        applyDarkTheme(false);
         saveSessionBackup(null);
         
         if (realtimeChannel) {
@@ -459,86 +454,6 @@ async function loadWishlistFromDB() {
 // Проверка: относится ли категория к "секретным" (исключаются из фильтров и поиска)
 function isSecretCategory(catKey) {
     return catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️");
-}
-
-// =======================================================
-// ТЁМНАЯ ТЕМА (доступна из секретной категории, сохраняется за пользователем)
-// =======================================================
-
-// Применяет/снимает класс тёмной темы с тела страницы
-function applyDarkTheme(enabled) {
-    isDarkTheme = enabled;
-    document.body.classList.toggle("dark-theme", enabled);
-}
-
-// Загружает сохранённую пользователем тему из базы (с мгновенным кэшем в localStorage,
-// чтобы тема не "мигала" при повторном открытии сайта до ответа сервера)
-async function loadThemePreference() {
-    if (!currentUser) return;
-
-    const cacheKey = "darkTheme_" + currentUser.id;
-    const cached = localStorage.getItem(cacheKey);
-    if (cached !== null) {
-        applyDarkTheme(cached === "true");
-    }
-
-    const { data, error } = await db
-        .from('user_settings')
-        .select('dark_theme')
-        .eq('user_id', currentUser.id)
-        .maybeSingle();
-
-    if (error) {
-        console.error("Ошибка при загрузке настроек темы:", error);
-        return;
-    }
-
-    const enabled = !!(data && data.dark_theme);
-    applyDarkTheme(enabled);
-    localStorage.setItem(cacheKey, String(enabled));
-}
-
-// Сохраняет выбор темы в базу и в локальный кэш
-async function saveThemePreference(enabled) {
-    if (!currentUser) return;
-    applyDarkTheme(enabled);
-    localStorage.setItem("darkTheme_" + currentUser.id, String(enabled));
-
-    const { error } = await db.from('user_settings').upsert(
-        { user_id: currentUser.id, dark_theme: enabled },
-        { onConflict: 'user_id' }
-    );
-    if (error) {
-        console.error("Ошибка при сохранении темы:", error);
-    }
-}
-
-// Строит переключатель тёмной темы для секретной категории
-function buildThemeToggle() {
-    let row = document.createElement("div");
-    row.className = "theme-toggle-row";
-
-    let label = document.createElement("span");
-    label.className = "theme-toggle-label";
-    label.textContent = "🌙 Режим Эчпочмони";
-
-    let switchLabel = document.createElement("label");
-    switchLabel.className = "theme-switch";
-
-    let checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = isDarkTheme;
-    checkbox.onchange = () => saveThemePreference(checkbox.checked);
-
-    let slider = document.createElement("span");
-    slider.className = "theme-switch-slider";
-
-    switchLabel.appendChild(checkbox);
-    switchLabel.appendChild(slider);
-
-    row.appendChild(label);
-    row.appendChild(switchLabel);
-    return row;
 }
 
 // Загрузка оценок (видны обе оценки — и Asmoday, и Myakish)
@@ -2481,14 +2396,6 @@ function openData(content, saveHistory = true, customTitle = null) {
         countFooter.className = "count-footer";
         countFooter.textContent = `Всего тайтлов: ${totalTitlesCount}`;
         app.appendChild(countFooter);
-    }
-
-    // Тумблер тёмной темы — только на самом верхнем экране категории "Секрет"
-    // (history.length === 1 сразу после клика по кнопке категории на главной),
-    // а не в её подкатегориях/жанрах ниже по дереву
-    const isTopLevelOfSecretCategory = isInSecretCategory && history.length === 1;
-    if (isTopLevelOfSecretCategory && currentUser) {
-        app.appendChild(buildThemeToggle());
     }
 
     addNavigation();
@@ -6725,8 +6632,8 @@ function initHeartsBackground() {
     function spawnHeart() {
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
-        // В режиме Эчпочмони сердечки заменяются на озорной эмодзи 😈
-        heart.innerHTML = isDarkTheme ? '😈' : '❤️';
+        // Сайт всегда в режиме Эчпочмони
+        heart.innerHTML = '😈';
 
         // Рандомизируем параметры для живого и естественного эффекта
         const size = Math.random() * 18 + 12; // Размер от 12px до 30px
@@ -6829,26 +6736,26 @@ style.textContent = `
 
     /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
     .btn-pink-style {
-        background-color: #ffe3ec !important;
-        color: #d81b60 !important;
+        background-color: #4a2233 !important;
+        color: #ffb3cf !important;
         border: none !important;
         font-weight: 600 !important;
         transition: background-color 0.2s ease, transform 0.1s ease;
     }
     .btn-pink-style:hover {
-        background-color: #ffd5e3 !important;
+        background-color: #5a2b3f !important;
     }
 
     /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
     .btn-cancel-gray {
-        background-color: #f0f0f0 !important;
-        color: #333333 !important;
+        background-color: #2b2233 !important;
+        color: #d8cede !important;
         border: none !important;
         font-weight: 600 !important;
         transition: background-color 0.2s ease;
     }
     .btn-cancel-gray:hover {
-        background-color: #e5e5e5 !important;
+        background-color: #362b40 !important;
     }
 `;
 document.head.appendChild(style);
