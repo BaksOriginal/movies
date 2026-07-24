@@ -1363,6 +1363,23 @@ function showFilterModal(onFiltersChanged) {
 // Фразы печатаются посимвольно (как ввод текста), немного "стоят" уже
 // напечатанными, затем стираются с конца — и так по кругу.
 const HERO_PHRASES = ["Время Кино 🎬", "Что посмотрим? 👀", "Попкорн-тайм! 🍿", "Эчпочмоня 😈", "Люблю Тебя! ❤"];
+
+// Эмодзи (и вообще многие символы вроде флагов/составных эмодзи) в JS-строке
+// занимают больше одной "единицы": слайс строки по .slice(0, N) может
+// разрезать эмодзи ровно пополам — и на один кадр анимации браузер рисует
+// вместо целого эмодзи "битый" символ (ромбик с "?"). Чтобы печатать/стирать
+// строго по целым видимым символам, разбиваем фразу на графемы через
+// Intl.Segmenter (с фолбэком на Array.from для старых браузеров — тот хотя
+// бы не бьёт пары суррогатов, даже если не всегда идеально группирует
+// составные эмодзи).
+function splitIntoGraphemes(str) {
+    if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+        const segmenter = new Intl.Segmenter("ru", { granularity: "grapheme" });
+        return Array.from(segmenter.segment(str), (s) => s.segment);
+    }
+    return Array.from(str);
+}
+const HERO_PHRASE_GRAPHEMES = HERO_PHRASES.map(splitIntoGraphemes);
 let heroTypewriterTimer = null;
 
 function startHeroTypewriter(textEl) {
@@ -1408,13 +1425,13 @@ function startHeroTypewriter(textEl) {
         // останавливаемся, чтобы не тикать вхолостую в фоне вечно.
         if (!document.body.contains(textEl)) { heroTypewriterTimer = null; return; }
 
-        const phrase = HERO_PHRASES[phraseIndex];
+        const graphemes = HERO_PHRASE_GRAPHEMES[phraseIndex];
 
         if (mode === "typing") {
             charIndex++;
-            textEl.textContent = phrase.slice(0, charIndex);
+            textEl.textContent = graphemes.slice(0, charIndex).join("");
             fitPlateText();
-            if (charIndex >= phrase.length) {
+            if (charIndex >= graphemes.length) {
                 mode = "holding";
                 heroTypewriterTimer = setTimeout(tick, HOLD_MS);
             } else {
@@ -1425,7 +1442,7 @@ function startHeroTypewriter(textEl) {
             heroTypewriterTimer = setTimeout(tick, DELETE_MS);
         } else if (mode === "deleting") {
             charIndex--;
-            textEl.textContent = phrase.slice(0, charIndex);
+            textEl.textContent = graphemes.slice(0, charIndex).join("");
             fitPlateText();
             if (charIndex <= 0) {
                 mode = "gap";
