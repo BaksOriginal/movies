@@ -434,15 +434,102 @@ button:nth-child(6){
     color: white;
 }
 
-/* Шапка пользователя на главном экране */
+/* ==========================================
+   HERO-BAR: шапка пользователя + анимированная плашка заголовка
+   на главном экране. У блока всегда свой собственный тёмный
+   градиентный фон — поэтому текст внутри задан фиксированными
+   контрастными цветами и не зависит от светлой/тёмной темы сайта.
+   ========================================== */
+.hero-bar {
+    max-width: 500px;
+    margin: 0 auto 18px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #241a35, #150f22 65%);
+    box-shadow: 0 10px 26px rgba(20, 8, 40, 0.28), 0 0 0 1px rgba(255,255,255,0.06) inset;
+    padding: 12px 14px 18px;
+    animation: fadeIn 0.5s ease both;
+}
+
+/* Шапка пользователя (имя + кнопки музыки/выхода) */
 .user-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
     font-size: 14px;
-    color: #9b4f70;
     font-weight: bold;
+}
+
+.hero-bar #userEmailSpan {
+    color: #f1e6f7 !important;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+
+.hero-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Круглые кнопки музыки/выхода поверх тёмного фона плашки — всегда
+   одинаковые, независимо от темы сайта, чтобы не терять контраст */
+.hero-bar .icon-btn {
+    background: rgba(255,255,255,0.12) !important;
+    border: 1px solid rgba(255,255,255,0.28) !important;
+    color: #f1e6f7 !important;
+}
+.hero-bar .icon-btn:hover {
+    background: rgba(255,255,255,0.2) !important;
+}
+
+/* Плашка с "печатающимся" заголовком */
+.movie-time-plate {
+    margin-top: 12px;
+    padding: 20px 18px;
+    border-radius: 16px;
+    background: linear-gradient(120deg, #ff5fa8, #7c5cff 45%, #22d3ee 90%);
+    background-size: 220% 220%;
+    animation: movieTimeGradient 7s ease infinite;
+    box-shadow: 0 8px 24px rgba(124, 92, 255, 0.35);
+    overflow: hidden;
+}
+
+.movie-time-inner {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    white-space: nowrap;
+    min-height: 1.3em;
+}
+
+.movie-time-text {
+    display: inline-block;
+    white-space: nowrap;
+    font-size: 30px;
+    font-weight: 900;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.35), 0 0 16px rgba(255,255,255,0.25);
+}
+
+.movie-time-cursor {
+    display: inline-block;
+    font-size: 30px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-left: 2px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    animation: movieTimeBlink 0.9s steps(1) infinite;
+}
+
+@keyframes movieTimeBlink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+
+@keyframes movieTimeGradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
 }
 
 .btn-logout {
@@ -1545,6 +1632,9 @@ body.dark-theme .btn-filter-icon.active {
     border-radius: 16px;
     display: flex;
     overflow: hidden;
+    touch-action: none; /* без этого браузер иногда "думал" над первым тапом
+        (не скролл ли это?), из-за чего он либо терялся, либо срабатывал с
+        задержкой — и создавалось ощущение "нужно тапнуть дважды" */
     box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 10px 30px rgba(0,0,0,0.45), inset 0 0 60px rgba(120,0,255,0.14);
 }
 
@@ -1552,6 +1642,7 @@ body.dark-theme .btn-filter-icon.active {
     position: relative;
     flex: 1;
     height: 100%;
+    touch-action: none;
     border-right: 1px solid rgba(255,255,255,0.07);
 }
 .rhythm-lane:last-child { border-right: none; }

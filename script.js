@@ -1357,6 +1357,95 @@ function showFilterModal(onFiltersChanged) {
 }
 
 // Главная страница
+// ==========================================
+// АНИМИРОВАННАЯ ПЛАШКА ГЛАВНОГО ЭКРАНА ("Время Кино" и т.д.)
+// ==========================================
+// Фразы печатаются посимвольно (как ввод текста), немного "стоят" уже
+// напечатанными, затем стираются с конца — и так по кругу.
+const HERO_PHRASES = ["Время Кино", "Что посмотрим?", "Попкорн-тайм!", "Эчпочмоня", "Люблю Тебя!"];
+let heroTypewriterTimer = null;
+
+function startHeroTypewriter(textEl) {
+    if (!textEl) return;
+    // showHome() перерисовывает экран с нуля при каждом заходе — глушим
+    // предыдущий таймер, чтобы они не копились и не печатали "поверх" друг друга.
+    if (heroTypewriterTimer) { clearTimeout(heroTypewriterTimer); heroTypewriterTimer = null; }
+
+    const TYPE_MS = 95;    // скорость печати одного символа
+    const DELETE_MS = 45;  // скорость стирания одного символа (чуть быстрее печати)
+    const HOLD_MS = 1500;  // сколько фраза "стоит" полностью напечатанной
+    const GAP_MS = 250;    // короткая пауза перед началом следующей фразы
+
+    let phraseIndex = 0;
+    let charIndex = 0;
+    let mode = "typing"; // typing -> holding -> deleting -> gap -> typing...
+
+    const cursorEl = textEl.parentElement ? textEl.parentElement.querySelector(".movie-time-cursor") : null;
+
+    // Подгоняет размер шрифта так, чтобы текущий текст (с учётом курсора)
+    // всегда помещался в одну строку по ширине плашки, на любом экране.
+    function fitPlateText() {
+        const plateInner = textEl.parentElement;
+        const plate = plateInner ? plateInner.parentElement : null;
+        if (!plate) return;
+        const MAX_FONT = 30;
+        const MIN_FONT = 15;
+        textEl.style.fontSize = MAX_FONT + "px";
+        if (cursorEl) cursorEl.style.fontSize = MAX_FONT + "px";
+        const plateStyles = getComputedStyle(plate);
+        const horizontalPadding = parseFloat(plateStyles.paddingLeft || "0") + parseFloat(plateStyles.paddingRight || "0");
+        const available = plate.clientWidth - horizontalPadding;
+        const needed = textEl.scrollWidth + (cursorEl ? cursorEl.offsetWidth : 10);
+        if (available > 0 && needed > available) {
+            const scaled = Math.max(MIN_FONT, Math.floor(MAX_FONT * available / needed));
+            textEl.style.fontSize = scaled + "px";
+            if (cursorEl) cursorEl.style.fontSize = scaled + "px";
+        }
+    }
+
+    function tick() {
+        // Пользователь ушёл с главного экрана — плашки больше нет в DOM,
+        // останавливаемся, чтобы не тикать вхолостую в фоне вечно.
+        if (!document.body.contains(textEl)) { heroTypewriterTimer = null; return; }
+
+        const phrase = HERO_PHRASES[phraseIndex];
+
+        if (mode === "typing") {
+            charIndex++;
+            textEl.textContent = phrase.slice(0, charIndex);
+            fitPlateText();
+            if (charIndex >= phrase.length) {
+                mode = "holding";
+                heroTypewriterTimer = setTimeout(tick, HOLD_MS);
+            } else {
+                heroTypewriterTimer = setTimeout(tick, TYPE_MS);
+            }
+        } else if (mode === "holding") {
+            mode = "deleting";
+            heroTypewriterTimer = setTimeout(tick, DELETE_MS);
+        } else if (mode === "deleting") {
+            charIndex--;
+            textEl.textContent = phrase.slice(0, charIndex);
+            fitPlateText();
+            if (charIndex <= 0) {
+                mode = "gap";
+                heroTypewriterTimer = setTimeout(tick, GAP_MS);
+            } else {
+                heroTypewriterTimer = setTimeout(tick, DELETE_MS);
+            }
+        } else { // gap
+            phraseIndex = (phraseIndex + 1) % HERO_PHRASES.length;
+            charIndex = 0;
+            mode = "typing";
+            heroTypewriterTimer = setTimeout(tick, TYPE_MS);
+        }
+    }
+
+    textEl.textContent = "";
+    fitPlateText();
+    heroTypewriterTimer = setTimeout(tick, TYPE_MS);
+}
+
 async function showHome() {
     startTransitionLock();
     isChatScreenOpen = false;
@@ -1401,20 +1490,21 @@ async function showHome() {
         return btn;
     };
 
+    // "hero-bar" — отдельный блок со своим фоном, визуально отделяющий шапку
+    // (имя пользователя + кнопки музыки/выхода) и заголовок от остального
+    // контента страницы. Внутри него всегда свой контрастный фон, поэтому
+    // текст в нём не нужно отдельно подстраивать под светлую/тёмную тему.
+    let heroBar = document.createElement("div");
+    heroBar.className = "hero-bar";
+
     if (currentUser) {
         let header = document.createElement("div");
         header.className = "user-header";
-        header.style.display = "flex";
-        header.style.justifyContent = "space-between";
-        header.style.alignItems = "center";
-        header.style.marginBottom = "15px";
 
-        header.innerHTML = `<span id="userEmailSpan" style="font-size: 14px;">${getUsernameFromEmail(currentUser.email)}</span>`;
-        
+        header.innerHTML = `<span id="userEmailSpan">${getUsernameFromEmail(currentUser.email)}</span>`;
+
         let controls = document.createElement("div");
-        controls.style.display = "flex";
-        controls.style.alignItems = "center";
-        controls.style.gap = "10px";
+        controls.className = "hero-controls";
 
         let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
             const audio = document.getElementById("bgMusic");
@@ -1427,12 +1517,22 @@ async function showHome() {
         controls.appendChild(musicBtn);
         controls.appendChild(logoutBtn);
         header.appendChild(controls);
-        app.appendChild(header);
+        heroBar.appendChild(header);
     }
 
-    let title = document.createElement("h1");
-    title.textContent = "Время Кино!";
-    app.appendChild(title);
+    // Плашка с "печатающимся" заголовком вместо статичного "Время Кино!"
+    let plate = document.createElement("div");
+    plate.className = "movie-time-plate";
+    plate.innerHTML = `
+        <div class="movie-time-inner">
+            <span class="movie-time-text" id="movieTimeText"></span><span class="movie-time-cursor">|</span>
+        </div>
+    `;
+    heroBar.appendChild(plate);
+
+    app.appendChild(heroBar);
+
+    startHeroTypewriter(plate.querySelector("#movieTimeText"));
 
     if (currentUser) {
         let addBtn = document.createElement("button");
@@ -6277,7 +6377,7 @@ async function startRhythmLevel(track) {
     // (пока хотя бы часть его длины перекрывает линию), плюс небольшой запас —
     // само окно, за пределами которого нота считается пропущенной. Зажато
     // снизу и сверху, чтобы не стать ни слишком жёстким, ни тривиально лёгким.
-    const MISS_CUTOFF = Math.min(0.4, Math.max(0.14, (TILE_HEIGHT_PX / 2) / TILE_SPEED_PX_PER_SEC + 0.05));
+    const MISS_CUTOFF = Math.min(0.4, Math.max(0.16, (TILE_HEIGHT_PX / 2) / TILE_SPEED_PX_PER_SEC + 0.07));
 
     // Минимальный зазор по времени между двумя нотами на ОДНОЙ дорожке, при
     // котором их тайлы ещё не наезжают друг на друга визуально — используется
@@ -6295,6 +6395,30 @@ async function startRhythmLevel(track) {
     let rafId = null;
     let activeTiles = []; // { note, el }
     let spawnCursor = 0;
+
+    // --- Плавные игровые часы ---
+    // audio.currentTime на многих мобильных браузерах обновляется рывками
+    // (не каждый кадр, а раз в ~150-250мс), в то время как позиция тайла на
+    // экране тоже считается от него же в loop() — а тап (pointerdown) в
+    // tryHitTile прилетает АСИНХРОННО, между кадрами rAF, и в момент тапа
+    // audio.currentTime мог быть "устаревшим" на десятки мс относительно
+    // того, что игрок реально видел на экране. Именно это ощущалось как
+    // "не засчитывает тап по ноте, хотя явно попал" и "приходится тапать
+    // дважды". Чтобы у тапа всегда было точное и монотонно растущее время,
+    // синхронизируем опорную точку (audio.currentTime + performance.now())
+    // на каждом кадре, а между кадрами интерполируем через performance.now()
+    // — он всегда точный и не "прыгает" пачками, в отличие от currentTime.
+    let clockAnchorAudioTime = 0;
+    let clockAnchorPerf = performance.now();
+    function syncClock() {
+        clockAnchorAudioTime = audio.currentTime;
+        clockAnchorPerf = performance.now();
+    }
+    function getPlaybackTime() {
+        if (paused || gameOver) return clockAnchorAudioTime;
+        const elapsedSec = (performance.now() - clockAnchorPerf) / 1000;
+        return clockAnchorAudioTime + elapsedSec * audio.playbackRate;
+    }
 
     function renderLives() {
         livesEl.textContent = "❤️".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, START_LIVES - lives));
@@ -6370,6 +6494,7 @@ async function startRhythmLevel(track) {
                 audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
                 audio.play().catch(() => {});
                 paused = false;
+                syncClock();
                 rafId = requestAnimationFrame(loop);
             } else {
                 countdownEl.textContent = "🔥 Ускорение! " + count;
@@ -6396,7 +6521,8 @@ async function startRhythmLevel(track) {
 
     function loop() {
         if (gameOver || paused) return;
-        const t = audio.currentTime;
+        syncClock();
+        const t = clockAnchorAudioTime;
 
         while (spawnCursor < chart.notes.length && chart.notes[spawnCursor].time - t <= LOOKAHEAD) {
             const note = chart.notes[spawnCursor];
@@ -6471,7 +6597,7 @@ async function startRhythmLevel(track) {
     function tryHitTile(note, el, onLine) {
         if (gameOver || paused) return;
         if (note.hit || note.missed) return;
-        const diff = Math.abs(audio.currentTime - note.time);
+        const diff = Math.abs(getPlaybackTime() - note.time);
         if (diff > MISS_CUTOFF) return; // тайл ещё далеко от такта — тап без эффекта
 
         registerHit(note, diff, onLine);
@@ -6491,7 +6617,7 @@ async function startRhythmLevel(track) {
     // Ближайшая по времени активная (ещё не пойманная и не пропущенная) нота —
     // среди ВСЕХ дорожек. Используется тапами в любом месте экрана.
     function findNearestActiveNote() {
-        const t = audio.currentTime;
+        const t = getPlaybackTime();
         let best = null, bestDiff = Infinity;
         for (const entry of activeTiles) {
             if (entry.note.hit || entry.note.missed) continue;
@@ -6517,7 +6643,7 @@ async function startRhythmLevel(track) {
     // Бьёт по ближайшей по времени ноте в соответствующей дорожке.
     function tryHitLane(lane) {
         if (gameOver || paused) return;
-        const t = audio.currentTime;
+        const t = getPlaybackTime();
         let bestNote = null, bestDiff = Infinity;
         for (const note of chart.notes) {
             if (note.hit || note.missed || note.lane !== lane) continue;
@@ -6538,6 +6664,7 @@ async function startRhythmLevel(track) {
         paused = false;
         audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
         audio.play().catch(() => {});
+        syncClock();
         rafId = requestAnimationFrame(loop);
     });
 
