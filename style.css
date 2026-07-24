@@ -36,11 +36,11 @@ body{
     background:
     linear-gradient(
         135deg,
-        #ffdce5,
-        #fff3f7
+        #1a1420,
+        #241a2c
     );
 
-    color:#4a3040;
+    color:#eadfe8;
 
     font-family:
     "Segoe UI",
@@ -79,7 +79,7 @@ h1{
 
     margin:30px 0;
 
-    color:#9b4f70;
+    color:#d9a7c4;
 
     animation:fadeIn 0.5s ease both;
 
@@ -142,9 +142,9 @@ button{
     border-radius:30px;
 
 
-    background:white;
+    background:#2b2233;
 
-    color:#9b4f70;
+    color:#eadfe8;
 
 
     font-size:20px;
@@ -164,7 +164,7 @@ button{
 
 
     box-shadow:
-    0 6px 18px rgba(180,80,120,0.18);
+    0 6px 18px rgba(0,0,0,0.35);
 
 
     transition:
@@ -222,7 +222,9 @@ button:active{
 
 .item{
 
-    background:white;
+    background:#2b2233;
+
+    color:#eadfe8;
 
     margin:12px 0;
 
@@ -239,7 +241,7 @@ button:active{
 
     box-shadow:
 
-    0 6px 18px rgba(180,80,120,0.15);
+    0 6px 18px rgba(0,0,0,0.35);
 
 
     animation:
@@ -376,21 +378,23 @@ button:nth-child(6){
     display: flex;
     flex-direction: column;
     gap: 15px;
-    background: white;
+    background: #2b2233;
+    color: #eadfe8;
     padding: 30px;
     border-radius: 25px;
-    box-shadow: 0 6px 18px rgba(180,80,120,0.15);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
     max-width: 350px;
     margin: 40px auto;
 }
 
 .login-form input {
     padding: 15px;
-    border: 2px solid #ffdce5;
+    border: 2px solid #40324a;
     border-radius: 15px;
     font-size: 16px;
     outline: none;
-    color: #4a3040;
+    color: #eadfe8;
+    background: #1f1826;
     width: 100%;
 }
 
@@ -417,12 +421,13 @@ button:nth-child(6){
 .btn-watch {
     min-height: 58px;
     width: 60px;
-    background: white;
+    background: #2b2233;
+    color: #eadfe8;
     border: none;
     border-radius: 20px;
     font-size: 22px;
     cursor: pointer;
-    box-shadow: 0 6px 18px rgba(180,80,120,0.15);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
@@ -436,16 +441,14 @@ button:nth-child(6){
 
 /* ==========================================
    HERO-BAR: шапка пользователя + анимированная плашка заголовка
-   на главном экране. У блока всегда свой собственный тёмный
-   градиентный фон — поэтому текст внутри задан фиксированными
-   контрастными цветами и не зависит от светлой/тёмной темы сайта.
+   на главном экране.
    ========================================== */
 .hero-bar {
     max-width: 500px;
     margin: 0 auto 18px;
     border-radius: 20px;
-    background: linear-gradient(135deg, #241a35, #150f22 65%);
-    box-shadow: 0 10px 26px rgba(20, 8, 40, 0.28), 0 0 0 1px rgba(255,255,255,0.06) inset;
+    background: #2b2233;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
     padding: 12px 14px 18px;
     animation: fadeIn 0.5s ease both;
 }
@@ -460,8 +463,8 @@ button:nth-child(6){
 }
 
 .hero-bar #userEmailSpan {
-    color: #f1e6f7 !important;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    color: #eadfe8 !important;
+    text-shadow: none;
 }
 
 .hero-controls {
@@ -470,34 +473,18 @@ button:nth-child(6){
     gap: 10px;
 }
 
-/* Круглые кнопки музыки/выхода поверх тёмного фона плашки — всегда
-   одинаковые, независимо от темы сайта, чтобы не терять контраст */
-.hero-bar .icon-btn {
-    background: rgba(255,255,255,0.12) !important;
-    border: 1px solid rgba(255,255,255,0.28) !important;
-    color: #f1e6f7 !important;
-}
-.hero-bar .icon-btn:hover {
-    background: rgba(255,255,255,0.2) !important;
-}
+/* Круглые кнопки музыки/выхода — цвет задаётся правилом .icon-btn ниже */
 
 /* Плашка с "печатающимся" заголовком */
 .movie-time-plate {
     margin-top: 12px;
     padding: 20px 18px;
     border-radius: 16px;
-    /* Светлая тема — тёплый "закатный" градиент */
-    background: linear-gradient(120deg, #ff8a65, #ffb347 45%, #ffd66b 90%);
+    background: linear-gradient(120deg, #ff5fa8, #7c5cff 45%, #22d3ee 90%);
     background-size: 220% 220%;
     animation: movieTimeGradient 7s ease infinite;
-    box-shadow: 0 8px 24px rgba(255, 138, 101, 0.35);
-    overflow: hidden;
-}
-
-body.dark-theme .movie-time-plate {
-    /* Тёмная тема — неоновый розово-фиолетово-голубой градиент, как было */
-    background: linear-gradient(120deg, #ff5fa8, #7c5cff 45%, #22d3ee 90%);
     box-shadow: 0 8px 24px rgba(124, 92, 255, 0.35);
+    overflow: hidden;
 }
 
 .movie-time-inner {
@@ -571,19 +558,19 @@ body.dark-theme .movie-time-plate {
     z-index: 1000;
 }
 .modal-content {
-    background: #fff;
+    background: #2b2233;
     padding: 25px;
     border-radius: 15px;
     width: 90%;
     max-width: 400px;
     box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-    color: #333;
+    color: #eadfe8;
 }
 .modal-content h3 {
     margin-top: 0;
     margin-bottom: 20px;
     text-align: center;
-    color: #222;
+    color: #eadfe8;
 }
 .modal-form {
     display: flex;
@@ -597,11 +584,13 @@ body.dark-theme .movie-time-plate {
 }
 .modal-form input, .modal-form select {
     padding: 10px;
-    border: 1px solid #ccc;
+    border: 1px solid #40324a;
     border-radius: 8px;
     font-size: 16px;
     width: 100%;
     box-sizing: border-box;
+    background: #1f1826;
+    color: #eadfe8;
 }
 .modal-buttons {
     display: flex;
@@ -635,7 +624,7 @@ body.dark-theme .movie-time-plate {
 .item-ratings {
     font-size: 13px;
     font-weight: 600;
-    color: #9b4f70;
+    color: #d9a7c4;
     text-align: left;
     padding: 4px 18px 0;
     min-height: 4px;
@@ -724,54 +713,55 @@ body.dark-theme .movie-time-plate {
 
 /* Нежно-золотая кнопка секретной категории */
 .btn-secret-gold {
-    background: linear-gradient(135deg, #fff3d6, #ffe9b3) !important;
-    color: #8a6a1f !important;
-    box-shadow: 0 6px 18px rgba(212, 175, 55, 0.25) !important;
+    background: linear-gradient(135deg, #3a2f12, #4a3d18) !important;
+    color: #f0cf7a !important;
+    box-shadow: 0 6px 18px rgba(212, 175, 55, 0.15) !important;
 }
 
 .btn-secret-gold:hover {
-    background: linear-gradient(135deg, #ffe9b3, #ffdf99) !important;
+    background: linear-gradient(135deg, #4a3d18, #5a4a20) !important;
 }
 
 .btn-secret-gold:active {
-    background: #ffdf99 !important;
+    background: #5a4a20 !important;
 }
 
 /* Нежно-фиолетовая кнопка чата */
 .btn-chat-purple {
-    background: #ece0fa !important;
-    color: #6a3fa0 !important;
+    background: #35275a !important;
+    color: #c9a6f2 !important;
 }
 
 .btn-chat-purple:hover {
-    background: #e0d0f7 !important;
+    background: #40306b !important;
 }
 
 .btn-chat-purple:active {
-    background: #d5bdf2 !important;
+    background: #2c2049 !important;
 }
 
 /* Нежно-зелёная кнопка "Игры" */
 .btn-games-green {
-    background: #e3f7e6 !important;
-    color: #1b7a3d !important;
+    background: #1b3a24 !important;
+    color: #7be89a !important;
 }
 
 .btn-games-green:hover {
-    background: #d1f0d6 !important;
+    background: #234a2e !important;
 }
 
 .btn-games-green:active {
-    background: #bfe8c7 !important;
+    background: #2c5a38 !important;
 }
 
 /* ===== Экран "Игры": карточки игр и таблица лидеров ===== */
 .game-card {
-    background: #fff;
+    background: #2b2233;
+    color: #eadfe8;
     border-radius: 15px;
     padding: 18px;
     margin-bottom: 18px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.3);
     text-align: center;
 }
 
@@ -799,19 +789,20 @@ body.dark-theme .movie-time-plate {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #f7f0f3;
+    background: #3a2e42;
     border-radius: 10px;
     padding: 8px 14px;
     font-size: 14px;
 }
 
 .leaderboard-leader {
-    background: linear-gradient(135deg, #fff3d6, #ffe9b3);
+    background: linear-gradient(135deg, #3a2f12, #4a3d18);
+    color: #f0cf7a;
     font-weight: 700;
 }
 
-.leaderboard-name { color: #4a3040; }
-.leaderboard-score { font-weight: 700; color: #9b4f70; }
+.leaderboard-name { color: #eadfe8; }
+.leaderboard-score { font-weight: 700; color: #ffb3cf; }
 
 /* ===== Игровой экран (canvas + управление) ===== */
 .game-wrap {
@@ -877,28 +868,19 @@ body.dark-theme .movie-time-plate {
     font-weight: 700;
     border: none;
     border-radius: 50px;
-    background: #ffe3ec;
-    color: #d81b60;
+    background: #3a2e42;
+    color: #f2a7c3;
     box-shadow: 0 4px 14px rgba(0,0,0,0.3);
     cursor: pointer;
     transition: transform 0.1s ease, background-color 0.2s ease;
 }
 
 .game-play-btn:hover {
-    background: #ffd5e3;
+    background: #4a3a53;
 }
 
 .game-play-btn:active {
     transform: scale(0.95);
-}
-
-body.dark-theme .game-play-btn {
-    background: #3a2e42;
-    color: #f2a7c3;
-}
-
-body.dark-theme .game-play-btn:hover {
-    background: #4a3a53;
 }
 
 .game-hint {
@@ -925,14 +907,14 @@ body.dark-theme .game-play-btn:hover {
     padding: 0;
     border-radius: 12px;
     border: none;
-    background: #f0f0f0;
+    background: #2b2233;
     font-size: 20px;
-    color: #4a3040;
+    color: #eadfe8;
     cursor: pointer;
 }
 
 .dpad-btn:active {
-    background: #e0e0e0;
+    background: #3a2e42;
 }
 
 /* Синий кружок "недавно добавлено" (в течение 2 суток) */
@@ -968,9 +950,10 @@ body.dark-theme .game-play-btn:hover {
     overflow-y: auto;
     padding: 15px;
     margin-bottom: 12px;
-    background: white;
+    background: #2b2233;
+    color: #eadfe8;
     border-radius: 22px;
-    box-shadow: 0 6px 18px rgba(180, 80, 120, 0.15);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
     text-align: left;
 }
 
@@ -993,8 +976,8 @@ body.dark-theme .game-play-btn:hover {
 
 .chat-bubble-theirs {
     align-self: flex-start;
-    background: #ffe3ec;
-    color: #4a3040;
+    background: #3a2c44;
+    color: #eadfe8;
     border-bottom-left-radius: 4px;
 }
 
@@ -1018,11 +1001,12 @@ body.dark-theme .game-play-btn:hover {
     flex: 1;
     min-width: 0; /* без этого поле ввода не сжимается во флекс-контейнере и выталкивает кнопки за экран */
     padding: 12px 14px;
-    border: 2px solid #ffdce5;
+    border: 2px solid #40324a;
     border-radius: 25px;
     font-size: 16px;
     outline: none;
-    color: #4a3040;
+    color: #eadfe8;
+    background: #1f1826;
     min-height: auto;
 }
 
@@ -1124,7 +1108,7 @@ body.dark-theme .game-play-btn:hover {
     text-align: center;
     font-size: 13px;
     font-weight: 600;
-    color: #9b4f70;
+    color: #d9a7c4;
     opacity: 0.75;
     margin: 18px 0 4px;
 }
@@ -1141,7 +1125,8 @@ body.dark-theme .game-play-btn:hover {
 }
 
 .comment-card {
-    background: #fdf2f6;
+    background: #2b2233;
+    color: #eadfe8;
     border-radius: 14px;
     padding: 10px 14px;
 }
@@ -1215,11 +1200,12 @@ body.dark-theme .game-play-btn:hover {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    background: white;
+    background: #2b2233;
+    color: #eadfe8;
     border-radius: 16px;
     padding: 8px 12px;
     margin-bottom: 8px;
-    box-shadow: 0 4px 12px rgba(180,80,120,0.15);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
     font-size: 13px;
 }
 
@@ -1288,267 +1274,41 @@ body.dark-theme .game-play-btn:hover {
     text-align: right;
 }
 
-/* ===== Переключатель тёмной темы (секретная категория) ===== */
-.theme-toggle-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    margin: 10px 0 20px;
-}
-
-.theme-toggle-label {
-    font-size: 14px;
-    font-weight: 600;
-    color: #8a6a1f;
-}
-
-.theme-switch {
-    position: relative;
-    display: inline-block;
-    width: 50px;
-    height: 28px;
-    flex-shrink: 0;
-}
-
-.theme-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.theme-switch-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background-color: #e0d0d8;
-    transition: 0.2s;
-    border-radius: 28px;
-}
-
-.theme-switch-slider:before {
-    position: absolute;
-    content: "";
-    height: 22px;
-    width: 22px;
-    left: 3px;
-    bottom: 3px;
-    background-color: white;
-    transition: 0.2s;
-    border-radius: 50%;
-}
-
-.theme-switch input:checked + .theme-switch-slider {
-    background-color: #9b4f70;
-}
-
-.theme-switch input:checked + .theme-switch-slider:before {
-    transform: translateX(22px);
-}
-
-/* ===== Тёмная тема ===== */
-body.dark-theme {
-    background: linear-gradient(135deg, #1a1420, #241a2c);
-    color: #eadfe8;
-}
-
-body.dark-theme h1,
-body.dark-theme .user-header,
-body.dark-theme .btn-logout {
-    color: #d9a7c4 !important;
-}
-
-body.dark-theme button,
-body.dark-theme .item,
-body.dark-theme .login-form,
-body.dark-theme .btn-watch,
-body.dark-theme .chat-box,
-body.dark-theme .comment-card,
-body.dark-theme .chat-reply-bar {
-    background: #2b2233;
-    color: #eadfe8;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-}
-
-body.dark-theme .modal-content {
-    background: #2b2233;
-    color: #eadfe8;
-}
-
-body.dark-theme .modal-content h3 {
-    color: #eadfe8;
-}
-
-body.dark-theme .login-form input,
-body.dark-theme .modal-form input,
-body.dark-theme .modal-form select,
-body.dark-theme .chat-input-row #chatInput {
-    background: #1f1826;
-    color: #eadfe8;
-    border-color: #40324a;
-}
-
-body.dark-theme .chat-bubble-theirs {
-    background: #3a2c44;
-    color: #eadfe8;
-}
-
-body.dark-theme .item-ratings,
-body.dark-theme .count-footer {
-    color: #d9a7c4;
-}
-
-/* ===== Круглые иконки-кнопки (музыка/выход) — светлая тема ===== */
+/* ===== Круглые иконки-кнопки (музыка/выход) ===== */
 .icon-btn {
-    border: 1px solid #ccc;
-    background: #f9f9f9;
+    border: 1px solid #4a3a56;
+    background: #2b2233;
+    color: #eadfe8;
 }
 
-/* ===== Кнопка "Добавить тайтл" — светлая тема ===== */
+/* ===== Кнопка "Добавить тайтл" ===== */
 .btn-add-new {
-    background: #e3f2fd !important;
-    color: #0d47a1 !important;
-}
-
-/* ===== Поле поиска и его кнопки — светлая тема ===== */
-.search-input-field {
-    border: 1px solid #ccc;
-    color: #9b4f70;
-    background: white;
-}
-
-.btn-search-icon {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
-}
-
-.btn-filter-icon {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
-}
-
-.btn-filter-icon.active {
-    background: #ffe3ec;
-    border: 1px solid #f48fb1;
-}
-
-/* =====================================================
-   ТЁМНАЯ ТЕМА — отдельные цветные кнопки сохраняют свой
-   характер (оттенок), но в тёмном варианте
-   ===================================================== */
-
-/* Круглые иконки (музыка/выход) */
-body.dark-theme .icon-btn {
-    background: #2b2233 !important;
-    border-color: #4a3a56 !important;
-    color: #eadfe8 !important;
-}
-
-/* "Добавить тайтл" — синий, тёмный вариант */
-body.dark-theme .btn-add-new {
     background: #12283a !important;
     color: #7fc4ff !important;
 }
 
-/* Секретная категория — золотой, тёмный вариант */
-body.dark-theme .btn-secret-gold {
-    background: linear-gradient(135deg, #3a2f12, #4a3d18) !important;
-    color: #f0cf7a !important;
-    box-shadow: 0 6px 18px rgba(212, 175, 55, 0.15) !important;
-}
-body.dark-theme .btn-secret-gold:hover {
-    background: linear-gradient(135deg, #4a3d18, #5a4a20) !important;
-}
-body.dark-theme .btn-secret-gold:active {
-    background: #5a4a20 !important;
+/* ===== Поле поиска и его кнопки ===== */
+.search-input-field {
+    border: 1px solid #55445f;
+    color: #f3d9e6;
+    background: #3a2e42;
 }
 
-/* "Будем смотреть" / "Просмотрено" / кнопки в меню редактирования тайтла — розовый, тёмный вариант */
-body.dark-theme .btn-pink-style {
-    background-color: #4a2233 !important;
-    color: #ffb3cf !important;
-}
-body.dark-theme .btn-pink-style:hover {
-    background-color: #5a2b3f !important;
+.btn-search-icon {
+    background: #2b2233;
+    border: 1px solid #4a3a56;
+    color: #eadfe8;
 }
 
-/* "Чат" — фиолетовый, тёмный вариант */
-body.dark-theme .btn-chat-purple {
-    background: #35275a !important;
-    color: #c9a6f2 !important;
-}
-body.dark-theme .btn-chat-purple:hover {
-    background: #40306b !important;
-}
-body.dark-theme .btn-chat-purple:active {
-    background: #2c2049 !important;
+.btn-filter-icon {
+    background: #2b2233;
+    border: 1px solid #4a3a56;
+    color: #eadfe8;
 }
 
-/* "Игры" — зелёная, тёмный вариант */
-body.dark-theme .btn-games-green {
-    background: #1b3a24 !important;
-    color: #7be89a !important;
-}
-body.dark-theme .btn-games-green:hover {
-    background: #234a2e !important;
-}
-body.dark-theme .btn-games-green:active {
-    background: #2c5a38 !important;
-}
-
-/* Карточки игр и таблица лидеров — тёмный вариант */
-body.dark-theme .game-card {
-    background: #2b2233 !important;
-    color: #eadfe8 !important;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.3) !important;
-}
-body.dark-theme .leaderboard-row {
-    background: #3a2e42 !important;
-}
-body.dark-theme .leaderboard-leader {
-    background: linear-gradient(135deg, #3a2f12, #4a3d18) !important;
-    color: #f0cf7a !important;
-}
-body.dark-theme .leaderboard-name { color: #eadfe8 !important; }
-body.dark-theme .leaderboard-score { color: #ffb3cf !important; }
-body.dark-theme .dpad-btn {
-    background: #2b2233 !important;
-    color: #eadfe8 !important;
-}
-body.dark-theme .dpad-btn:active {
-    background: #3a2e42 !important;
-}
-
-/* Серые кнопки "Отмена" — тёмный вариант */
-body.dark-theme .btn-cancel-gray {
-    background-color: #2b2233 !important;
-    color: #d8cede !important;
-}
-body.dark-theme .btn-cancel-gray:hover {
-    background-color: #362b40 !important;
-}
-
-/* Поле поиска — совсем немного темнее, а не полностью тёмное */
-body.dark-theme .search-input-field {
-    background: #3a2e42 !important;
-    color: #f3d9e6 !important;
-    border-color: #55445f !important;
-}
-
-/* Кнопки поиска/фильтра — тёмный вариант */
-body.dark-theme .btn-search-icon {
-    background: #2b2233 !important;
-    border-color: #4a3a56 !important;
-    color: #eadfe8 !important;
-}
-body.dark-theme .btn-filter-icon {
-    background: #2b2233 !important;
-    border-color: #4a3a56 !important;
-    color: #eadfe8 !important;
-}
-body.dark-theme .btn-filter-icon.active {
-    background: #4a2233 !important;
-    border-color: #8a4a68 !important;
+.btn-filter-icon.active {
+    background: #4a2233;
+    border: 1px solid #8a4a68;
 }
 
 /* ============================================================
