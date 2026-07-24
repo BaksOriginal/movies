@@ -49,16 +49,20 @@ const GITHUB_RHYTHM_PATH = "rhythm_game";
 // (легкий запрос refs/heads, не листинг файлов), и кэшируем результат в
 // localStorage на SHA_CACHE_TTL_MS, чтобы не тратить его лимит (60 запросов
 // в час на IP) при каждом заходе пользователя на сайт.
-const SHA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 минут
+const SHA_CACHE_TTL_MS = 30 * 60 * 1000; // 30 минут (было 5 — слишком часто дёргали api.github.com и без нужды приближали лимит 60 запросов/час)
 
 async function getGithubBranchSha(owner, repo, branch) {
     const cacheKey = `ghSha:${owner}/${repo}@${branch}`;
+    let cachedEntry = null;
     try {
         const cachedRaw = localStorage.getItem(cacheKey);
         if (cachedRaw) {
             const cached = JSON.parse(cachedRaw);
-            if (cached && cached.sha && (Date.now() - cached.savedAt) < SHA_CACHE_TTL_MS) {
-                return cached.sha;
+            if (cached && cached.sha) {
+                cachedEntry = cached; // запоминаем даже "протухший" по TTL — пригодится ниже как запасной вариант
+                if ((Date.now() - cached.savedAt) < SHA_CACHE_TTL_MS) {
+                    return cached.sha;
+                }
             }
         }
     } catch (e) { /* битый кэш в localStorage — просто идём за свежим SHA */ }
@@ -76,11 +80,25 @@ async function getGithubBranchSha(owner, repo, branch) {
 
         return sha;
     } catch (e) {
-        // Не удалось получить SHA (лимит GitHub API исчерпан, сеть и т.п.) —
-        // откатываемся на имя ветки напрямую, как было раньше. Это безопасный
-        // фолбэк: просто возвращается риск устаревшего кэша jsDelivr, без
-        // поломки сайта.
-        console.error(`Не удалось получить актуальный SHA ветки ${owner}/${repo}@${branch}, используем branch напрямую:`, e);
+        // Не удалось получить СВЕЖИЙ SHA (лимит GitHub API исчерпан, сеть и
+        // т.п.). Раньше здесь был откат сразу на имя ветки ("main") — но
+        // именно это один раз и привело к тому, что на сайте показались уже
+        // ДАВНО удалённые из GitHub треки: jsDelivr кэширует листинг файлов
+        // по имени ветки на часы, и мог отдать старый снимок репозитория
+        // (например, от версии до замены Di Young на BenSound).
+        //
+        // Теперь вместо этого сначала пробуем последний РЕАЛЬНО известный
+        // SHA из localStorage, даже если его TTL уже истёк — он указывает
+        // на конкретный неизменный коммит, и jsDelivr по нему отдаст пусть
+        // не самый свежий, но гарантированно НАСТОЯЩИЙ (когда-то бывший
+        // актуальным) снимок репозитория — а не рандомно старый кэш ветки.
+        // На имя ветки откатываемся только если вообще никакого SHA нет в
+        // кэше (например, самый первый визит на сайт с чистым браузером).
+        if (cachedEntry && cachedEntry.sha) {
+            console.error(`Не удалось получить свежий SHA ${owner}/${repo}@${branch} (см. ошибку ниже), используем последний известный SHA из кэша:`, e);
+            return cachedEntry.sha;
+        }
+        console.error(`Не удалось получить SHA ветки ${owner}/${repo}@${branch}, и в кэше ничего нет — используем branch напрямую (риск устаревшего кэша jsDelivr):`, e);
         return branch;
     }
 }
