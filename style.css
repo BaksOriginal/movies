@@ -486,11 +486,18 @@ button:nth-child(6){
     margin-top: 12px;
     padding: 20px 18px;
     border-radius: 16px;
-    background: linear-gradient(120deg, #ff5fa8, #7c5cff 45%, #22d3ee 90%);
+    /* Светлая тема — тёплый "закатный" градиент */
+    background: linear-gradient(120deg, #ff8a65, #ffb347 45%, #ffd66b 90%);
     background-size: 220% 220%;
     animation: movieTimeGradient 7s ease infinite;
-    box-shadow: 0 8px 24px rgba(124, 92, 255, 0.35);
+    box-shadow: 0 8px 24px rgba(255, 138, 101, 0.35);
     overflow: hidden;
+}
+
+body.dark-theme .movie-time-plate {
+    /* Тёмная тема — неоновый розово-фиолетово-голубой градиент, как было */
+    background: linear-gradient(120deg, #ff5fa8, #7c5cff 45%, #22d3ee 90%);
+    box-shadow: 0 8px 24px rgba(124, 92, 255, 0.35);
 }
 
 .movie-time-inner {
