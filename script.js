@@ -3817,7 +3817,7 @@ function resumeMusicAfterGames() {
     musicWasPlayingBeforeGames = false;
 }
 
-// Единая навигация для экрана игр: "⬅️ Игры" (если внутри конкретной игры) + "🏠 Домой"
+// Единая навигация для экрана игр: "⬅ Игры" (если внутри конкретной игры) + "🏠 Домой"
 function setGamesNav(showBackToMenu) {
     // Ставим музыку на паузу и блокируем выделение текста только один раз, при входе в раздел
     // "Игры" (а не при каждом переключении между играми внутри раздела).
@@ -3834,7 +3834,7 @@ function setGamesNav(showBackToMenu) {
 
     if (showBackToMenu) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅️ Игры";
+        backBtn.textContent = "⬅ Игры";
         backBtn.onclick = () => showGamesScreen();
         nav.appendChild(backBtn);
     }
