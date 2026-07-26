@@ -1605,14 +1605,6 @@ async function showHome() {
         gamesBtn.onclick = () => showGamesScreen();
         app.appendChild(gamesBtn);
     }
-
-    let footer = document.createElement("p");
-    footer.style.textAlign = "center";
-    footer.style.marginTop = "40px";
-    footer.style.fontSize = "10px";
-    footer.style.color = "#999";
-    footer.innerHTML = 'Музыка: "Echoes Of Home" by Scott Buckley (www.scottbuckley.com.au) — Licensed under CC-BY 4.0';
-    app.appendChild(footer);
 }
 
 // Отрисовка строки элемента (тайтла)
