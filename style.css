@@ -914,14 +914,11 @@ button:nth-child(6){
 
 /* Золотая кнопка секретной категории — мерцающая неоновая рамка */
 .btn-secret-gold {
-    background:
-        linear-gradient(transparent, transparent) padding-box,
-        linear-gradient(120deg, var(--gold), #7a5a1a 45%, var(--gold)) border-box !important;
-    background-size: 100% 100%, 220% 220% !important;
-    border: 1px solid transparent !important;
+    background: transparent !important;
+    border: 1.5px solid var(--gold) !important;
     color: var(--gold) !important;
     box-shadow: 0 6px 18px rgba(0,0,0,0.4), var(--glow-gold) !important;
-    animation: fadeUp 0.35s ease both, neonShift 5s ease infinite !important;
+    animation: fadeUp 0.35s ease both !important;
     text-shadow: 0 0 10px rgba(255,209,92,0.5);
 }
 
@@ -1526,14 +1523,11 @@ button:nth-child(6){
 
 /* ===== Кнопка "Добавить тайтл" ===== */
 .btn-add-new {
-    background:
-        linear-gradient(transparent, transparent) padding-box,
-        linear-gradient(120deg, var(--cyan), #1fe8a8 50%, var(--cyan)) border-box !important;
-    background-size: 100% 100%, 220% 220% !important;
-    border: 1.5px solid transparent !important;
+    background: transparent !important;
+    border: 1.5px solid var(--cyan) !important;
     color: var(--cyan) !important;
     box-shadow: var(--glow-cyan) !important;
-    animation: fadeUp 0.35s ease both, neonShift 5s ease infinite !important;
+    animation: fadeUp 0.35s ease both !important;
     text-shadow: 0 0 10px rgba(46,232,255,0.5);
 }
 .btn-add-new:hover {
