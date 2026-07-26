@@ -916,7 +916,7 @@ button:nth-child(6){
 /* Золотая кнопка секретной категории — мерцающая неоновая рамка */
 .btn-secret-gold {
     background:
-        linear-gradient(var(--panel), var(--panel)) padding-box,
+        linear-gradient(transparent, transparent) padding-box,
         linear-gradient(120deg, var(--gold), #7a5a1a 45%, var(--gold)) border-box !important;
     background-size: 100% 100%, 220% 220% !important;
     border: 1px solid transparent !important;
@@ -1528,7 +1528,7 @@ button:nth-child(6){
 /* ===== Кнопка "Добавить тайтл" ===== */
 .btn-add-new {
     background:
-        linear-gradient(var(--panel), var(--panel)) padding-box,
+        linear-gradient(transparent, transparent) padding-box,
         linear-gradient(120deg, var(--cyan), #1fe8a8 50%, var(--cyan)) border-box !important;
     background-size: 100% 100%, 220% 220% !important;
     border: 1.5px solid transparent !important;
