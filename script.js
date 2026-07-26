@@ -2,6 +2,31 @@ let dbData = {}; // Сюда мы динамически соберем стру
 let titleCreatedAt = {}; // "Название (год)" -> дата добавления в базу (для синего кружка "новинка")
 
 // ==========================================
+// ЗАГОЛОВКИ (h1) С ЭМОДЗИ
+// ==========================================
+// У h1 в CSS градиентная "вырезка" текста (background-clip: text), из-за
+// которой эмодзи в начале заголовка тоже красится в сплошной цвет градиента
+// и теряет свой нативный многоцветный вид. Эта функция оборачивает ведущий
+// эмодзи в отдельный <span>, который не участвует в вырезке — эмодзи
+// остаётся собственного цвета, но с лёгкой обводкой (см. .emoji-native в CSS),
+// а остальной текст заголовка окрашивается градиентом как раньше.
+function setEmojiTitle(el, text) {
+    el.textContent = "";
+    const match = text.match(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s*/u);
+    if (match) {
+        const emoji = match[1];
+        const rest = text.slice(match[0].length);
+        const span = document.createElement("span");
+        span.className = "emoji-native";
+        span.textContent = emoji;
+        el.appendChild(span);
+        el.appendChild(document.createTextNode(" " + rest));
+    } else {
+        el.textContent = text;
+    }
+}
+
+// ==========================================
 // TMDB (постеры фильмов/сериалов)
 // ==========================================
 // Получите бесплатный ключ на https://www.themoviedb.org/settings/api
@@ -792,7 +817,7 @@ function showStarChoiceModal(title) {
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;">Действие</h3>
-            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 ${optionsHtml}
             </div>
@@ -999,7 +1024,7 @@ function buildSearchBar(prefillQuery = "") {
         border-radius: 8px;
         font-size: 18px;
         font-weight: 600;
-        font-family: "Segoe UI", Arial, sans-serif;
+        font-family: var(--font-body);
         box-sizing: border-box;
     `;
 
@@ -1485,28 +1510,12 @@ async function showHome() {
     startHeroTypewriter(plate.querySelector("#movieTimeText"));
 
     if (currentUser) {
-        let addBtn = document.createElement("button");
-        addBtn.className = "btn-add-new";
-        addBtn.textContent = "➕ Добавить тайтл";
-        addBtn.style.marginBottom = "10px";
-        addBtn.onclick = () => showAddEditModal();
-        app.appendChild(addBtn);
-        
-        // Первый сплиттер HR (после "Добавить")
-        let hr = document.createElement("hr");
-        hr.style.border = "0";
-        hr.style.borderTop = "2px solid #9b4f70"; 
-        hr.style.margin = "15px 0";
-        app.appendChild(hr);
-
         // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
         app.appendChild(buildSearchBar());
 
-        // Второй сплиттер HR (после Поиска)
+        // Сплиттер (после Поиска)
         let hrAfterSearch = document.createElement("hr");
-        hrAfterSearch.style.border = "0";
-        hrAfterSearch.style.borderTop = "2px solid #9b4f70"; 
-        hrAfterSearch.style.margin = "15px 0 20px 0";
+        hrAfterSearch.className = "neon-divider";
         app.appendChild(hrAfterSearch);
     }
 
@@ -1517,9 +1526,7 @@ async function showHome() {
         const isSecretKey = key.includes("Секрет") || key.includes("🔒") || key.includes("❤️");
         if (isSecretKey && !secretDividerAdded) {
             let hrBeforeSecret = document.createElement("hr");
-            hrBeforeSecret.style.border = "0";
-            hrBeforeSecret.style.borderTop = "2px solid #9b4f70";
-            hrBeforeSecret.style.margin = "15px 0";
+            hrBeforeSecret.className = "neon-divider";
             app.appendChild(hrBeforeSecret);
             secretDividerAdded = true;
         }
@@ -1532,12 +1539,19 @@ async function showHome() {
         button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
         app.appendChild(button);
 
-        // Третий сплиттер HR (после категории "Секрет")
+        // Кнопка "Добавить тайтл" — переехала сюда, сразу под "Сериалы", без сплиттера
+        if (currentUser && key.includes("Сериал")) {
+            let addBtn = document.createElement("button");
+            addBtn.className = "btn-add-new";
+            addBtn.textContent = "➕ Добавить тайтл";
+            addBtn.onclick = () => showAddEditModal();
+            app.appendChild(addBtn);
+        }
+
+        // Сплиттер (после категории "Секрет")
         if (isSecretKey) {
             let hrAfterSecret = document.createElement("hr");
-            hrAfterSecret.style.border = "0";
-            hrAfterSecret.style.borderTop = "2px solid #9b4f70"; 
-            hrAfterSecret.style.margin = "15px 0";
+            hrAfterSecret.className = "neon-divider";
             app.appendChild(hrAfterSecret);
         }
     }
@@ -1565,9 +1579,7 @@ async function showHome() {
 
     if (currentUser) {
         let hrBeforeChat = document.createElement("hr");
-        hrBeforeChat.style.border = "0";
-        hrBeforeChat.style.borderTop = "2px solid #9b4f70";
-        hrBeforeChat.style.margin = "20px 0";
+        hrBeforeChat.className = "neon-divider";
         app.appendChild(hrBeforeChat);
 
         let chatBtn = document.createElement("button");
@@ -1582,11 +1594,9 @@ async function showHome() {
         allCommentsBtn.onclick = () => showAllCommentsScreen();
         app.appendChild(allCommentsBtn);
 
-        // Сплиттер HR перед разделом игр
+        // Сплиттер перед разделом игр
         let hrBeforeGames = document.createElement("hr");
-        hrBeforeGames.style.border = "0";
-        hrBeforeGames.style.borderTop = "2px solid #9b4f70";
-        hrBeforeGames.style.margin = "20px 0";
+        hrBeforeGames.className = "neon-divider";
         app.appendChild(hrBeforeGames);
 
         let gamesBtn = document.createElement("button");
@@ -1834,7 +1844,7 @@ function showStickerPicker(onPick) {
         <div class="modal-content" style="max-height:70vh; overflow-y:auto;">
             <h3 style="text-align:center; margin-bottom:15px;">😊 Стикеры</h3>
             <div class="sticker-grid" id="stickerGrid">
-                <p style="text-align:center;color:#999;font-size:13px;">Загружаем стикеры...</p>
+                <p style="text-align:center;color:#9686b8;font-size:13px;">Загружаем стикеры...</p>
             </div>
             <button class="btn-action-cancel" id="stickerPickerCancel" style="margin-top:15px;width:100%;">Закрыть</button>
         </div>
@@ -1848,7 +1858,7 @@ function showStickerPicker(onPick) {
         if (!grid) return; // модалку уже закрыли, пока грузились стикеры
 
         if (list.length === 0) {
-            grid.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Стикеры не найдены. Проверьте настройки GITHUB_STICKERS_* в script.js</p>`;
+            grid.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Стикеры не найдены. Проверьте настройки GITHUB_STICKERS_* в script.js</p>`;
             return;
         }
 
@@ -1879,9 +1889,9 @@ function showActionMenu(itemText) {
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;" id="menuTitle"></h3>
             <div id="posterBox" style="margin: 10px 0 15px; display: flex; justify-content: center;">
-                <p style="color: #999; font-size: 13px;">Ищем постер...</p>
+                <p style="color: #9686b8; font-size: 13px;">Ищем постер...</p>
             </div>
-            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
+            <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
                 <button class="btn-pink-style" id="actComment">💬 Комментарии</button>
@@ -1902,7 +1912,7 @@ function showActionMenu(itemText) {
         if (url) {
             posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
         } else {
-            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильму не найден</p>`;
+            posterBox.innerHTML = `<p style="color: #9686b8; font-size: 13px;">Постер к фильму не найден</p>`;
         }
     });
 
@@ -1953,9 +1963,9 @@ function showRatingModal(itemText) {
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;">Оценка (${myUsername})</h3>
-            <p style="color: #666; margin-bottom: 15px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <p style="color: #cbb8e8; margin-bottom: 15px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="rating-stars" id="ratingStars">${starsHtml}</div>
-            <p id="ratingValueLabel" style="color: #9b4f70; font-weight: bold; margin: 10px 0 20px; min-height: 18px;">${currentScore > 0 ? currentScore + "/10" : ""}</p>
+            <p id="ratingValueLabel" style="color: var(--pink-soft); font-weight: bold; margin: 10px 0 20px; min-height: 18px;">${currentScore > 0 ? currentScore + "/10" : ""}</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 ${existing ? '<button id="ratingDelete" class="btn-action-delete">🗑️ Удалить мою оценку</button>' : ''}
                 <button id="ratingCancel" class="btn-action-cancel">Закрыть</button>
@@ -2042,9 +2052,9 @@ async function showCommentsModal(itemText) {
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 10px;">💬 Комментарии</h3>
-            <p style="color: #666; margin-bottom: 15px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
+            <p style="color: #cbb8e8; margin-bottom: 15px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="comments-list" id="commentsList">
-                <p style="text-align:center;color:#999;font-size:13px;">Загрузка...</p>
+                <p style="text-align:center;color:#9686b8;font-size:13px;">Загрузка...</p>
             </div>
             <div id="commentFormBox"></div>
             <div class="action-buttons" style="margin-top: 10px;">
@@ -2065,7 +2075,7 @@ async function showCommentsModal(itemText) {
 
         listEl.innerHTML = "";
         if (comments.length === 0) {
-            listEl.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Комментариев пока нет.</p>`;
+            listEl.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Комментариев пока нет.</p>`;
         } else {
             comments.forEach(c => {
                 const card = document.createElement("div");
@@ -2187,12 +2197,12 @@ async function showAllCommentsScreen() {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    title.textContent = "🗨️ Комментарии";
+    setEmojiTitle(title, "🗨️ Комментарии");
     app.appendChild(title);
 
     let container = document.createElement("div");
     container.id = "allCommentsContainer";
-    container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Загрузка...</p>`;
+    container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Загрузка...</p>`;
     app.appendChild(container);
 
     // Своя навигация (не трогает историю поиска/каталога) — как у экрана чата
@@ -2222,7 +2232,7 @@ async function renderAllComments(container) {
     container.innerHTML = "";
 
     if (allComments.length === 0) {
-        container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Комментариев пока нет.</p>`;
+        container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Комментариев пока нет.</p>`;
         return;
     }
 
@@ -2352,7 +2362,7 @@ function openData(content, saveHistory = true, customTitle = null) {
 
     if (customTitle) {
         let title = document.createElement("h1");
-        title.textContent = customTitle;
+        setEmojiTitle(title, customTitle);
         app.appendChild(title);
     }
 
@@ -2745,7 +2755,7 @@ function showChatMessageMenu(msg, isMine) {
                 ${canModify ? `<button class="btn-action-delete" id="chatMsgDelete">🗑️ Удалить</button>` : ``}
                 <button class="btn-action-cancel" id="chatMsgCancel">${canModify ? "Отмена" : "Закрыть"}</button>
             </div>
-            ${isMine && !canModify ? `<p style="color: #777; font-size: 13px; margin-top: 12px;">Изменять и удалять сообщение можно только в течение 24 часов после отправки.</p>` : ``}
+            ${isMine && !canModify ? `<p style="color: #9686b8; font-size: 13px; margin-top: 12px;">Изменять и удалять сообщение можно только в течение 24 часов после отправки.</p>` : ``}
         </div>
     `;
     document.body.appendChild(overlay);
@@ -2864,7 +2874,7 @@ function renderChatMessages() {
         if (box.dataset.rendered !== "empty") {
             box.innerHTML = "";
             let empty = document.createElement("p");
-            empty.style.cssText = "text-align:center;color:#999;margin-top:20px;font-size:14px;";
+            empty.style.cssText = "text-align:center;color:#9686b8;margin-top:20px;font-size:14px;";
             empty.textContent = "Сообщений пока нет. Напишите первым!";
             box.appendChild(empty);
             box.dataset.rendered = "empty";
@@ -2925,7 +2935,7 @@ async function showChatScreen() {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    title.textContent = "💬 Чат";
+    setEmojiTitle(title, "💬 Чат");
     app.appendChild(title);
 
     let chatBox = document.createElement("div");
@@ -3344,7 +3354,7 @@ function renderWatchedTop() {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    title.textContent = "🎬 Просмотрено";
+    setEmojiTitle(title, "🎬 Просмотрено");
     app.appendChild(title);
 
     for (let key in WATCHED_BUCKETS) {
@@ -3376,7 +3386,7 @@ function renderWatchedBucket(bucketKey) {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    title.textContent = bucket.label;
+    setEmojiTitle(title, bucket.label);
     app.appendChild(title);
 
     const list = Array.from(bucket.set());
@@ -3413,7 +3423,7 @@ function renderWishlistFolder() {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    title.textContent = "🍿 Будем смотреть";
+    setEmojiTitle(title, "🍿 Будем смотреть");
     app.appendChild(title);
 
     const list = Array.from(wishlistTitles);
@@ -3561,13 +3571,13 @@ function showRandomTitleModal(titleText, pool = []) {
                 return;
             }
             posterBox.style.display = "flex";
-            posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Ищем постер...</p>`;
+            posterBox.innerHTML = `<p style="color: #9686b8; font-size: 13px;">Ищем постер...</p>`;
             const url = await fetchTmdbPoster(currentTitle);
             if (!overlay.isConnected) return; // модалку уже закрыли, пока грузился постер
             if (url) {
                 posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
             } else {
-                posterBox.innerHTML = `<p style="color: #999; font-size: 13px;">Постер к фильму не найден</p>`;
+                posterBox.innerHTML = `<p style="color: #9686b8; font-size: 13px;">Постер к фильму не найден</p>`;
             }
         };
 
@@ -3863,7 +3873,7 @@ function showGameOverModal(score, isRecord, onRestart) {
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
             <h3>${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</h3>
-            <p style="font-size: 22px; font-weight: bold; color:#9b4f70; margin: 10px 0 20px;">Счёт: ${score}</p>
+            <p style="font-size: 22px; font-weight: bold; color: var(--pink-soft); margin: 10px 0 20px;">Счёт: ${score}</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button id="gameOverRestart" class="btn-pink-style">🔁 Заново</button>
                 <button id="gameOverMenu" class="btn-action-cancel">🕹 К играм</button>
@@ -3925,12 +3935,12 @@ async function showGamesScreen() {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    title.textContent = "🕹 Игры";
+    setEmojiTitle(title, "🕹 Игры");
     app.appendChild(title);
 
     let container = document.createElement("div");
     container.id = "gamesContainer";
-    container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Загрузка рекордов...</p>`;
+    container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Загрузка рекордов...</p>`;
     app.appendChild(container);
 
     setGamesNav(false);
@@ -3985,7 +3995,7 @@ function startSnakeGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🐍 Змейка";
+    setEmojiTitle(title, "🐍 Змейка");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -4232,7 +4242,7 @@ function startFlappyGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🍫 Эчпочмоня vs. Шоколадки";
+    setEmojiTitle(title, "🍫 Эчпочмоня vs. Шоколадки");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -4527,7 +4537,7 @@ function startDoodleGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "👾 Doodle Jump";
+    setEmojiTitle(title, "👾 Doodle Jump");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -5225,7 +5235,7 @@ function startRunnerGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🥦 Бега Брокколи";
+    setEmojiTitle(title, "🥦 Бега Брокколи");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -5473,7 +5483,7 @@ function startRunnerGame() {
         if (runnerCharImg.complete && runnerCharImg.naturalWidth > 0) {
             ctx.drawImage(runnerCharImg, -w / 2, -h, w, h);
         } else {
-            ctx.fillStyle = "#9b4f70";
+            ctx.fillStyle = "#ff2e93";
             ctx.fillRect(-w / 2, -h, w, h);
         }
         ctx.restore();
@@ -5631,7 +5641,7 @@ function startNinjaGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "⚔ Эмодзи Ниндзя";
+    setEmojiTitle(title, "⚔ Эмодзи Ниндзя");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -6154,19 +6164,19 @@ async function showRhythmMenu() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🎵 Ритм-Аркада";
+    setEmojiTitle(title, "🎵 Ритм-Аркада");
     app.appendChild(title);
 
     let container = document.createElement("div");
     container.id = "rhythmMenuContainer";
-    container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Загружаем список треков с GitHub...</p>`;
+    container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Загружаем список треков с GitHub...</p>`;
     app.appendChild(container);
 
     const tracks = await fetchRhythmTrackList(true); // переспрашиваем список заново при каждом заходе
     if (!container.isConnected) return;
 
     if (tracks.length === 0) {
-        container.innerHTML = `<p style="text-align:center;color:#999;font-size:13px;">Треков не найдено. Загрузите .ogg-файлы в папку "${GITHUB_RHYTHM_PATH}" репозитория ${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}.</p>`;
+        container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Треков не найдено. Загрузите .ogg-файлы в папку "${GITHUB_RHYTHM_PATH}" репозитория ${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}.</p>`;
         return;
     }
 
@@ -6197,7 +6207,7 @@ function showRhythmGameOverModal(score, isRecord, onRestart, onMenu) {
     overlay.innerHTML = `
         <div class="modal-content rhythm-gameover-modal" style="text-align: center;">
             <h3>${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</h3>
-            <p style="font-size: 22px; font-weight: bold; color:#9b4f70; margin: 10px 0 20px;">Счёт: ${score}</p>
+            <p style="font-size: 22px; font-weight: bold; color: var(--pink-soft); margin: 10px 0 20px;">Счёт: ${score}</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button id="rhythmGameOverRestart" class="btn-pink-style">🔁 Заново</button>
                 <button id="rhythmGameOverMenu" class="btn-action-cancel">🎵 К трекам</button>
@@ -6216,7 +6226,7 @@ async function startRhythmLevel(track) {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    title.textContent = "🎵 " + track.label;
+    setEmojiTitle(title, "🎵 " + track.label);
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
@@ -6241,8 +6251,8 @@ async function startRhythmLevel(track) {
     } catch (e) {
         console.error("Ошибка загрузки/анализа трека:", e);
         if (wrap.isConnected) {
-            wrap.innerHTML = `<p style="text-align:center;color:#999;">Не удалось загрузить трек 😔<br>Проверьте, что файл лежит в папке "${GITHUB_RHYTHM_PATH}" и доступен по ссылке.</p>
-                <button class="btn-action-cancel" id="rhythmBackErr" style="margin-top:12px;">🎵 Назад</button>`;
+            wrap.innerHTML = `<p style="text-align:center;color:#9686b8;">Не удалось загрузить трек 😔<br>Проверьте, что файл лежит в папке "${GITHUB_RHYTHM_PATH}" и доступен по ссылке.</p>
+                <button class="btn-action-cancel" id="rhythmBackErr" style="margin-top:12px;">⬅ Назад</button>`;
             wrap.querySelector("#rhythmBackErr").onclick = () => showRhythmMenu();
         }
         return;
@@ -6250,8 +6260,8 @@ async function startRhythmLevel(track) {
     if (!wrap.isConnected) return; // пока грузили — успели уйти с экрана
 
     if (!chart.notes.length) {
-        wrap.innerHTML = `<p style="text-align:center;color:#999;">Не получилось найти чёткий ритм в этом треке 😕<br>Попробуйте другой трек.</p>
-            <button class="btn-action-cancel" id="rhythmBackNoNotes" style="margin-top:12px;">🎵 Назад</button>`;
+        wrap.innerHTML = `<p style="text-align:center;color:#9686b8;">Не получилось найти чёткий ритм в этом треке 😕<br>Попробуйте другой трек.</p>
+            <button class="btn-action-cancel" id="rhythmBackNoNotes" style="margin-top:12px;">⬅ Назад</button>`;
         wrap.querySelector("#rhythmBackNoNotes").onclick = () => showRhythmMenu();
         return;
     }
@@ -6632,8 +6642,9 @@ function initHeartsBackground() {
     function spawnHeart() {
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
-        // Сайт всегда в режиме Эчпочмони
-        heart.innerHTML = '😈';
+        // Сайт всегда в режиме Эчпочмони — вперемешку летают демоны и сердечки
+        const FLOATING_EMOJIS = ['😈', '❤️', '😈', '❤️', '💜'];
+        heart.innerHTML = FLOATING_EMOJIS[Math.floor(Math.random() * FLOATING_EMOJIS.length)];
 
         // Рандомизируем параметры для живого и естественного эффекта
         const size = Math.random() * 18 + 12; // Размер от 12px до 30px
@@ -6683,13 +6694,14 @@ style.textContent = `
         justify-content: center !important;
         align-items: center !important;
         cursor: pointer !important;
-        border: 1px solid #ccc !important;
-        background: #f9f9f9 !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        background: #1a1128 !important;
+        color: #f2e9ff !important;
         font-size: 18px !important;
         box-sizing: border-box !important;
         line-height: 1 !important;
     }
-    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ СЕРДЕЧКАМИ --- */
+    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ ДЕМОНАМИ И СЕРДЕЧКАМИ --- */
     .hearts-background {
         position: fixed;
         top: 0;
@@ -6704,10 +6716,10 @@ style.textContent = `
     .floating-heart {
         position: absolute;
         bottom: -50px;        /* Появляются чуть ниже экрана */
-        color: #ff4081;       /* Малиново-розовый цвет */
         opacity: 0;
         pointer-events: none;
         user-select: none;
+        filter: drop-shadow(0 0 6px rgba(255,46,147,0.55)) drop-shadow(0 0 10px rgba(139,59,255,0.35));
         animation: floatUp linear forwards;
     }
 
@@ -6717,10 +6729,10 @@ style.textContent = `
             opacity: 0;
         }
         10% {
-            opacity: 0.15;    /* Порог максимальной прозрачности (очень нежные) */
+            opacity: 0.22;    /* Порог максимальной прозрачности (очень нежные) */
         }
         90% {
-            opacity: 0.15;
+            opacity: 0.22;
         }
         100% {
             /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
@@ -6728,34 +6740,33 @@ style.textContent = `
             opacity: 0;       /* Полностью растворяются вверху */
         }
     }
-    /* Звёздочка для вишлиста (Красивый голубой) */
-    .btn-watch.wishlist-active {
-        color: #2196f3 !important;
-        opacity: 1 !important;
-    }
 
     /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
     .btn-pink-style {
-        background-color: #4a2233 !important;
-        color: #ffb3cf !important;
-        border: none !important;
+        background: transparent !important;
+        color: var(--pink) !important;
+        text-shadow: 0 0 10px rgba(255,46,147,0.5);
+        border: 1.5px solid var(--pink) !important;
         font-weight: 600 !important;
-        transition: background-color 0.2s ease, transform 0.1s ease;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 14px rgba(255,46,147,0.22) !important;
+        transition: box-shadow 0.2s ease, transform 0.1s ease, border-color 0.2s ease;
     }
     .btn-pink-style:hover {
-        background-color: #5a2b3f !important;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 22px rgba(255,46,147,0.5) !important;
+        border-color: var(--purple) !important;
     }
 
     /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
     .btn-cancel-gray {
-        background-color: #2b2233 !important;
+        background: #1a1128 !important;
         color: #d8cede !important;
-        border: none !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
         font-weight: 600 !important;
-        transition: background-color 0.2s ease;
+        transition: background-color 0.2s ease, border-color 0.2s ease;
     }
     .btn-cancel-gray:hover {
-        background-color: #362b40 !important;
+        background: #241733 !important;
+        border-color: rgba(255,255,255,0.2) !important;
     }
 `;
 document.head.appendChild(style);
