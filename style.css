@@ -569,30 +569,25 @@ button:nth-child(6){
 }
 
 /* ==========================================
-   HERO-BAR: шапка пользователя + анимированная плашка заголовка
-   на главном экране.
+   ШАПКА ПОЛЬЗОВАТЕЛЯ + АНИМИРОВАННАЯ ПЛАШКА ЗАГОЛОВКА
+   на главном экране — теперь без карточки-обёртки,
+   прямо на общем фоне страницы.
    ========================================== */
-.hero-bar {
-    max-width: 500px;
-    margin: 0 auto 18px;
-    border-radius: 22px;
-    background: linear-gradient(150deg, var(--panel-2), var(--panel));
-    border: 1px solid rgba(139,59,255,0.35);
-    box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 16px rgba(139,59,255,0.22), 0 0 9px rgba(255,46,147,0.14);
-    padding: 12px 14px 18px;
-    animation: fadeIn 0.5s ease both;
-}
 
 /* Шапка пользователя (имя + кнопки музыки/выхода) */
 .user-header {
+    max-width: 500px;
+    margin: 0 auto 14px;
+    padding: 2px 4px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     font-size: 14px;
     font-weight: bold;
+    animation: fadeIn 0.5s ease both;
 }
 
-.hero-bar #userEmailSpan {
+#userEmailSpan {
     color: var(--text) !important;
     text-shadow: none;
 }
@@ -605,13 +600,17 @@ button:nth-child(6){
 
 /* Плашка с "печатающимся" заголовком — неоновый градиент, живее прежнего */
 .movie-time-plate {
-    margin-top: 12px;
+    max-width: 500px;
+    margin: 0 auto 18px;
     padding: 20px 18px;
     border-radius: 16px;
-    background: linear-gradient(120deg, var(--pink), var(--purple) 45%, var(--cyan) 90%);
-    background-size: 220% 220%;
-    animation: movieTimeGradient 7s ease infinite;
-    box-shadow: 0 8px 24px rgba(139, 59, 255, 0.4), 0 0 40px rgba(255,46,147,0.18);
+    background:
+        linear-gradient(transparent, transparent) padding-box,
+        linear-gradient(120deg, var(--pink), var(--purple) 45%, var(--cyan) 90%) border-box;
+    background-size: 100% 100%, 220% 220%;
+    border: 1.5px solid transparent;
+    animation: movieTimeGradient 7s ease infinite, fadeIn 0.5s ease both;
+    box-shadow: 0 0 24px rgba(139,59,255,0.35), 0 0 16px rgba(255,46,147,0.2);
     overflow: hidden;
 }
 

@@ -1465,13 +1465,9 @@ async function showHome() {
         return btn;
     };
 
-    // "hero-bar" — отдельный блок со своим фоном, визуально отделяющий шапку
-    // (имя пользователя + кнопки музыки/выхода) и заголовок от остального
-    // контента страницы. Внутри него всегда свой контрастный фон, поэтому
-    // текст в нём не нужно отдельно подстраивать под светлую/тёмную тему.
-    let heroBar = document.createElement("div");
-    heroBar.className = "hero-bar";
-
+    // Раньше здесь был отдельный "hero-bar" — карточка со своим фоном,
+    // в которую заворачивались шапка пользователя и плашка заголовка.
+    // Теперь оба живут прямо на общем фоне страницы, без обёртки.
     if (currentUser) {
         let header = document.createElement("div");
         header.className = "user-header";
@@ -1492,7 +1488,7 @@ async function showHome() {
         controls.appendChild(musicBtn);
         controls.appendChild(logoutBtn);
         header.appendChild(controls);
-        heroBar.appendChild(header);
+        app.appendChild(header);
     }
 
     // Плашка с "печатающимся" заголовком вместо статичного "Время Кино!"
@@ -1503,9 +1499,8 @@ async function showHome() {
             <span class="movie-time-text" id="movieTimeText"></span><span class="movie-time-cursor">|</span>
         </div>
     `;
-    heroBar.appendChild(plate);
+    app.appendChild(plate);
 
-    app.appendChild(heroBar);
 
     startHeroTypewriter(plate.querySelector("#movieTimeText"));
 
@@ -3822,7 +3817,7 @@ function resumeMusicAfterGames() {
     musicWasPlayingBeforeGames = false;
 }
 
-// Единая навигация для экрана игр: "⬅ Игры" (если внутри конкретной игры) + "🏠 Домой"
+// Единая навигация для экрана игр: "⬅️ Игры" (если внутри конкретной игры) + "🏠 Домой"
 function setGamesNav(showBackToMenu) {
     // Ставим музыку на паузу и блокируем выделение текста только один раз, при входе в раздел
     // "Игры" (а не при каждом переключении между играми внутри раздела).
@@ -3839,7 +3834,7 @@ function setGamesNav(showBackToMenu) {
 
     if (showBackToMenu) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅ Игры";
+        backBtn.textContent = "⬅️ Игры";
         backBtn.onclick = () => showGamesScreen();
         nav.appendChild(backBtn);
     }
