@@ -660,13 +660,6 @@ button:nth-child(6){
     100% { background-position: 0% 50%; }
 }
 
-/* Общая анимация "бегущего" градиента для кнопок */
-@keyframes neonShift {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
-
 .btn-logout {
     background: transparent !important;
     border: none !important;
@@ -1388,7 +1381,10 @@ button:nth-child(6){
     width: 100%;
 }
 
-.chat-input-row #chatInput {
+/* Стили завязаны на классы (.chat-text-input/.chat-send-btn/.chat-sticker-btn),
+   а не на ID — так их наследует любой .chat-input-row: обычный чат,
+   встроенный чат "Совместного просмотра" и поле вставки ссылки там же. */
+.chat-input-row .chat-text-input {
     flex: 1;
     min-width: 0;
     padding: 12px 14px;
@@ -1399,15 +1395,17 @@ button:nth-child(6){
     color: var(--text);
     background: var(--panel-deep);
     min-height: auto;
+    margin: 0;
+    width: auto;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.chat-input-row #chatInput:focus {
+.chat-input-row .chat-text-input:focus {
     border-color: var(--cyan);
     box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
 }
 
-.chat-input-row #chatSendBtn {
+.chat-input-row .chat-send-btn {
     width: 46px;
     min-width: 46px;
     min-height: 46px;
@@ -1425,14 +1423,14 @@ button:nth-child(6){
     box-shadow: var(--glow-pink);
 }
 
-.chat-input-row #chatSendBtn:hover {
+.chat-input-row .chat-send-btn:hover {
     border-color: var(--purple);
     box-shadow: 0 0 24px rgba(255,46,147,0.6);
     transform: none;
 }
 
 /* Кнопка открытия стикеров рядом с полем ввода */
-.chat-input-row #chatStickerBtn {
+.chat-input-row .chat-sticker-btn {
     width: 46px;
     min-width: 46px;
     min-height: 46px;
@@ -1450,7 +1448,7 @@ button:nth-child(6){
     box-shadow: 0 0 10px rgba(46,232,255,0.2);
 }
 
-.chat-input-row #chatStickerBtn:hover {
+.chat-input-row .chat-sticker-btn:hover {
     box-shadow: var(--glow-cyan);
     transform: none;
 }
@@ -1696,14 +1694,13 @@ button:nth-child(6){
     box-shadow: 0 0 26px rgba(46,232,255,0.55) !important;
 }
 
-/* ===== Разделитель нового поколения (вместо голых <hr>) ===== */
+/* ===== Разделитель нового поколения (вместо голых <hr>) =====
+   Статичная неоновая полоса — без бегущего градиента. */
 .neon-divider {
     border: 0;
     height: 2px;
     margin: 18px 0;
     background: linear-gradient(90deg, transparent, var(--purple), var(--pink), var(--cyan), transparent);
-    background-size: 200% 100%;
-    animation: neonShift 6s linear infinite;
     box-shadow: 0 0 10px rgba(139,59,255,0.35);
     border-radius: 2px;
 }

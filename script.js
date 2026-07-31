@@ -2986,16 +2986,19 @@ async function showChatScreen() {
     let chatInput = document.createElement("input");
     chatInput.type = "text";
     chatInput.id = "chatInput";
+    chatInput.className = "chat-text-input";
     chatInput.placeholder = "Написать сообщение...";
     chatInput.autocomplete = "off";
 
     let stickerBtn = document.createElement("button");
     stickerBtn.id = "chatStickerBtn";
+    stickerBtn.className = "chat-sticker-btn";
     stickerBtn.type = "button";
     stickerBtn.textContent = "😊";
 
     let sendBtn = document.createElement("button");
     sendBtn.id = "chatSendBtn";
+    sendBtn.className = "chat-send-btn";
     sendBtn.textContent = "➤";
 
     // Общая отправка сообщения в БД — используется и для текста, и для стикеров
@@ -4169,6 +4172,7 @@ async function showWatchPartyScreen() {
     let urlInput = document.createElement("input");
     urlInput.type = "text";
     urlInput.id = "wpUrlInput";
+    urlInput.className = "chat-text-input";
     urlInput.placeholder = "Ссылка: YouTube, Rutube, .mp4/.webm/.m3u8";
     urlInput.autocomplete = "off";
     let loadBtn = document.createElement("button");
@@ -4216,16 +4220,19 @@ async function showWatchPartyScreen() {
     let wpChatInput = document.createElement("input");
     wpChatInput.type = "text";
     wpChatInput.id = "wpChatInput";
+    wpChatInput.className = "chat-text-input";
     wpChatInput.placeholder = "Написать сообщение...";
     wpChatInput.autocomplete = "off";
 
     let wpStickerBtn = document.createElement("button");
     wpStickerBtn.id = "wpChatStickerBtn";
+    wpStickerBtn.className = "chat-sticker-btn";
     wpStickerBtn.type = "button";
     wpStickerBtn.textContent = "😊";
 
     let wpSendBtn = document.createElement("button");
     wpSendBtn.id = "wpChatSendBtn";
+    wpSendBtn.className = "chat-send-btn";
     wpSendBtn.textContent = "➤";
 
     const sendWPChatMessage = async (text) => {
