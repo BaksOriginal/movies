@@ -375,8 +375,9 @@ db.auth.onAuthStateChange(async (event, session) => {
             realtimeChannel = null;
         }
         if (watchPartyChannel) {
-            db.removeChannel(watchPartyChannel);
+            const channelToClose = watchPartyChannel;
             watchPartyChannel = null;
+            db.removeChannel(channelToClose);
         }
         if (watchPartyHeartbeat) {
             clearInterval(watchPartyHeartbeat);
@@ -1688,14 +1689,29 @@ function renderItemRow(itemText, container) {
         let pressTimer = null;
         let isMoving = false;
         let startX = 0, startY = 0;
+        // На гибридных устройствах (тач + мышь) после touchstart браузер
+        // может дополнительно прислать синтетический mousedown. Раньше это
+        // запускало ВТОРОЙ независимый setTimeout, и переменная pressTimer
+        // перезаписывалась — ссылка на первый таймер терялась, cancelPress()
+        // переставал его отменять, и showActionMenu() мог вызваться дважды
+        // подряд. Это и было первопричиной того, что меню тайтла иногда
+        // открывалось "битым" — с кнопками "Редактировать"/"Удалить",
+        // привязанными к уже удалённой копии модалки. Флаг ниже гарантирует,
+        // что реальный пресс запускает таймер только один раз.
+        let suppressNextMouseDown = false;
 
         const startPress = (e) => {
-            isMoving = false;
+            if (e.type === 'mousedown' && suppressNextMouseDown) {
+                suppressNextMouseDown = false;
+                return;
+            }
             if (e.type === 'touchstart') {
+                suppressNextMouseDown = true;
                 startX = e.touches[0].clientX;
                 startY = e.touches[0].clientY;
             }
 
+            isMoving = false;
             pressTimer = setTimeout(() => {
                 if (!isMoving) {
                     showActionMenu(itemText);
@@ -3587,11 +3603,19 @@ const WP_LEAVE_GRACE_MS = 2500;
 function initWatchPartyChannel() {
     if (watchPartyChannel || !currentUser) return;
 
-    watchPartyChannel = db.channel("watch_party_room", {
+    // Держим локальную ссылку на "этот" канал: колбэк .subscribe() ниже
+    // сверяется именно с ней, а не с внешней переменной watchPartyChannel.
+    // Раньше колбэк читал внешнюю watchPartyChannel напрямую — если канал
+    // уже был заменён новым (или намеренно закрыт через leaveWatchPartyScreen),
+    // "устаревший" колбэк всё равно видел актуальный/непустой канал в этой
+    // переменной и заново логировал ошибку/пересоздавал канал, из-за чего
+    // при выходе с экрана в консоль летели сотни повторов одной и той же ошибки.
+    const channel = db.channel("watch_party_room", {
         config: { presence: { key: currentUser.id } }
     });
+    watchPartyChannel = channel;
 
-    watchPartyChannel
+    channel
         .on("broadcast", { event: "sync" }, ({ payload }) => handleRemoteWPPayload(payload))
         .on("postgres_changes", { event: "*", schema: "public", table: "watch_party_messages" }, () => onWatchPartyChatRealtimeChange())
         .on("presence", { event: "sync" }, () => updateWPPresenceUI())
@@ -3642,6 +3666,12 @@ function initWatchPartyChannel() {
             }, WP_LEAVE_GRACE_MS);
         })
         .subscribe(async (status) => {
+            // Если к этому моменту watchPartyChannel уже указывает не на
+            // "наш" channel (его успели заменить новым или обнулить при
+            // выходе с экрана) — это событие от устаревшего/намеренно
+            // закрытого канала, реагировать на него не нужно.
+            if (watchPartyChannel !== channel) return;
+
             if (status === "SUBSCRIBED") {
                 await trackWPPresence();
                 updateWPPresenceUI();
@@ -3652,7 +3682,8 @@ function initWatchPartyChannel() {
                 // канала play/pause/seek у партнёров тихо перестают долетать
                 // друг до друга. Пересобираем канал через пару секунд.
                 console.error("Канал совместного просмотра отвалился со статусом:", status);
-                if (watchPartyChannel) { db.removeChannel(watchPartyChannel); watchPartyChannel = null; }
+                db.removeChannel(channel);
+                watchPartyChannel = null;
                 if (isWatchPartyScreenOpen) {
                     setTimeout(() => { if (isWatchPartyScreenOpen) initWatchPartyChannel(); }, 2000);
                 }
@@ -3674,7 +3705,17 @@ function leaveWatchPartyScreen() {
     if (watchPartyLeaveTimer) { clearTimeout(watchPartyLeaveTimer); watchPartyLeaveTimer = null; }
     if (watchPartyChatPollInterval) { clearInterval(watchPartyChatPollInterval); watchPartyChatPollInterval = null; }
     if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
-    if (watchPartyChannel) { db.removeChannel(watchPartyChannel); watchPartyChannel = null; }
+    if (watchPartyChannel) {
+        // Важно: обнуляем ссылку ДО removeChannel. Статус CLOSED от этого
+        // канала может прилететь в .subscribe()-колбэк асинхронно, и та
+        // проверка (watchPartyChannel !== channel) должна увидеть, что
+        // канал уже не актуален — иначе на каждый выход с экрана в консоль
+        // сыпался спам "Канал совместного просмотра отвалился" и запускалась
+        // ненужная попытка пересоздания канала.
+        const channelToClose = watchPartyChannel;
+        watchPartyChannel = null;
+        db.removeChannel(channelToClose);
+    }
     watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 };
     watchPartyPartnerPresence = null;
     watchPartyPartnerOnline = false;
