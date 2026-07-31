@@ -1100,6 +1100,34 @@ button:nth-child(6){
     opacity: 0;
     transition: opacity 0.3s ease;
     margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+/* Встроенный чат совместного просмотра — компактнее обычного, чтобы
+   плеер + ссылка + чат помещались на экране телефона без лишней прокрутки */
+.wp-chat-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin: 4px 2px 8px;
+}
+
+.chat-box.wp-chat-box {
+    min-height: 160px;
+    max-height: 30vh;
+    padding: 12px;
+    border-radius: 18px;
+    gap: 8px;
+}
+
+.wp-chat-box .chat-bubble {
+    font-size: 14px;
+    padding: 8px 12px;
+}
+
+.wp-chat-box .chat-sticker-img {
+    max-width: 110px;
+    max-height: 110px;
 }
 
 /* ===== Экран "Игры": карточки игр и таблица лидеров ===== */
