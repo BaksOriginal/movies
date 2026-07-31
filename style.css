@@ -90,6 +90,12 @@ body{
 
     overscroll-behavior: none;
 
+    /* Создаёт свой стековый контекст, чтобы собственный фон body рисовался
+       "под низом" (как фон холста), а не поверх дочерних элементов с
+       z-index:-1 (например .hearts-background) — иначе плавающие эмодзи
+       были бы видимым мертвым грузом в DOM, но полностью перекрыты фоном. */
+    isolation: isolate;
+
     background:
         radial-gradient(ellipse 60% 38% at 12% -5%, rgba(139,59,255,0.30), transparent 60%),
         radial-gradient(ellipse 55% 32% at 95% 8%, rgba(255,46,147,0.22), transparent 60%),
