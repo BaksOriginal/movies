@@ -257,6 +257,9 @@ let watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0
 let watchPartyPartnerPresence = null; // Последнее известное состояние партнёра (из Presence)
 let watchPartyPartnerOnline = false;
 let watchPartyLeaveTimer = null; // Отложенная проверка "партнёр правда вышел" (см. initWatchPartyChannel)
+let watchPartyChatMessages = []; // Сообщения чата совместного просмотра (своя таблица watch_party_messages)
+let watchPartyChatReplyTarget = null; // Сообщение, на которое сейчас отвечаем в чате совместного просмотра
+let watchPartyChatPollInterval = null; // Подстраховка на случай проблем с realtime (как у обычного чата)
 let youtubeAPIReadyPromise = null; // Кэш промиса загрузки YouTube IFrame API (грузим один раз)
 let hlsJsReadyPromise = null; // Кэш промиса загрузки hls.js (грузим один раз, только если реально нужен m3u8)
 
@@ -3577,6 +3580,7 @@ function initWatchPartyChannel() {
 
     watchPartyChannel
         .on("broadcast", { event: "sync" }, ({ payload }) => handleRemoteWPPayload(payload))
+        .on("postgres_changes", { event: "*", schema: "public", table: "watch_party_messages" }, () => onWatchPartyChatRealtimeChange())
         .on("presence", { event: "sync" }, () => updateWPPresenceUI())
         .on("presence", { event: "join" }, ({ key }) => {
             if (key === currentUser.id) return;
@@ -3655,11 +3659,13 @@ function leaveWatchPartyScreen() {
     isWatchPartyScreenOpen = false;
     if (watchPartyHeartbeat) { clearInterval(watchPartyHeartbeat); watchPartyHeartbeat = null; }
     if (watchPartyLeaveTimer) { clearTimeout(watchPartyLeaveTimer); watchPartyLeaveTimer = null; }
+    if (watchPartyChatPollInterval) { clearInterval(watchPartyChatPollInterval); watchPartyChatPollInterval = null; }
     if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
     if (watchPartyChannel) { db.removeChannel(watchPartyChannel); watchPartyChannel = null; }
     watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 };
     watchPartyPartnerPresence = null;
     watchPartyPartnerOnline = false;
+    watchPartyChatReplyTarget = null;
 }
 
 // ---------- Мелкие UI-хелперы экрана ----------
@@ -3695,6 +3701,421 @@ function showWPStatusNote(text) {
     el._hideTimer = setTimeout(() => { el.style.opacity = "0"; }, 3500);
 }
 
+// ==========================================
+// ЧАТ СОВМЕСТНОГО ПРОСМОТРА
+// ==========================================
+// Функционал повторяет обычный чат (стикеры, ответы, время, редактирование,
+// удаление, реакция сердечком), но живёт в отдельной таблице БД
+// (watch_party_messages, лимит 100 сообщений — старые чистятся триггером
+// на стороне БД) и встроен прямо в экран совместного просмотра компактным
+// блоком, а не отдельным полноэкранным чатом.
+
+// Загружает последние 100 сообщений чата совместного просмотра
+async function loadWatchPartyChatMessages() {
+    const { data, error } = await db
+        .from('watch_party_messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+    if (error) {
+        console.error("Ошибка при загрузке чата совместного просмотра:", error);
+        return;
+    }
+
+    watchPartyChatMessages = data.reverse();
+}
+
+// Реалтайм-обработчик изменений в чате совместного просмотра
+async function onWatchPartyChatRealtimeChange() {
+    await loadWatchPartyChatMessages();
+    if (isWatchPartyScreenOpen) {
+        renderWatchPartyChatMessages();
+    }
+}
+
+// ---------- Ответ на сообщение ----------
+function setWPChatReplyTarget(msg) {
+    watchPartyChatReplyTarget = msg;
+    renderWPChatReplyBar();
+    const input = document.getElementById("wpChatInput");
+    if (input) input.focus();
+}
+
+function clearWPChatReplyTarget() {
+    watchPartyChatReplyTarget = null;
+    renderWPChatReplyBar();
+}
+
+function renderWPChatReplyBar() {
+    const box = document.getElementById("wpChatReplyBarBox");
+    if (!box) return;
+
+    if (!watchPartyChatReplyTarget) {
+        box.innerHTML = "";
+        return;
+    }
+
+    box.innerHTML = `
+        <div class="chat-reply-bar">
+            <div class="chat-reply-bar-info">
+                <span class="chat-reply-bar-author"></span>
+                <span class="chat-reply-bar-text"></span>
+            </div>
+            <button type="button" class="chat-reply-bar-cancel" id="wpChatReplyCancelBtn">✕</button>
+        </div>
+    `;
+    box.querySelector(".chat-reply-bar-author").textContent = watchPartyChatReplyTarget.username;
+    box.querySelector(".chat-reply-bar-text").textContent = buildReplyPreviewText(watchPartyChatReplyTarget);
+    box.querySelector("#wpChatReplyCancelBtn").onclick = () => clearWPChatReplyTarget();
+}
+
+// ---------- Пузыри сообщений ----------
+function createWPChatBubble(msg) {
+    let bubble = document.createElement("div");
+    const isMine = currentUser && msg.user_id === currentUser.id;
+    bubble.className = "chat-bubble " + (isMine ? "chat-bubble-mine" : "chat-bubble-theirs");
+    bubble.dataset.msgId = msg.id;
+
+    if (msg.reply_to_username) {
+        let quote = document.createElement("div");
+        quote.className = "chat-reply-quote";
+        quote.innerHTML = `<span class="chat-reply-quote-author"></span><br><span class="chat-reply-quote-text"></span>`;
+        quote.querySelector(".chat-reply-quote-author").textContent = msg.reply_to_username;
+        quote.querySelector(".chat-reply-quote-text").textContent = msg.reply_to_text || "";
+        bubble.appendChild(quote);
+    }
+
+    let meta = document.createElement("div");
+    meta.className = "chat-meta";
+    meta.textContent = `${msg.username} • ${formatChatTime(msg.created_at)}`;
+
+    let text = document.createElement("div");
+    text.className = "chat-text";
+
+    if (isStickerMessage(msg.message)) {
+        bubble.classList.add("chat-bubble-sticker");
+        let img = document.createElement("img");
+        img.src = getStickerUrl(msg.message);
+        img.alt = "стикер";
+        img.className = "chat-sticker-img";
+        img.draggable = false;
+        img.oncontextmenu = (e) => e.preventDefault();
+        text.appendChild(img);
+    } else {
+        text.textContent = msg.message;
+    }
+
+    bubble.appendChild(meta);
+    bubble.appendChild(text);
+
+    if (msg.reaction) {
+        let heart = document.createElement("div");
+        heart.className = "chat-reaction-heart";
+        heart.textContent = msg.reaction;
+        bubble.appendChild(heart);
+    }
+
+    bubble.style.cursor = "pointer";
+    attachWPChatLongPress(bubble, msg, isMine);
+
+    if (!isMine) {
+        attachWPChatDoubleTap(bubble, msg);
+    }
+
+    return bubble;
+}
+
+function updateWPChatBubbleContent(bubbleEl, msg) {
+    const quoteTextEl = bubbleEl.querySelector(".chat-reply-quote-text");
+    if (quoteTextEl) {
+        const quoteText = msg.reply_to_text || "";
+        if (quoteTextEl.textContent !== quoteText) {
+            quoteTextEl.textContent = quoteText;
+        }
+    }
+
+    if (isStickerMessage(msg.message)) return;
+
+    const textEl = bubbleEl.querySelector(".chat-text");
+    if (textEl && textEl.textContent !== msg.message) {
+        textEl.textContent = msg.message;
+    }
+    const metaEl = bubbleEl.querySelector(".chat-meta");
+    const metaText = `${msg.username} • ${formatChatTime(msg.created_at)}`;
+    if (metaEl && metaEl.textContent !== metaText) {
+        metaEl.textContent = metaText;
+    }
+
+    let heartEl = bubbleEl.querySelector(".chat-reaction-heart");
+    if (msg.reaction) {
+        if (!heartEl) {
+            heartEl = document.createElement("div");
+            heartEl.className = "chat-reaction-heart";
+            bubbleEl.appendChild(heartEl);
+        }
+        heartEl.textContent = msg.reaction;
+    } else if (heartEl) {
+        heartEl.remove();
+    }
+}
+
+function attachWPChatLongPress(el, msg, isMine) {
+    let pressTimer = null;
+    let isMoving = false;
+    let startX = 0, startY = 0;
+
+    const startPress = (e) => {
+        isMoving = false;
+        if (e.type === 'touchstart') {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }
+        pressTimer = setTimeout(() => {
+            if (!isMoving) {
+                vibrate(15);
+                showWPChatMessageMenu(msg, isMine);
+            }
+        }, 600);
+    };
+
+    const cancelPress = () => {
+        if (pressTimer !== null) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+    };
+
+    const movePress = (e) => {
+        if (e.type === 'touchmove') {
+            let diffX = Math.abs(e.touches[0].clientX - startX);
+            let diffY = Math.abs(e.touches[0].clientY - startY);
+            if (diffX > 10 || diffY > 10) {
+                isMoving = true;
+                cancelPress();
+            }
+        }
+    };
+
+    el.addEventListener("mousedown", startPress);
+    el.addEventListener("mouseup", cancelPress);
+    el.addEventListener("mouseleave", cancelPress);
+    el.addEventListener("touchstart", startPress, { passive: true });
+    el.addEventListener("touchmove", movePress, { passive: true });
+    el.addEventListener("touchend", cancelPress, { passive: true });
+    el.addEventListener("touchcancel", cancelPress);
+}
+
+function attachWPChatDoubleTap(el, msg) {
+    let lastTapTime = 0;
+    const DOUBLE_TAP_MS = 300;
+
+    const handleTap = (e) => {
+        const now = Date.now();
+        if (now - lastTapTime < DOUBLE_TAP_MS) {
+            lastTapTime = 0;
+            e.preventDefault();
+            toggleWPChatHeartReaction(msg);
+        } else {
+            lastTapTime = now;
+        }
+    };
+
+    el.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        toggleWPChatHeartReaction(msg);
+    });
+    el.addEventListener("touchend", handleTap, { passive: false });
+}
+
+async function toggleWPChatHeartReaction(msg) {
+    if (!currentUser) return;
+    const alreadyMine = msg.reaction && msg.reaction_by === currentUser.id;
+    const newReaction = alreadyMine ? null : "❤️";
+    const newReactionBy = alreadyMine ? null : currentUser.id;
+
+    vibrate(20);
+
+    const local = watchPartyChatMessages.find(m => m.id === msg.id);
+    if (local) {
+        local.reaction = newReaction;
+        local.reaction_by = newReactionBy;
+        renderWatchPartyChatMessages();
+    }
+
+    const { error } = await db.from('watch_party_messages')
+        .update({ reaction: newReaction, reaction_by: newReactionBy })
+        .eq('id', msg.id);
+
+    if (error) {
+        console.error("Ошибка при сохранении реакции в чате совместного просмотра:", error);
+    }
+}
+
+function showWPChatMessageMenu(msg, isMine) {
+    const canModify = isMine && canModifyChatMessage(msg);
+    const isSticker = isStickerMessage(msg.message);
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "wpChatMsgMenuModal";
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 15px;">Сообщение</h3>
+            <div class="action-buttons">
+                <button class="btn-action-edit" id="wpChatMsgReply">↩️ Ответить</button>
+                ${canModify && !isSticker ? `<button class="btn-action-edit" id="wpChatMsgEdit">✏️ Редактировать</button>` : ``}
+                ${canModify ? `<button class="btn-action-delete" id="wpChatMsgDelete">🗑️ Удалить</button>` : ``}
+                <button class="btn-action-cancel" id="wpChatMsgCancel">${canModify ? "Отмена" : "Закрыть"}</button>
+            </div>
+            ${isMine && !canModify ? `<p style="color: #9686b8; font-size: 13px; margin-top: 12px;">Изменять и удалять сообщение можно только в течение 24 часов после отправки.</p>` : ``}
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById("wpChatMsgCancel").onclick = () => overlay.remove();
+
+    document.getElementById("wpChatMsgReply").onclick = () => {
+        overlay.remove();
+        setWPChatReplyTarget(msg);
+    };
+
+    if (!canModify) return;
+
+    const editBtn = document.getElementById("wpChatMsgEdit");
+    if (editBtn) editBtn.onclick = () => {
+        overlay.remove();
+        if (!canModifyChatMessage(msg)) {
+            alert("Время редактирования истекло (доступно только 24 часа после отправки).");
+            return;
+        }
+        showWPChatMessageEditModal(msg);
+    };
+
+    document.getElementById("wpChatMsgDelete").onclick = async () => {
+        overlay.remove();
+        if (!canModifyChatMessage(msg)) {
+            alert("Время удаления истекло (доступно только 24 часа после отправки).");
+            return;
+        }
+        if (!confirm("Удалить это сообщение?")) return;
+
+        const { error: replyUpdateError } = await db.from('watch_party_messages')
+            .update({ reply_to_text: "Сообщение удалено" })
+            .eq('reply_to_id', msg.id);
+        if (replyUpdateError) {
+            console.error("Ошибка при обновлении ответов на удаляемое сообщение:", replyUpdateError);
+        }
+
+        const { error } = await db.from('watch_party_messages').delete().eq('id', msg.id);
+        if (error) {
+            console.error("Ошибка при удалении сообщения:", error);
+            alert("Не удалось удалить сообщение.");
+            return;
+        }
+        watchPartyChatMessages = watchPartyChatMessages.filter(m => m.id !== msg.id);
+        watchPartyChatMessages.forEach(m => {
+            if (m.reply_to_id === msg.id) m.reply_to_text = "Сообщение удалено";
+        });
+        renderWatchPartyChatMessages();
+    };
+}
+
+function showWPChatMessageEditModal(msg) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "wpChatMsgEditModal";
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <h3 style="text-align: center; margin-bottom: 15px;">Редактировать сообщение</h3>
+            <form class="modal-form" id="wpChatEditForm">
+                <input type="text" id="wpChatEditInput" required>
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-save">Сохранить</button>
+                    <button type="button" class="btn-cancel" id="wpChatEditCancel">Отмена</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector("#wpChatEditInput");
+    input.value = msg.message;
+    input.focus();
+
+    overlay.querySelector("#wpChatEditCancel").onclick = () => overlay.remove();
+
+    overlay.querySelector("#wpChatEditForm").onsubmit = async (e) => {
+        e.preventDefault();
+        const newText = input.value.trim();
+        if (!newText || newText === msg.message) {
+            overlay.remove();
+            return;
+        }
+
+        const { error } = await db.from('watch_party_messages').update({ message: newText }).eq('id', msg.id);
+        if (error) {
+            console.error("Ошибка при редактировании сообщения:", error);
+            alert("Не удалось изменить сообщение.");
+            return;
+        }
+        const local = watchPartyChatMessages.find(m => m.id === msg.id);
+        if (local) local.message = newText;
+        overlay.remove();
+        renderWatchPartyChatMessages();
+    };
+}
+
+// Отрисовка (та же логика "не перерисовывать всё с нуля", что и в обычном чате)
+function renderWatchPartyChatMessages() {
+    const box = document.getElementById("wpChatBox");
+    if (!box) return;
+
+    if (watchPartyChatMessages.length === 0) {
+        if (box.dataset.rendered !== "empty") {
+            box.innerHTML = "";
+            let empty = document.createElement("p");
+            empty.style.cssText = "text-align:center;color:#9686b8;margin-top:15px;font-size:13px;";
+            empty.textContent = "Сообщений пока нет. Напишите первым!";
+            box.appendChild(empty);
+            box.dataset.rendered = "empty";
+        }
+        return;
+    }
+
+    if (box.dataset.rendered === "empty") {
+        box.innerHTML = "";
+        box.dataset.rendered = "list";
+    }
+    box.dataset.rendered = "list";
+
+    const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+
+    const renderedEls = new Map();
+    box.querySelectorAll("[data-msg-id]").forEach(el => renderedEls.set(el.dataset.msgId, el));
+    const currentIds = new Set(watchPartyChatMessages.map(m => String(m.id)));
+
+    renderedEls.forEach((el, id) => {
+        if (!currentIds.has(id)) el.remove();
+    });
+
+    let addedNew = false;
+    watchPartyChatMessages.forEach(msg => {
+        const idStr = String(msg.id);
+        const existingEl = renderedEls.get(idStr);
+        if (!existingEl) {
+            box.appendChild(createWPChatBubble(msg));
+            addedNew = true;
+        } else {
+            updateWPChatBubbleContent(existingEl, msg);
+        }
+    });
+
+    if (addedNew && wasNearBottom) {
+        box.scrollTop = box.scrollHeight;
+    }
+}
+
 // ---------- Экран совместного просмотра ----------
 async function showWatchPartyScreen() {
     startTransitionLock();
@@ -3721,6 +4142,8 @@ async function showWatchPartyScreen() {
     statusBar.innerHTML = '<span class="wp-status-dot wp-offline"></span> Подключаемся...';
     app.appendChild(statusBar);
 
+    // Баннер "партнёр смотрит другое видео, присоединиться?" — всегда над
+    // плеером, самым верхним смысловым блоком (не относится к чату).
     let joinBanner = document.createElement("div");
     joinBanner.id = "watchPartyJoinBanner";
     joinBanner.className = "wp-join-banner";
@@ -3733,6 +4156,14 @@ async function showWatchPartyScreen() {
     joinBanner.appendChild(joinBtn);
     app.appendChild(joinBanner);
 
+    // Плеер
+    let playerContainer = document.createElement("div");
+    playerContainer.id = "watchPartyPlayerContainer";
+    playerContainer.className = "wp-player-container";
+    playerContainer.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Вставьте ссылку ниже, чтобы начать</p>';
+    app.appendChild(playerContainer);
+
+    // Строка вставки ссылки + кнопка запуска рядом с ней
     let urlRow = document.createElement("div");
     urlRow.className = "chat-input-row wp-url-row";
     let urlInput = document.createElement("input");
@@ -3757,19 +4188,119 @@ async function showWatchPartyScreen() {
     urlRow.appendChild(loadBtn);
     app.appendChild(urlRow);
 
-    let playerContainer = document.createElement("div");
-    playerContainer.id = "watchPartyPlayerContainer";
-    playerContainer.className = "wp-player-container";
-    playerContainer.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Вставьте ссылку выше, чтобы начать</p>';
-    app.appendChild(playerContainer);
-
     let note = document.createElement("div");
     note.id = "watchPartyNote";
     note.className = "wp-note";
     app.appendChild(note);
 
+    // ---------- Чат (компактный, встроенный, своя таблица watch_party_messages) ----------
+    let chatLabel = document.createElement("div");
+    chatLabel.className = "wp-chat-label";
+    chatLabel.textContent = "💬 Чат";
+    app.appendChild(chatLabel);
+
+    let wpChatBox = document.createElement("div");
+    wpChatBox.className = "chat-box wp-chat-box";
+    wpChatBox.id = "wpChatBox";
+    app.appendChild(wpChatBox);
+
+    let wpReplyBarBox = document.createElement("div");
+    wpReplyBarBox.id = "wpChatReplyBarBox";
+    app.appendChild(wpReplyBarBox);
+    watchPartyChatReplyTarget = null;
+    renderWPChatReplyBar();
+
+    let wpInputRow = document.createElement("div");
+    wpInputRow.className = "chat-input-row";
+
+    let wpChatInput = document.createElement("input");
+    wpChatInput.type = "text";
+    wpChatInput.id = "wpChatInput";
+    wpChatInput.placeholder = "Написать сообщение...";
+    wpChatInput.autocomplete = "off";
+
+    let wpStickerBtn = document.createElement("button");
+    wpStickerBtn.id = "wpChatStickerBtn";
+    wpStickerBtn.type = "button";
+    wpStickerBtn.textContent = "😊";
+
+    let wpSendBtn = document.createElement("button");
+    wpSendBtn.id = "wpChatSendBtn";
+    wpSendBtn.textContent = "➤";
+
+    const sendWPChatMessage = async (text) => {
+        if (!text || !currentUser) return;
+
+        const username = getUsernameFromEmail(currentUser.email);
+        const payload = { user_id: currentUser.id, username: username, message: text };
+
+        if (watchPartyChatReplyTarget) {
+            payload.reply_to_id = watchPartyChatReplyTarget.id;
+            payload.reply_to_username = watchPartyChatReplyTarget.username;
+            payload.reply_to_text = buildReplyPreviewText(watchPartyChatReplyTarget);
+        }
+
+        const { data, error } = await db.from('watch_party_messages')
+            .insert([payload])
+            .select()
+            .single();
+
+        if (error) {
+            console.error("Ошибка при отправке сообщения в чат совместного просмотра:", error);
+            alert("Не удалось отправить сообщение.");
+            return;
+        }
+
+        clearWPChatReplyTarget();
+
+        if (data) {
+            watchPartyChatMessages.push(data);
+            if (watchPartyChatMessages.length > 100) watchPartyChatMessages.shift();
+            renderWatchPartyChatMessages();
+        }
+    };
+
+    const sendWPMessageFromInput = async () => {
+        const text = wpChatInput.value.trim();
+        if (!text) return;
+
+        wpChatInput.value = "";
+        wpChatInput.focus();
+
+        await sendWPChatMessage(text);
+    };
+
+    wpStickerBtn.onclick = () => {
+        if (!currentUser) return;
+        showStickerPicker((stickerUrl) => sendWPChatMessage(STICKER_PREFIX + stickerUrl));
+    };
+
+    wpSendBtn.onclick = sendWPMessageFromInput;
+    wpChatInput.onkeydown = (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            sendWPMessageFromInput();
+        }
+    };
+
+    wpInputRow.appendChild(wpChatInput);
+    wpInputRow.appendChild(wpStickerBtn);
+    wpInputRow.appendChild(wpSendBtn);
+    app.appendChild(wpInputRow);
+
     initWatchPartyChannel();
     renderWPStatusBar();
+
+    await loadWatchPartyChatMessages();
+    renderWatchPartyChatMessages();
+
+    // Подстраховка на случай проблем с realtime — как у обычного чата
+    if (watchPartyChatPollInterval) clearInterval(watchPartyChatPollInterval);
+    watchPartyChatPollInterval = setInterval(async () => {
+        if (!isWatchPartyScreenOpen) return;
+        await loadWatchPartyChatMessages();
+        renderWatchPartyChatMessages();
+    }, 4000);
 
     // Собственная навигация — как у чата и игр, не трогает историю каталога
     let nav = document.createElement("div");
