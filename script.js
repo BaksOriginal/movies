@@ -240,6 +240,26 @@ let currentWatchedBucket = null; // null | 'top' | 'mine' | 'partner' | 'both'
 let isWishlistScreenOpen = false;
 
 // ==========================================
+// Состояние совместного просмотра (Watch Party)
+// ==========================================
+// Синхронизация построена на Supabase Realtime: канал с двумя механизмами —
+// Broadcast (мгновенные события play/pause/seek/load, без записи в БД и без
+// каких-либо лимитов на "N запросов в час") и Presence (кто сейчас находится
+// на экране совместного просмотра — на этом строится автопауза при потере
+// интернета у собеседника: событие "leave" присылает сам сервер Supabase,
+// как только соединение реально обрывается).
+let isWatchPartyScreenOpen = false;
+let watchPartyChannel = null; // Supabase Realtime канал (broadcast + presence)
+let watchPartyPlayer = null; // Унифицированная обёртка над текущим плеером (video/YouTube/Rutube)
+let isApplyingRemoteWPUpdate = false; // Пока true — наши же события play/pause/seek не рассылаются обратно
+let watchPartyHeartbeat = null; // Интервал, который раз в 5 сек досылает текущее время (коррекция рассинхрона)
+let watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 }; // То, что мы транслируем партнёру
+let watchPartyPartnerPresence = null; // Последнее известное состояние партнёра (из Presence)
+let watchPartyPartnerOnline = false;
+let youtubeAPIReadyPromise = null; // Кэш промиса загрузки YouTube IFrame API (грузим один раз)
+let hlsJsReadyPromise = null; // Кэш промиса загрузки hls.js (грузим один раз, только если реально нужен m3u8)
+
+// ==========================================
 // РЕЗЕРВНОЕ КОПИРОВАНИЕ СЕССИИ (COOKIE BACKUP)
 // ==========================================
 function saveSessionBackup(session) {
@@ -350,6 +370,19 @@ db.auth.onAuthStateChange(async (event, session) => {
             db.removeChannel(realtimeChannel);
             realtimeChannel = null;
         }
+        if (watchPartyChannel) {
+            db.removeChannel(watchPartyChannel);
+            watchPartyChannel = null;
+        }
+        if (watchPartyHeartbeat) {
+            clearInterval(watchPartyHeartbeat);
+            watchPartyHeartbeat = null;
+        }
+        isWatchPartyScreenOpen = false;
+        watchPartyPlayer = null;
+        watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 };
+        watchPartyPartnerPresence = null;
+        watchPartyPartnerOnline = false;
         showLoginScreen();
     }
 });
@@ -1576,6 +1609,12 @@ async function showHome() {
         let hrBeforeChat = document.createElement("hr");
         hrBeforeChat.className = "neon-divider";
         app.appendChild(hrBeforeChat);
+
+        let watchPartyBtn = document.createElement("button");
+        watchPartyBtn.className = "btn-watchparty-gold";
+        watchPartyBtn.textContent = "🎬 Совместный просмотр";
+        watchPartyBtn.onclick = () => showWatchPartyScreen();
+        app.appendChild(watchPartyBtn);
 
         let chatBtn = document.createElement("button");
         chatBtn.className = "btn-chat-purple";
@@ -3054,6 +3093,655 @@ async function showChatScreen() {
     }
 
     chatInput.focus();
+}
+
+// ==========================================
+// СОВМЕСТНЫЙ ПРОСМОТР (Watch Party)
+// ==========================================
+// Поддерживаемые источники на старте: YouTube, Rutube, а также прямые
+// ссылки на файлы .mp4 / .webm / .m3u8 (HLS). ВК Видео и Одноклассники
+// сознательно не поддерживаются — у обоих сервисов на данный момент нет
+// рабочего программного API для управления встроенным плеером.
+
+// ---------- Определение источника по ссылке ----------
+function parseWatchPartyUrl(rawUrl) {
+    let url;
+    try {
+        url = new URL(String(rawUrl).trim());
+    } catch (e) {
+        return null;
+    }
+
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    const path = url.pathname;
+
+    // YouTube
+    if (host === "youtu.be") {
+        const id = path.slice(1).split("/")[0];
+        if (id) return { type: "youtube", ref: id };
+    }
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+        if (path === "/watch") {
+            const id = url.searchParams.get("v");
+            if (id) return { type: "youtube", ref: id };
+        }
+        const embedMatch = path.match(/^\/(?:embed|shorts|live)\/([a-zA-Z0-9_-]+)/);
+        if (embedMatch) return { type: "youtube", ref: embedMatch[1] };
+    }
+
+    // Rutube
+    if (host === "rutube.ru") {
+        const m = path.match(/\/(?:video|play\/embed|shorts)\/([a-zA-Z0-9]+)/);
+        if (m) return { type: "rutube", ref: m[1] };
+    }
+
+    // Прямые файлы
+    const cleanPath = path.toLowerCase();
+    if (cleanPath.endsWith(".m3u8")) return { type: "hls", ref: url.href };
+    if (cleanPath.endsWith(".mp4") || cleanPath.endsWith(".webm")) return { type: "direct", ref: url.href };
+
+    return null;
+}
+
+function describeWPSource(type) {
+    if (type === "youtube") return "YouTube-видео";
+    if (type === "rutube") return "видео с Rutube";
+    if (type === "hls") return "видеопоток (m3u8)";
+    return "видеофайл";
+}
+
+// ---------- Ленивая загрузка внешних плееров ----------
+function ensureYouTubeAPI() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (youtubeAPIReadyPromise) return youtubeAPIReadyPromise;
+    youtubeAPIReadyPromise = new Promise((resolve) => {
+        const prevCallback = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = () => {
+            if (typeof prevCallback === "function") prevCallback();
+            resolve();
+        };
+        const script = document.createElement("script");
+        script.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(script);
+    });
+    return youtubeAPIReadyPromise;
+}
+
+function ensureHlsJs() {
+    if (window.Hls) return Promise.resolve();
+    if (hlsJsReadyPromise) return hlsJsReadyPromise;
+    hlsJsReadyPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Не удалось загрузить hls.js"));
+        document.head.appendChild(script);
+    });
+    return hlsJsReadyPromise;
+}
+
+// ---------- Общая обёртка для <video> (прямые mp4/webm и HLS) ----------
+function wireWatchPartyVideoElement(video, type) {
+    const obj = {
+        type: type,
+        onPlay: null,
+        onPause: null,
+        onSeek: null,
+        play() {
+            const p = video.play();
+            if (p && p.catch) p.catch(() => {});
+        },
+        pause() {
+            video.pause();
+        },
+        seekTo(t) {
+            try { video.currentTime = Math.max(0, t); } catch (e) {}
+        },
+        getCurrentTime() {
+            return video.currentTime || 0;
+        },
+        destroy() {
+            try { video.pause(); video.removeAttribute("src"); video.load(); } catch (e) {}
+            video.remove();
+        }
+    };
+
+    video.addEventListener("play", () => {
+        if (!isApplyingRemoteWPUpdate && obj.onPlay) obj.onPlay(video.currentTime);
+    });
+    video.addEventListener("pause", () => {
+        if (!isApplyingRemoteWPUpdate && obj.onPause) obj.onPause(video.currentTime);
+    });
+    video.addEventListener("seeked", () => {
+        if (!isApplyingRemoteWPUpdate && obj.onSeek) obj.onSeek(video.currentTime);
+    });
+
+    return obj;
+}
+
+async function createWPDirectPlayer(mountEl, url) {
+    mountEl.innerHTML = "";
+    const video = document.createElement("video");
+    video.className = "wp-video";
+    video.controls = true;
+    video.playsInline = true;
+    video.src = url;
+    mountEl.appendChild(video);
+    return wireWatchPartyVideoElement(video, "direct");
+}
+
+async function createWPHlsPlayer(mountEl, url) {
+    mountEl.innerHTML = "";
+    const video = document.createElement("video");
+    video.className = "wp-video";
+    video.controls = true;
+    video.playsInline = true;
+    mountEl.appendChild(video);
+
+    let hlsInstance = null;
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari умеет HLS нативно
+        video.src = url;
+    } else {
+        await ensureHlsJs();
+        hlsInstance = new Hls();
+        hlsInstance.loadSource(url);
+        hlsInstance.attachMedia(video);
+    }
+
+    const obj = wireWatchPartyVideoElement(video, "hls");
+    const originalDestroy = obj.destroy;
+    obj.destroy = () => {
+        if (hlsInstance) { try { hlsInstance.destroy(); } catch (e) {} }
+        originalDestroy();
+    };
+    return obj;
+}
+
+// ---------- YouTube (IFrame Player API) ----------
+async function createWPYouTubePlayer(mountEl, videoId) {
+    mountEl.innerHTML = "";
+    const holder = document.createElement("div");
+    holder.id = "wpYouTube_" + Math.random().toString(36).slice(2);
+    mountEl.appendChild(holder);
+
+    await ensureYouTubeAPI();
+
+    return await new Promise((resolve) => {
+        const obj = {
+            type: "youtube",
+            onPlay: null,
+            onPause: null,
+            onSeek: null,
+            _player: null,
+            _lastTime: 0,
+            _poll: null,
+            play() { this._player && this._player.playVideo(); },
+            pause() { this._player && this._player.pauseVideo(); },
+            seekTo(t) { this._player && this._player.seekTo(t, true); },
+            getCurrentTime() { return this._player ? (this._player.getCurrentTime() || 0) : 0; },
+            destroy() {
+                if (this._poll) clearInterval(this._poll);
+                if (this._player) { try { this._player.destroy(); } catch (e) {} }
+            }
+        };
+
+        obj._player = new YT.Player(holder.id, {
+            videoId: videoId,
+            playerVars: { playsinline: 1, rel: 0 },
+            events: {
+                onReady: () => {
+                    // У YouTube нет отдельного события перемотки — отслеживаем
+                    // скачки времени сами, раз в секунду, пока видео играет.
+                    obj._poll = setInterval(() => {
+                        if (isApplyingRemoteWPUpdate || !obj._player || typeof obj._player.getPlayerState !== "function") return;
+                        if (obj._player.getPlayerState() !== 1) return; // 1 = playing
+                        const now = obj._player.getCurrentTime();
+                        const expected = obj._lastTime + 1;
+                        if (Math.abs(now - expected) > 1.5) {
+                            obj.onSeek && obj.onSeek(now);
+                        }
+                        obj._lastTime = now;
+                    }, 1000);
+                    resolve(obj);
+                },
+                onStateChange: (e) => {
+                    if (isApplyingRemoteWPUpdate) return;
+                    if (e.data === YT.PlayerState.PLAYING) {
+                        obj.onPlay && obj.onPlay(obj._player.getCurrentTime());
+                    } else if (e.data === YT.PlayerState.PAUSED) {
+                        obj.onPause && obj.onPause(obj._player.getCurrentTime());
+                    }
+                }
+            }
+        });
+    });
+}
+
+// ---------- Rutube (embed + postMessage API) ----------
+async function createWPRutubePlayer(mountEl, videoId) {
+    mountEl.innerHTML = "";
+    const iframe = document.createElement("iframe");
+    iframe.className = "wp-rutube-frame";
+    iframe.src = "https://rutube.ru/play/embed/" + videoId + "/";
+    iframe.setAttribute("frameborder", "0");
+    iframe.setAttribute("allow", "clipboard-write; autoplay; fullscreen");
+    iframe.setAttribute("webkitAllowFullScreen", "");
+    iframe.setAttribute("allowFullScreen", "");
+    mountEl.appendChild(iframe);
+
+    const obj = {
+        type: "rutube",
+        onPlay: null,
+        onPause: null,
+        onSeek: null,
+        _lastTime: 0,
+        _msgHandler: null,
+        play() { this._send("player:play"); },
+        pause() { this._send("player:pause"); },
+        seekTo(t) { this._send("player:setCurrentTime", { time: t }); },
+        getCurrentTime() { return this._lastTime; },
+        _send(type, data) {
+            if (!iframe.contentWindow) return;
+            iframe.contentWindow.postMessage(JSON.stringify({ type: type, data: data || {} }), "*");
+        },
+        destroy() {
+            if (this._msgHandler) window.removeEventListener("message", this._msgHandler);
+            iframe.remove();
+        }
+    };
+
+    let resolveReady;
+    const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+
+    obj._msgHandler = (event) => {
+        if (event.source !== iframe.contentWindow) return;
+        let msg;
+        try { msg = JSON.parse(event.data); } catch (e) { return; }
+        if (!msg || !msg.type) return;
+
+        if (msg.type === "player:ready") {
+            resolveReady();
+        } else if (msg.type === "player:currentTime" && msg.data) {
+            obj._lastTime = msg.data.time ?? msg.data.currentTime ?? obj._lastTime;
+        } else if (msg.type === "player:changeState" && msg.data) {
+            if (isApplyingRemoteWPUpdate) return;
+            const state = msg.data.state;
+            if (state === "playing") obj.onPlay && obj.onPlay(obj._lastTime);
+            else if (state === "pause" || state === "paused") obj.onPause && obj.onPause(obj._lastTime);
+        }
+    };
+    window.addEventListener("message", obj._msgHandler);
+
+    // Резервный таймаут — если сообщение player:ready почему-то не пришло,
+    // не блокируем экран навсегда.
+    await Promise.race([readyPromise, new Promise((r) => setTimeout(r, 3000))]);
+
+    return obj;
+}
+
+// ---------- Загрузка источника (своя или пришедшая от партнёра) ----------
+async function loadWatchPartySource(rawUrl, opts) {
+    opts = opts || {};
+    const parsed = parseWatchPartyUrl(rawUrl);
+    if (!parsed) {
+        showWPStatusNote("⚠️ Ссылка не распознана. Поддерживаются YouTube, Rutube и прямые ссылки на .mp4/.webm/.m3u8");
+        return;
+    }
+
+    const container = document.getElementById("watchPartyPlayerContainer");
+    if (!container) return;
+    container.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Загружаем видео...</p>';
+
+    if (watchPartyPlayer) {
+        try { watchPartyPlayer.destroy(); } catch (e) {}
+        watchPartyPlayer = null;
+    }
+
+    let player = null;
+    try {
+        if (parsed.type === "direct") player = await createWPDirectPlayer(container, parsed.ref);
+        else if (parsed.type === "hls") player = await createWPHlsPlayer(container, parsed.ref);
+        else if (parsed.type === "youtube") player = await createWPYouTubePlayer(container, parsed.ref);
+        else if (parsed.type === "rutube") player = await createWPRutubePlayer(container, parsed.ref);
+    } catch (e) {
+        console.error("Ошибка загрузки видео для совместного просмотра:", e);
+    }
+
+    if (!player) {
+        container.innerHTML = '<p style="text-align:center;color:var(--pink-soft);padding:40px 0;">Не удалось загрузить видео.</p>';
+        return;
+    }
+
+    if (!document.getElementById("watchPartyPlayerContainer")) {
+        // Пользователь успел уйти с экрана, пока плеер грузился
+        try { player.destroy(); } catch (e) {}
+        return;
+    }
+
+    player.onPlay = handleLocalWPPlay;
+    player.onPause = handleLocalWPPause;
+    player.onSeek = handleLocalWPSeek;
+
+    watchPartyPlayer = player;
+    const initialTime = opts.initialTime || 0;
+    watchPartySelfState = {
+        url: rawUrl,
+        sourceType: parsed.type,
+        playing: !!opts.autoplay,
+        time: initialTime
+    };
+
+    if (initialTime > 0.5) {
+        applyRemoteWP(() => player.seekTo(initialTime));
+    }
+    if (opts.autoplay) {
+        applyRemoteWP(() => player.play());
+    }
+
+    await trackWPPresence();
+    renderWPStatusBar();
+
+    if (opts.announce !== false) {
+        broadcastWP("load", { url: rawUrl, sourceType: parsed.type, time: initialTime });
+    }
+}
+
+// ---------- Локальные действия -> рассылка партнёру ----------
+function handleLocalWPPlay(time) {
+    watchPartySelfState.playing = true;
+    watchPartySelfState.time = time;
+    broadcastWP("play", { time: time });
+    trackWPPresence();
+}
+function handleLocalWPPause(time) {
+    watchPartySelfState.playing = false;
+    watchPartySelfState.time = time;
+    broadcastWP("pause", { time: time });
+    trackWPPresence();
+}
+function handleLocalWPSeek(time) {
+    watchPartySelfState.time = time;
+    broadcastWP("seek", { time: time });
+    trackWPPresence();
+}
+
+function applyRemoteWP(fn) {
+    isApplyingRemoteWPUpdate = true;
+    try { fn(); } catch (e) { console.error(e); }
+    setTimeout(() => { isApplyingRemoteWPUpdate = false; }, 400);
+}
+
+function broadcastWP(type, extra) {
+    if (!watchPartyChannel || !currentUser) return;
+    watchPartyChannel.send({
+        type: "broadcast",
+        event: "sync",
+        payload: Object.assign({
+            type: type,
+            senderId: currentUser.id,
+            senderName: getUsernameFromEmail(currentUser.email)
+        }, extra || {})
+    });
+}
+
+async function trackWPPresence() {
+    if (!watchPartyChannel || !currentUser) return;
+    try {
+        await watchPartyChannel.track({
+            username: getUsernameFromEmail(currentUser.email),
+            url: watchPartySelfState.url,
+            sourceType: watchPartySelfState.sourceType,
+            playing: watchPartySelfState.playing,
+            time: watchPartySelfState.time,
+            updatedAt: Date.now()
+        });
+    } catch (e) {
+        console.error("Не удалось обновить presence совместного просмотра:", e);
+    }
+}
+
+// ---------- Обработка событий от партнёра ----------
+function handleRemoteWPPayload(payload) {
+    if (!payload || !currentUser || payload.senderId === currentUser.id) return;
+    const senderName = payload.senderName || "Партнёр";
+
+    if (payload.type === "load") {
+        showWPStatusNote(senderName + " включил(а): " + describeWPSource(payload.sourceType));
+        loadWatchPartySource(payload.url, { initialTime: payload.time || 0, announce: false, autoplay: false });
+        return;
+    }
+
+    if (!watchPartyPlayer) return;
+
+    if (payload.type === "play") {
+        applyRemoteWP(() => {
+            const drift = Math.abs(watchPartyPlayer.getCurrentTime() - (payload.time || 0));
+            if (drift > 1.2) watchPartyPlayer.seekTo(payload.time || 0);
+            watchPartyPlayer.play();
+        });
+        watchPartySelfState.playing = true;
+        showWPStatusNote(senderName + " нажал(а) ▶️ Play");
+    } else if (payload.type === "pause") {
+        applyRemoteWP(() => {
+            watchPartyPlayer.pause();
+            watchPartyPlayer.seekTo(payload.time || 0);
+        });
+        watchPartySelfState.playing = false;
+        showWPStatusNote(senderName + " поставил(а) ⏸ на паузу");
+    } else if (payload.type === "seek") {
+        applyRemoteWP(() => watchPartyPlayer.seekTo(payload.time || 0));
+        watchPartySelfState.time = payload.time || 0;
+    } else if (payload.type === "heartbeat") {
+        const drift = Math.abs(watchPartyPlayer.getCurrentTime() - (payload.time || 0));
+        if (drift > 2.5) {
+            applyRemoteWP(() => watchPartyPlayer.seekTo(payload.time || 0));
+        }
+    }
+}
+
+// ---------- Presence: кто сейчас в комнате совместного просмотра ----------
+function updateWPPresenceUI() {
+    if (!watchPartyChannel || !currentUser) return;
+    const state = watchPartyChannel.presenceState();
+    let foundPartner = null;
+    for (const key in state) {
+        if (key === currentUser.id) continue;
+        const entries = state[key];
+        if (entries && entries.length) foundPartner = entries[entries.length - 1];
+    }
+    watchPartyPartnerOnline = !!foundPartner;
+    watchPartyPartnerPresence = foundPartner;
+    renderWPStatusBar();
+}
+
+function joinPartnerWatchParty() {
+    if (!watchPartyPartnerPresence || !watchPartyPartnerPresence.url) return;
+    const p = watchPartyPartnerPresence;
+    const estTime = (p.time || 0) + (p.playing ? Math.max(0, (Date.now() - (p.updatedAt || Date.now())) / 1000) : 0);
+    loadWatchPartySource(p.url, { initialTime: estTime, autoplay: !!p.playing, announce: false });
+}
+
+// ---------- Канал Realtime ----------
+function initWatchPartyChannel() {
+    if (watchPartyChannel || !currentUser) return;
+
+    watchPartyChannel = db.channel("watch_party_room", {
+        config: { presence: { key: currentUser.id } }
+    });
+
+    watchPartyChannel
+        .on("broadcast", { event: "sync" }, ({ payload }) => handleRemoteWPPayload(payload))
+        .on("presence", { event: "sync" }, () => updateWPPresenceUI())
+        .on("presence", { event: "join" }, ({ key }) => {
+            if (key === currentUser.id) return;
+            updateWPPresenceUI();
+            showWPStatusNote("Партнёр зашёл в совместный просмотр");
+        })
+        .on("presence", { event: "leave" }, ({ key }) => {
+            if (key === currentUser.id) return;
+            watchPartyPartnerOnline = false;
+            watchPartyPartnerPresence = null;
+            renderWPStatusBar();
+            if (watchPartyPlayer && watchPartySelfState.playing) {
+                applyRemoteWP(() => watchPartyPlayer.pause());
+                watchPartySelfState.playing = false;
+            }
+            showWPStatusNote("⚠️ Партнёр отключился — видео поставлено на паузу");
+        })
+        .subscribe(async (status) => {
+            if (status === "SUBSCRIBED") {
+                await trackWPPresence();
+                updateWPPresenceUI();
+            }
+        });
+
+    if (watchPartyHeartbeat) clearInterval(watchPartyHeartbeat);
+    watchPartyHeartbeat = setInterval(() => {
+        if (!isWatchPartyScreenOpen || !watchPartyPlayer || !watchPartySelfState.playing) return;
+        const t = watchPartyPlayer.getCurrentTime();
+        watchPartySelfState.time = t;
+        broadcastWP("heartbeat", { time: t });
+    }, 5000);
+}
+
+function leaveWatchPartyScreen() {
+    isWatchPartyScreenOpen = false;
+    if (watchPartyHeartbeat) { clearInterval(watchPartyHeartbeat); watchPartyHeartbeat = null; }
+    if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
+    if (watchPartyChannel) { db.removeChannel(watchPartyChannel); watchPartyChannel = null; }
+    watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 };
+    watchPartyPartnerPresence = null;
+    watchPartyPartnerOnline = false;
+}
+
+// ---------- Мелкие UI-хелперы экрана ----------
+function renderWPStatusBar() {
+    const bar = document.getElementById("watchPartyStatusBar");
+    if (bar) {
+        bar.innerHTML = watchPartyPartnerOnline
+            ? '<span class="wp-status-dot wp-online"></span> Партнёр в совместном просмотре'
+            : '<span class="wp-status-dot wp-offline"></span> Партнёр сейчас не смотрит с вами';
+    }
+
+    const banner = document.getElementById("watchPartyJoinBanner");
+    if (!banner) return;
+
+    const partnerHasOther = watchPartyPartnerOnline && watchPartyPartnerPresence && watchPartyPartnerPresence.url &&
+        watchPartySelfState.url !== watchPartyPartnerPresence.url;
+
+    if (partnerHasOther) {
+        banner.style.display = "flex";
+        const textEl = banner.querySelector("#wpJoinText");
+        if (textEl) textEl.textContent = "Партнёр сейчас смотрит: " + describeWPSource(watchPartyPartnerPresence.sourceType);
+    } else {
+        banner.style.display = "none";
+    }
+}
+
+function showWPStatusNote(text) {
+    const el = document.getElementById("watchPartyNote");
+    if (!el) return;
+    el.textContent = text;
+    el.style.opacity = "1";
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(() => { el.style.opacity = "0"; }, 3500);
+}
+
+// ---------- Экран совместного просмотра ----------
+async function showWatchPartyScreen() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
+    currentCategoryName = null;
+    if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
+    if (typeof activeGameCleanup !== "undefined" && activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    app.innerHTML = "";
+    isWatchPartyScreenOpen = true;
+
+    let title = document.createElement("h1");
+    setEmojiTitle(title, "🎬 Совместный просмотр");
+    app.appendChild(title);
+
+    let statusBar = document.createElement("div");
+    statusBar.id = "watchPartyStatusBar";
+    statusBar.className = "wp-status-bar";
+    statusBar.innerHTML = '<span class="wp-status-dot wp-offline"></span> Подключаемся...';
+    app.appendChild(statusBar);
+
+    let joinBanner = document.createElement("div");
+    joinBanner.id = "watchPartyJoinBanner";
+    joinBanner.className = "wp-join-banner";
+    joinBanner.style.display = "none";
+    joinBanner.innerHTML = '<span id="wpJoinText"></span>';
+    let joinBtn = document.createElement("button");
+    joinBtn.className = "btn-watchparty-gold";
+    joinBtn.textContent = "▶️ Присоединиться";
+    joinBtn.onclick = () => joinPartnerWatchParty();
+    joinBanner.appendChild(joinBtn);
+    app.appendChild(joinBanner);
+
+    let urlRow = document.createElement("div");
+    urlRow.className = "chat-input-row wp-url-row";
+    let urlInput = document.createElement("input");
+    urlInput.type = "text";
+    urlInput.id = "wpUrlInput";
+    urlInput.placeholder = "Ссылка: YouTube, Rutube, .mp4/.webm/.m3u8";
+    urlInput.autocomplete = "off";
+    let loadBtn = document.createElement("button");
+    loadBtn.id = "wpLoadBtn";
+    loadBtn.type = "button";
+    loadBtn.textContent = "▶️";
+    const doLoad = () => {
+        const val = urlInput.value.trim();
+        if (!val) return;
+        loadWatchPartySource(val, { initialTime: 0, autoplay: false, announce: true });
+    };
+    loadBtn.onclick = doLoad;
+    urlInput.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); doLoad(); }
+    };
+    urlRow.appendChild(urlInput);
+    urlRow.appendChild(loadBtn);
+    app.appendChild(urlRow);
+
+    let playerContainer = document.createElement("div");
+    playerContainer.id = "watchPartyPlayerContainer";
+    playerContainer.className = "wp-player-container";
+    playerContainer.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Вставьте ссылку выше, чтобы начать</p>';
+    app.appendChild(playerContainer);
+
+    let note = document.createElement("div");
+    note.id = "watchPartyNote";
+    note.className = "wp-note";
+    app.appendChild(note);
+
+    initWatchPartyChannel();
+    renderWPStatusBar();
+
+    // Собственная навигация — как у чата и игр, не трогает историю каталога
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+
+    let homeBtn = document.createElement("button");
+    homeBtn.textContent = "🏠 Домой";
+    homeBtn.onclick = () => {
+        leaveWatchPartyScreen();
+        showHome();
+    };
+    nav.appendChild(homeBtn);
+
+    let container = document.querySelector(".container");
+    if (container) {
+        container.insertBefore(nav, container.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
 }
 
 // Функция открытия модалки для ДОБАВЛЕНИЯ или РЕДАКТИРОВАНИЯ

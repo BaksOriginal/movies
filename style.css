@@ -972,6 +972,136 @@ button:nth-child(6){
     filter: brightness(0.92);
 }
 
+/* Кнопка "Совместный просмотр" — неоновый золотой */
+.btn-watchparty-gold {
+    background: transparent !important;
+    animation: fadeUp 0.35s ease both !important;
+    border: 1.5px solid var(--gold) !important;
+    color: var(--gold) !important;
+    text-shadow: 0 0 10px rgba(255,209,92,0.5);
+    box-shadow: var(--glow-gold) !important;
+}
+
+.btn-watchparty-gold:hover {
+    border-color: #ffe08a !important;
+    box-shadow: 0 0 28px rgba(255,209,92,0.6) !important;
+}
+
+.btn-watchparty-gold:active {
+    filter: brightness(0.92);
+}
+
+/* ===== Экран "Совместный просмотр" ===== */
+.wp-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+    padding: 10px 16px;
+    margin-bottom: 12px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+}
+
+.wp-status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.wp-status-dot.wp-online {
+    background: #1fe8a8;
+    box-shadow: 0 0 8px rgba(31,232,168,0.8);
+}
+
+.wp-status-dot.wp-offline {
+    background: #6b6080;
+}
+
+.wp-join-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+    text-align: center;
+    padding: 16px;
+    margin-bottom: 12px;
+    background: linear-gradient(150deg, var(--panel-2), var(--panel));
+    border: 1px solid rgba(255,209,92,0.3);
+    border-radius: 18px;
+    color: var(--text);
+    font-size: 14px;
+}
+
+.wp-join-banner button {
+    margin: 0;
+    width: auto;
+    min-height: 44px;
+    padding: 10px 24px;
+}
+
+.wp-url-row {
+    margin-bottom: 14px;
+}
+
+.wp-url-row #wpLoadBtn {
+    width: 46px;
+    min-width: 46px;
+    min-height: 46px;
+    height: 46px;
+    padding: 0;
+    margin: 0;
+    border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid var(--gold);
+    color: var(--gold);
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--glow-gold);
+}
+
+.wp-url-row #wpLoadBtn:hover {
+    border-color: #ffe08a;
+    box-shadow: 0 0 24px rgba(255,209,92,0.6);
+    transform: none;
+}
+
+.wp-player-container {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+    margin-bottom: 10px;
+}
+
+.wp-video,
+.wp-rutube-frame,
+.wp-player-container iframe {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border: none;
+}
+
+.wp-note {
+    min-height: 18px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--text-faint);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    margin-top: 4px;
+}
+
 /* ===== Экран "Игры": карточки игр и таблица лидеров ===== */
 .game-card {
     background: linear-gradient(150deg, var(--panel-2), var(--panel));
