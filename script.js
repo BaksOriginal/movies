@@ -1911,6 +1911,16 @@ function showStickerPicker(onPick) {
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
+    // На некоторых устройствах долгое нажатие может сработать дважды подряд
+    // (например, от mousedown и touchstart одновременно) — тогда в DOM
+    // оказывались ДВЕ одинаковые модалки с одинаковыми id, и обработчики
+    // клика через getElementById привязывались к первой (уже невидимой),
+    // а пользователь видел вторую — из-за этого "Редактировать"/"Удалить"
+    // визуально были на месте, но не реагировали на нажатия.
+    // Удаляем предыдущую копию модалки тайтла, если она вдруг ещё осталась.
+    const existingMenu = document.getElementById("actionMenuModal");
+    if (existingMenu) existingMenu.remove();
+
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "actionMenuModal";
@@ -1947,28 +1957,28 @@ function showActionMenu(itemText) {
     });
 
     // Логика кнопки трейлера
-    document.getElementById("actTrailer").onclick = () => {
+    overlay.querySelector("#actTrailer").onclick = () => {
         overlay.remove();
         const query = encodeURIComponent(itemText + " трейлер");
         window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
     };
 
-    document.getElementById("actComment").onclick = () => {
+    overlay.querySelector("#actComment").onclick = () => {
         overlay.remove();
         showCommentsModal(itemText);
     };
 
-    document.getElementById("actEdit").onclick = () => {
+    overlay.querySelector("#actEdit").onclick = () => {
         overlay.remove();
         handleEditClick(itemText);
     };
 
-    document.getElementById("actDelete").onclick = () => {
+    overlay.querySelector("#actDelete").onclick = () => {
         overlay.remove();
         handleDeleteClick(itemText);
     };
 
-    document.getElementById("actCancel").onclick = () => {
+    overlay.querySelector("#actCancel").onclick = () => {
         overlay.remove();
     };
 }
@@ -4178,7 +4188,8 @@ async function showWatchPartyScreen() {
     let loadBtn = document.createElement("button");
     loadBtn.id = "wpLoadBtn";
     loadBtn.type = "button";
-    loadBtn.textContent = "▶️";
+    loadBtn.className = "chat-send-btn"; // тот же стиль, что и у кнопки отправки сообщений в чат
+    loadBtn.textContent = "➤"; // тот же эмодзи, что и у кнопки отправки сообщений в чат
     const doLoad = () => {
         const val = urlInput.value.trim();
         if (!val) return;
@@ -7892,6 +7903,16 @@ async function startRhythmLevel(track) {
 
 // Генератор бесконечных нежных сердечек на заднем фоне
 function initHeartsBackground() {
+    // Если скрипт выполняется до того, как <body> появился в DOM (например,
+    // из-за того, что тег <script> оказался в <head> без defer), document.body
+    // ещё null и весь дальнейший код ниже по файлу просто падал с ошибкой,
+    // не долетая ни до этой функции, ни до подключения стилей ниже. Ждём
+    // готовности документа и пробуем снова.
+    if (!document.body) {
+        document.addEventListener('DOMContentLoaded', initHeartsBackground, { once: true });
+        return;
+    }
+
     // Если контейнер уже почему-то существует, не создаем его заново
     if (document.querySelector('.hearts-background')) return;
 
@@ -7899,7 +7920,13 @@ function initHeartsBackground() {
     container.className = 'hearts-background';
     document.body.appendChild(container);
 
+    // Ограничиваем максимальное число одновременно летающих эмодзи,
+    // чтобы не перегружать страницу
+    const MAX_FLOATING_EMOJIS = 10;
+
     function spawnHeart() {
+        if (container.childElementCount >= MAX_FLOATING_EMOJIS) return;
+
         const heart = document.createElement('div');
         heart.className = 'floating-heart';
         // Сайт всегда в режиме Эчпочмони — вперемешку летают демоны и сердечки
@@ -7932,9 +7959,10 @@ function initHeartsBackground() {
 
     // Создаем первое сердечко сразу
     spawnHeart();
-    
-    // Каждые 900мс (чуть меньше секунды) плавно выпускаем новое сердечко
-    setInterval(spawnHeart, 900);
+
+    // Раз в 1.8 секунды плавно выпускаем новое сердечко (было каждые 900мс —
+    // вместе с MAX_FLOATING_EMOJIS ограничивает нагрузку на страницу)
+    setInterval(spawnHeart, 1800);
 }
 
 // Запускаем магию!
