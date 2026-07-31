@@ -256,6 +256,7 @@ let watchPartyHeartbeat = null; // Интервал, который раз в 5 
 let watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 }; // То, что мы транслируем партнёру
 let watchPartyPartnerPresence = null; // Последнее известное состояние партнёра (из Presence)
 let watchPartyPartnerOnline = false;
+let watchPartyLeaveTimer = null; // Отложенная проверка "партнёр правда вышел" (см. initWatchPartyChannel)
 let youtubeAPIReadyPromise = null; // Кэш промиса загрузки YouTube IFrame API (грузим один раз)
 let hlsJsReadyPromise = null; // Кэш промиса загрузки hls.js (грузим один раз, только если реально нужен m3u8)
 
@@ -3563,6 +3564,10 @@ function joinPartnerWatchParty() {
 }
 
 // ---------- Канал Realtime ----------
+// Сколько ждём после события "leave", прежде чем поверить, что партнёр
+// действительно вышел (см. комментарий внутри обработчика ниже).
+const WP_LEAVE_GRACE_MS = 2500;
+
 function initWatchPartyChannel() {
     if (watchPartyChannel || !currentUser) return;
 
@@ -3575,24 +3580,65 @@ function initWatchPartyChannel() {
         .on("presence", { event: "sync" }, () => updateWPPresenceUI())
         .on("presence", { event: "join" }, ({ key }) => {
             if (key === currentUser.id) return;
+            // Партнёр реально на связи — если параллельно тикает отложенная
+            // проверка "вышел ли он" (см. leave ниже), отменяем её: обычно
+            // join прилетает почти сразу вслед за leave при кратком разрыве
+            // websocket'а (сон вкладки, смена сети, пропущенный heartbeat),
+            // а не при настоящем уходе со страницы.
+            if (watchPartyLeaveTimer) {
+                clearTimeout(watchPartyLeaveTimer);
+                watchPartyLeaveTimer = null;
+            } else if (!watchPartyPartnerOnline) {
+                showWPStatusNote("Партнёр зашёл в совместный просмотр");
+            }
             updateWPPresenceUI();
-            showWPStatusNote("Партнёр зашёл в совместный просмотр");
         })
         .on("presence", { event: "leave" }, ({ key }) => {
             if (key === currentUser.id) return;
-            watchPartyPartnerOnline = false;
-            watchPartyPartnerPresence = null;
-            renderWPStatusBar();
-            if (watchPartyPlayer && watchPartySelfState.playing) {
-                applyRemoteWP(() => watchPartyPlayer.pause());
-                watchPartySelfState.playing = false;
-            }
-            showWPStatusNote("⚠️ Партнёр отключился — видео поставлено на паузу");
+            // ВАЖНО: раньше здесь сразу считали, что партнёр вышел, и молча
+            // ставили видео на паузу. Но Supabase Presence шлёт leave (и следом
+            // за ним join) при ЛЮБОМ кратком обрыве соединения — не только при
+            // реальном уходе со страницы. Именно это давало ложное "партнёр
+            // отключился" при обоих открытых вкладках и самопроизвольную паузу
+            // в момент запуска (когда сокет как раз проходит первый
+            // хендшейк/переподключение). Поэтому не реагируем мгновенно: ждём
+            // немного и перепроверяем актуальный список presence — если партнёр
+            // уже снова там, это была ложная тревога.
+            if (watchPartyLeaveTimer) clearTimeout(watchPartyLeaveTimer);
+            watchPartyLeaveTimer = setTimeout(() => {
+                watchPartyLeaveTimer = null;
+                if (!watchPartyChannel) return;
+                const state = watchPartyChannel.presenceState();
+                const stillPresent = Object.keys(state).some(
+                    k => k !== currentUser.id && state[k] && state[k].length
+                );
+                if (stillPresent) return; // ложная тревога — партнёр уже переподключился
+
+                watchPartyPartnerOnline = false;
+                watchPartyPartnerPresence = null;
+                renderWPStatusBar();
+                if (watchPartyPlayer && watchPartySelfState.playing) {
+                    applyRemoteWP(() => watchPartyPlayer.pause());
+                    watchPartySelfState.playing = false;
+                }
+                showWPStatusNote("⚠️ Партнёр отключился — видео поставлено на паузу");
+            }, WP_LEAVE_GRACE_MS);
         })
         .subscribe(async (status) => {
             if (status === "SUBSCRIBED") {
                 await trackWPPresence();
                 updateWPPresenceUI();
+            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                // Канал отвалился сам по себе (не пользователь закрыл экран) —
+                // судя по логам ("Realtime send() is automatically falling back
+                // to REST API"), сокет периодически рвётся, и без пересоздания
+                // канала play/pause/seek у партнёров тихо перестают долетать
+                // друг до друга. Пересобираем канал через пару секунд.
+                console.error("Канал совместного просмотра отвалился со статусом:", status);
+                if (watchPartyChannel) { db.removeChannel(watchPartyChannel); watchPartyChannel = null; }
+                if (isWatchPartyScreenOpen) {
+                    setTimeout(() => { if (isWatchPartyScreenOpen) initWatchPartyChannel(); }, 2000);
+                }
             }
         });
 
@@ -3608,6 +3654,7 @@ function initWatchPartyChannel() {
 function leaveWatchPartyScreen() {
     isWatchPartyScreenOpen = false;
     if (watchPartyHeartbeat) { clearInterval(watchPartyHeartbeat); watchPartyHeartbeat = null; }
+    if (watchPartyLeaveTimer) { clearTimeout(watchPartyLeaveTimer); watchPartyLeaveTimer = null; }
     if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
     if (watchPartyChannel) { db.removeChannel(watchPartyChannel); watchPartyChannel = null; }
     watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 };
