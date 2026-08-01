@@ -1886,7 +1886,7 @@ function setupScratchCard(wrapperEl, canvasEl) {
         ctx.font = "600 13px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("✨ потяни, чтобы узнать ✨", w / 2, h / 2);
+        ctx.fillText("✨ Погладь Меня ✨", w / 2, h / 2);
     }
 
     function sizeCanvas() {
