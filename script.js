@@ -1552,74 +1552,61 @@ async function showHome() {
         app.appendChild(hrAfterSearch);
     }
 
-    // Рендерим кнопки категорий
-    let secretDividerAdded = false;
-    for (let key in dbData) {
-        // Разделитель ПЕРЕД секретной категорией (например между "Сериалы" и "Секрет")
-        const isSecretKey = key.includes("Секрет") || key.includes("🔒") || key.includes("❤️");
-        if (isSecretKey && !secretDividerAdded) {
-            let hrBeforeSecret = document.createElement("hr");
-            hrBeforeSecret.className = "neon-divider";
-            app.appendChild(hrBeforeSecret);
-            secretDividerAdded = true;
+    // Рендерим кнопки категорий в фиксированном порядке:
+    // Фильмы -> Мультфильмы -> Сериалы -> Аниме -> (Добавить тайтл),
+    // а секретная категория переехала в самый низ страницы.
+    const categoryPriorityOrder = ["Фильм", "Мультфильм", "Сериал", "Аниме"];
+    function getCategoryPriority(key) {
+        // Секретная категория — всегда в конце
+        if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) return 1000;
+        for (let i = 0; i < categoryPriorityOrder.length; i++) {
+            if (key.includes(categoryPriorityOrder[i])) return i;
         }
-
-        let button = document.createElement("button");
-        button.textContent = key;
-        if (isSecretKey) {
-            button.classList.add("btn-secret-gold");
-        }
-        button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
-        app.appendChild(button);
-
-        // Кнопка "Добавить тайтл" — переехала сюда, сразу под "Сериалы", без сплиттера
-        if (currentUser && key.includes("Сериал")) {
-            let addBtn = document.createElement("button");
-            addBtn.className = "btn-add-new";
-            addBtn.textContent = "➕ Добавить тайтл";
-            addBtn.onclick = () => showAddEditModal();
-            app.appendChild(addBtn);
-        }
-
-        // Сплиттер (после категории "Секрет")
-        if (isSecretKey) {
-            let hrAfterSecret = document.createElement("hr");
-            hrAfterSecret.className = "neon-divider";
-            app.appendChild(hrAfterSecret);
-        }
+        // Неизвестная категория — после основных, но перед секретной
+        return 500;
     }
 
-    let wishlistBtn = document.createElement("button");
-    wishlistBtn.id = "wishlistMainBtn";
-    wishlistBtn.className = "btn-pink-style";
-    wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-    wishlistBtn.onclick = () => {
-        renderWishlistFolder();
-    };
-    app.appendChild(wishlistBtn);
+    const orderedCategoryKeys = Object.keys(dbData).sort(
+        (a, b) => getCategoryPriority(a) - getCategoryPriority(b)
+    );
+    const secretKeys = orderedCategoryKeys.filter(
+        key => key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")
+    );
+    const normalKeys = orderedCategoryKeys.filter(key => !secretKeys.includes(key));
 
-    // Кнопка "Просмотрено" на главной — ведёт в папку с 3 подкатегориями
-    // (мной / партнёром / нами)
-    let watchedBtn = document.createElement("button");
-    watchedBtn.id = "watchedMainBtn";
-    watchedBtn.className = "btn-pink-style";
-    const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
-    watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
-    watchedBtn.onclick = () => {
-        renderWatchedTop();
-    };
-    app.appendChild(watchedBtn);
+    // Обычные категории (Фильмы, Мультфильмы, Сериалы, Аниме и т.д.)
+    normalKeys.forEach(key => {
+        let button = document.createElement("button");
+        button.textContent = key;
+        button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
+        app.appendChild(button);
+    });
+
+    // Кнопка "Добавить тайтл" — сразу под обычными категориями
+    if (currentUser && normalKeys.length > 0) {
+        let addBtn = document.createElement("button");
+        addBtn.className = "btn-add-new";
+        addBtn.textContent = "➕ Добавить тайтл";
+        addBtn.onclick = () => showAddEditModal();
+        app.appendChild(addBtn);
+    }
 
     if (currentUser) {
-        let hrBeforeChat = document.createElement("hr");
-        hrBeforeChat.className = "neon-divider";
-        app.appendChild(hrBeforeChat);
+        // Разделитель после блока категорий/"Добавить тайтл"
+        let hrAfterCategories = document.createElement("hr");
+        hrAfterCategories.className = "neon-divider";
+        app.appendChild(hrAfterCategories);
 
         let watchPartyBtn = document.createElement("button");
         watchPartyBtn.className = "btn-watchparty-gold";
         watchPartyBtn.textContent = "🎬 Совместный просмотр";
         watchPartyBtn.onclick = () => showWatchPartyScreen();
         app.appendChild(watchPartyBtn);
+
+        // Разделитель перед чатом/комментариями
+        let hrBeforeChat = document.createElement("hr");
+        hrBeforeChat.className = "neon-divider";
+        app.appendChild(hrBeforeChat);
 
         let chatBtn = document.createElement("button");
         chatBtn.className = "btn-chat-purple";
@@ -1643,6 +1630,47 @@ async function showHome() {
         gamesBtn.textContent = "🕹 Игры";
         gamesBtn.onclick = () => showGamesScreen();
         app.appendChild(gamesBtn);
+
+        // Разделитель перед "Будем смотреть"/"Просмотрено"
+        let hrBeforeWatchLists = document.createElement("hr");
+        hrBeforeWatchLists.className = "neon-divider";
+        app.appendChild(hrBeforeWatchLists);
+    }
+
+    let wishlistBtn = document.createElement("button");
+    wishlistBtn.id = "wishlistMainBtn";
+    wishlistBtn.className = "btn-pink-style";
+    wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
+    wishlistBtn.onclick = () => {
+        renderWishlistFolder();
+    };
+    app.appendChild(wishlistBtn);
+
+    // Кнопка "Просмотрено" на главной — ведёт в папку с 3 подкатегориями
+    // (мной / партнёром / нами)
+    let watchedBtn = document.createElement("button");
+    watchedBtn.id = "watchedMainBtn";
+    watchedBtn.className = "btn-pink-style";
+    const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
+    watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
+    watchedBtn.onclick = () => {
+        renderWatchedTop();
+    };
+    app.appendChild(watchedBtn);
+
+    // Секретная категория — в самом низу страницы, за разделителем
+    if (secretKeys.length > 0) {
+        let hrBeforeSecret = document.createElement("hr");
+        hrBeforeSecret.className = "neon-divider";
+        app.appendChild(hrBeforeSecret);
+
+        secretKeys.forEach(key => {
+            let button = document.createElement("button");
+            button.textContent = key;
+            button.classList.add("btn-secret-gold");
+            button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
+            app.appendChild(button);
+        });
     }
 }
 
@@ -1664,7 +1692,19 @@ function renderItemRow(itemText, container) {
     }
 
     if (isSecret) {
-        itemDiv.textContent = itemText.replace(/\s*\(\d{4}\)$/, "");
+        const displayText = itemText.replace(/\s*\(\d{4}\)$/, "");
+        itemDiv.classList.add("secret-scratch-card");
+
+        let textSpan = document.createElement("span");
+        textSpan.className = "secret-scratch-text";
+        textSpan.textContent = displayText;
+        itemDiv.appendChild(textSpan);
+
+        let scratchCanvas = document.createElement("canvas");
+        scratchCanvas.className = "secret-scratch-canvas";
+        itemDiv.appendChild(scratchCanvas);
+
+        setupScratchCard(itemDiv, scratchCanvas);
     } else {
         let titleSpan = document.createElement("span");
         titleSpan.textContent = itemText;
@@ -1790,6 +1830,147 @@ function renderItemRow(itemText, container) {
     }
 
     container.appendChild(wrapper);
+}
+
+// Уменьшает размер шрифта секретного текста так, чтобы название всегда
+// помещалось в одну строку, независимо от длины и ширины экрана.
+function fitSecretTextToOneLine(wrapperEl, cardWidth) {
+    const textEl = wrapperEl.querySelector(".secret-scratch-text");
+    if (!textEl) return;
+
+    const maxFontSize = 20; // базовый размер, как у обычных карточек .item
+    const minFontSize = 11; // дальше уже не уменьшаем, чтобы не превратить в нечитаемую строку
+    const availableWidth = Math.max(20, cardWidth - 40); // за вычетом отступов карточки
+
+    let fontSize = maxFontSize;
+    textEl.style.fontSize = fontSize + "px";
+
+    while (textEl.scrollWidth > availableWidth && fontSize > minFontSize) {
+        fontSize -= 1;
+        textEl.style.fontSize = fontSize + "px";
+    }
+}
+
+// Скретч-карточка для секретной категории: содержимое скрыто под "фольгой",
+// текст проявляется по мере того, как пользователь "стирает" её пальцем/мышью
+// — как лотерейный билет. Полностью счищать не обязательно: как только
+// открыто больше половины площади, остаток фольги плавно исчезает сам.
+function setupScratchCard(wrapperEl, canvasEl) {
+    const ctx = canvasEl.getContext("2d", { willReadFrequently: true });
+    let scratching = false;
+    let revealed = false;
+    let moveCount = 0;
+    let cssWidth = 0, cssHeight = 0;
+
+    function drawFoil(w, h) {
+        ctx.clearRect(0, 0, w, h);
+
+        const grad = ctx.createLinearGradient(0, 0, w, h);
+        grad.addColorStop(0, "#4a1942");
+        grad.addColorStop(0.5, "#8a2d5e");
+        grad.addColorStop(1, "#3a1240");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // Диагональные блики, как у настоящей скретч-фольги
+        ctx.strokeStyle = "rgba(255, 215, 130, 0.16)";
+        ctx.lineWidth = 3;
+        for (let x = -h; x < w; x += 14) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + h, h);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = "rgba(255, 221, 150, 0.95)";
+        ctx.font = "600 13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("✨ потяни, чтобы узнать ✨", w / 2, h / 2);
+    }
+
+    function sizeCanvas() {
+        const rect = wrapperEl.getBoundingClientRect();
+        cssWidth = Math.max(1, rect.width);
+        cssHeight = Math.max(1, rect.height);
+        const dpr = window.devicePixelRatio || 1;
+        canvasEl.width = Math.round(cssWidth * dpr);
+        canvasEl.height = Math.round(cssHeight * dpr);
+        canvasEl.style.width = cssWidth + "px";
+        canvasEl.style.height = cssHeight + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawFoil(cssWidth, cssHeight);
+
+        fitSecretTextToOneLine(wrapperEl, cssWidth);
+    }
+
+    function scratchAt(x, y) {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.beginPath();
+        ctx.arc(x, y, 20, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    function getPos(e) {
+        const rect = canvasEl.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    function checkProgress() {
+        if (!cssWidth || !cssHeight) return;
+        const sampleW = 32;
+        const sampleH = Math.max(1, Math.round(sampleW * (cssHeight / cssWidth)));
+        const sampleCanvas = document.createElement("canvas");
+        sampleCanvas.width = sampleW;
+        sampleCanvas.height = sampleH;
+        const sctx = sampleCanvas.getContext("2d");
+        sctx.drawImage(canvasEl, 0, 0, sampleW, sampleH);
+        const data = sctx.getImageData(0, 0, sampleW, sampleH).data;
+        let clearPixels = 0;
+        for (let i = 3; i < data.length; i += 4) {
+            if (data[i] < 12) clearPixels++;
+        }
+        if (clearPixels / (sampleW * sampleH) > 0.5) {
+            revealFully();
+        }
+    }
+
+    function revealFully() {
+        if (revealed) return;
+        revealed = true;
+        canvasEl.style.transition = "opacity 0.35s ease";
+        canvasEl.style.opacity = "0";
+        vibrate([40, 30, 60]);
+        setTimeout(() => canvasEl.remove(), 380);
+    }
+
+    function handleDown(e) {
+        if (revealed) return;
+        scratching = true;
+        canvasEl.setPointerCapture(e.pointerId);
+        const p = getPos(e);
+        scratchAt(p.x, p.y);
+    }
+    function handleMove(e) {
+        if (!scratching || revealed) return;
+        const p = getPos(e);
+        scratchAt(p.x, p.y);
+        moveCount++;
+        if (moveCount % 6 === 0) checkProgress();
+    }
+    function handleUp() {
+        if (revealed) return;
+        scratching = false;
+        checkProgress();
+    }
+
+    canvasEl.addEventListener("pointerdown", handleDown);
+    canvasEl.addEventListener("pointermove", handleMove);
+    canvasEl.addEventListener("pointerup", handleUp);
+    canvasEl.addEventListener("pointercancel", handleUp);
+
+    // Ждём кадр отрисовки, чтобы у обёртки уже был реальный размер
+    requestAnimationFrame(sizeCanvas);
 }
 
 // Всплывающее меню выбора действия
@@ -3617,7 +3798,7 @@ function initWatchPartyChannel() {
 
     channel
         .on("broadcast", { event: "sync" }, ({ payload }) => handleRemoteWPPayload(payload))
-        .on("postgres_changes", { event: "*", schema: "public", table: "watch_party_messages" }, () => onWatchPartyChatRealtimeChange())
+        .on("postgres_changes", { event: "*", schema: "public", table: "watch_party_messages" }, (payload) => onWatchPartyChatRealtimeChange(payload))
         .on("presence", { event: "sync" }, () => updateWPPresenceUI())
         .on("presence", { event: "join" }, ({ key }) => {
             if (key === currentUser.id) return;
@@ -3780,8 +3961,58 @@ async function loadWatchPartyChatMessages() {
     watchPartyChatMessages = data.reverse();
 }
 
+// Синтезирует короткий звук-«колокольчик» через Web Audio API (без внешнего
+// аудиофайла) — играет при новом сообщении от партнёра в совместном
+// просмотре, независимо от того, свёрнут чат или открыт полноэкранный плеер:
+// пока пользователь физически находится на этом экране (а значит realtime-канал
+// вообще подписан), звук должен быть слышен.
+let wpNotifyAudioCtx = null;
+function playWatchPartyBellSound() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!wpNotifyAudioCtx) wpNotifyAudioCtx = new AudioCtx();
+        if (wpNotifyAudioCtx.state === "suspended") wpNotifyAudioCtx.resume();
+
+        const ctx = wpNotifyAudioCtx;
+        const now = ctx.currentTime;
+
+        // Два коротких перекрывающихся тона дают эффект "динь-динь"
+        [880, 1320].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.value = freq;
+
+            const start = now + i * 0.09;
+            gain.gain.setValueAtTime(0, start);
+            gain.gain.linearRampToValueAtTime(0.22, start + 0.015);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.5);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + 0.55);
+        });
+    } catch (e) {
+        console.error("Не удалось воспроизвести звук уведомления:", e);
+    }
+}
+
 // Реалтайм-обработчик изменений в чате совместного просмотра
-async function onWatchPartyChatRealtimeChange() {
+async function onWatchPartyChatRealtimeChange(payload) {
+    // Звук — только на НОВОЕ сообщение (INSERT) и только если оно не наше
+    // собственное (иначе будет пищать в ответ на каждое своё сообщение).
+    // Редактирование/удаление/реакция сердечком (UPDATE/DELETE) сюда не попадают.
+    if (
+        payload &&
+        payload.eventType === "INSERT" &&
+        payload.new &&
+        (!currentUser || payload.new.user_id !== currentUser.id)
+    ) {
+        playWatchPartyBellSound();
+    }
+
     await loadWatchPartyChatMessages();
     if (isWatchPartyScreenOpen) {
         renderWatchPartyChatMessages();
@@ -4353,11 +4584,27 @@ async function showWatchPartyScreen() {
     await loadWatchPartyChatMessages();
     renderWatchPartyChatMessages();
 
-    // Подстраховка на случай проблем с realtime — как у обычного чата
+    // Подстраховка на случай проблем с realtime — как у обычного чата.
+    // Дополнительно сверяем id последнего сообщения до/после подгрузки: если
+    // realtime по каким-то причинам не сработал, а тут "подъехало" новое
+    // чужое сообщение — звук всё равно должен прозвучать.
     if (watchPartyChatPollInterval) clearInterval(watchPartyChatPollInterval);
     watchPartyChatPollInterval = setInterval(async () => {
         if (!isWatchPartyScreenOpen) return;
+
+        const prevLastId = watchPartyChatMessages.length
+            ? watchPartyChatMessages[watchPartyChatMessages.length - 1].id
+            : null;
+
         await loadWatchPartyChatMessages();
+
+        const newLast = watchPartyChatMessages.length
+            ? watchPartyChatMessages[watchPartyChatMessages.length - 1]
+            : null;
+        if (newLast && newLast.id !== prevLastId && (!currentUser || newLast.user_id !== currentUser.id)) {
+            playWatchPartyBellSound();
+        }
+
         renderWatchPartyChatMessages();
     }, 4000);
 
@@ -4522,6 +4769,27 @@ function showAddEditModal(existingItem = null) {
         if (result.error) {
             alert("Ошибка сохранения: " + result.error.message);
         } else {
+            // Если при редактировании изменилось название и/или год — у тайтла
+            // меняется "полное" имя ("Title (Year)"), которым в таблице
+            // comments помечены все комментарии к нему. Переносим их на новое имя,
+            // иначе они "отвяжутся" от тайтла и осядут под старым, уже
+            // не существующим названием.
+            if (existingItem) {
+                const oldFullTitle = `${existingItem.title} (${existingItem.year})`;
+                const newFullTitle = `${titleVal} (${yearVal})`;
+
+                if (oldFullTitle !== newFullTitle) {
+                    const { error: commentsRenameError } = await db
+                        .from("comments")
+                        .update({ title: newFullTitle })
+                        .eq("title", oldFullTitle);
+
+                    if (commentsRenameError) {
+                        console.error("Не удалось обновить название тайтла в комментариях:", commentsRenameError.message);
+                    }
+                }
+            }
+
             overlay.remove();
             await refreshCurrentScreen();
         }
@@ -4580,6 +4848,18 @@ async function handleDeleteClick(itemText) {
 
         if (wishlistError) {
             console.error("Не удалось удалить из списка 'Будем смотреть':", wishlistError.message);
+        }
+
+        // Удаляем комментарии, оставленные на этом тайтле — иначе они
+        // "осиротеют" и будут висеть в общем экране "Комментарии" под
+        // названием тайтла, которого уже не существует.
+        const { error: commentsError } = await db
+            .from("comments")
+            .delete()
+            .eq("title", itemText);
+
+        if (commentsError) {
+            console.error("Не удалось удалить комментарии тайтла:", commentsError.message);
         }
 
         const { error } = await db
