@@ -4224,7 +4224,7 @@ async function showWatchPartyScreen() {
     urlInput.type = "text";
     urlInput.id = "wpUrlInput";
     urlInput.className = "chat-text-input";
-    urlInput.placeholder = "Ссылка: YouTube, Rutube, .mp4/.webm/.m3u8";
+    urlInput.placeholder = "Ссылка: YouTube, Rutube";
     urlInput.autocomplete = "off";
     let loadBtn = document.createElement("button");
     loadBtn.id = "wpLoadBtn";
