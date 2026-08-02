@@ -2019,3 +2019,182 @@ button:nth-child(6){
 @media (max-width: 380px) {
     .rhythm-arena { height: 62vh; min-height: 360px; }
 }
+
+/* ============================================================
+   🕸️ ПАУТИНКА — граф-режим просмотра каталога
+   ============================================================ */
+/* Полноэкранная накладка добавляется напрямую в <body> (а не внутрь #app),
+   т.к. у #app висит анимация pageChange с transform:translateX(...) —
+   а любой ненулевой transform на предке создаёт для потомков с
+   position:fixed свой containing block, и они "прилипали" бы к рамке
+   #app вместо реального viewport'а. */
+#pautinkaOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    background: radial-gradient(ellipse at center, rgba(10,6,19,0.18), rgba(8,4,15,0.6));
+    animation: pautinkaOverlayIn 0.35s ease both;
+}
+@keyframes pautinkaOverlayIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.pautinka-heading {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 502;
+    padding: 8px 22px;
+    border-radius: 999px;
+    background: rgba(20,12,32,0.6);
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: 15px;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+    pointer-events: none;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.pautinka-scroll {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-x pan-y;
+    cursor: grab;
+}
+.pautinka-scroll.pautinka-dragging {
+    cursor: grabbing;
+}
+
+.pautinka-zoom-controls {
+    position: fixed;
+    right: 16px;
+    bottom: 22px;
+    z-index: 502;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.pautinka-zoom-controls .round-btn {
+    font-size: 20px !important;
+    font-weight: 700;
+}
+
+.pautinka-back-controls {
+    position: fixed;
+    left: 16px;
+    bottom: 22px;
+    z-index: 502;
+}
+.pautinka-back-controls .round-btn {
+    font-size: 18px !important;
+    font-weight: 700;
+}
+
+.pautinka-svg {
+    display: block;
+}
+
+/* --- Нити (связи) --- */
+.pautinka-thread-base {
+    stroke: rgba(255,255,255,0.14);
+    fill: none;
+}
+.pautinka-thread-pulse {
+    fill: none;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 4px currentColor);
+    animation: pautinkaThreadFlow 3s linear infinite;
+    opacity: 0.9;
+}
+@keyframes pautinkaThreadFlow {
+    to { stroke-dashoffset: calc(var(--len, 100) * -1); }
+}
+
+/* --- Узлы --- */
+.pautinka-node {
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.pautinka-node-pop {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pautinkaPopIn 0.5s cubic-bezier(0.22, 0.9, 0.32, 1.28) both;
+}
+@keyframes pautinkaPopIn {
+    0%   { opacity: 0; transform: scale(0.2); }
+    70%  { opacity: 1; transform: scale(1.12); }
+    100% { opacity: 1; transform: scale(1); }
+}
+.pautinka-node-float {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation-name: pautinkaFloat;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+}
+@keyframes pautinkaFloat {
+    from { transform: translateY(-3px) rotate(-1.2deg); }
+    to   { transform: translateY(3px) rotate(1.2deg); }
+}
+.pautinka-node-active .pautinka-node-shape {
+    transform: scale(1.18);
+}
+.pautinka-node-shape {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform 0.15s ease, filter 0.15s ease;
+}
+.pautinka-node:hover .pautinka-node-shape {
+    filter: brightness(1.25);
+}
+
+/* Хабы (Фильмы/Мультфильмы/Сериалы/Аниме/Игры) больше не кликабельны —
+   убираем у них курсор-указатель и подсветку при наведении, чтобы не
+   выглядели как рабочие кнопки */
+.pautinka-node-static {
+    cursor: default;
+}
+.pautinka-node-static:hover .pautinka-node-shape {
+    filter: none;
+}
+
+.pautinka-sonar {
+    fill: none;
+    stroke-width: 2px;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pautinkaSonar 2.6s ease-out infinite;
+    pointer-events: none;
+}
+@keyframes pautinkaSonar {
+    0%   { transform: scale(0.65); opacity: 0.55; }
+    100% { transform: scale(2.1); opacity: 0; }
+}
+
+.pautinka-label {
+    fill: var(--text);
+    font-family: var(--font-body);
+    text-anchor: middle;
+    paint-order: stroke;
+    stroke: rgba(5,2,12,0.85);
+    stroke-width: 3px;
+    /* Раньше тут стояли pointer-events:none и user-select:none — подписи
+       узлов вообще нельзя было выделить/скопировать. Теперь можно. */
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.pautinka-home-shape {
+    filter: drop-shadow(0 0 14px rgba(255,209,92,0.65));
+}

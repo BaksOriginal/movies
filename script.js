@@ -59,6 +59,25 @@ const GITHUB_RHYTHM_REPO = "movies";
 const GITHUB_RHYTHM_BRANCH = "main";
 const GITHUB_RHYTHM_PATH = "rhythm_game";
 
+// Резервный SHA ветки main — используется getGithubBranchSha() только в самом
+// крайнем случае: если свежий SHA получить не удалось (например, 403 —
+// исчерпан лимит 60 запросов/час на IP у api.github.com) И при этом в
+// localStorage браузера ещё нет вообще никакого ранее сохранённого SHA
+// (первый визит на сайт / очищенный кэш). Раньше в этом случае код подставлял
+// имя ветки "main" напрямую в jsDelivr — а jsDelivr кэширует листинг файлов по
+// имени ветки на часы без возможности ручного Purge, из-за чего показывались
+// давно удалённые треки. Подстановка вот этого константного SHA вместо имени
+// ветки гарантирует настоящий (пусть не самый последний) снимок репозитория.
+//
+// ВАЖНО: обновляйте эту строку на актуальный SHA вашей ветки main каждый раз,
+// когда добавляете/удаляете треки в rhythm_game (или стикеры в stickers) —
+// иначе в этом редком edge-case будет показываться снимок репозитория на
+// момент, когда эта строка была обновлена в последний раз, а не самый свежий.
+// Узнать текущий SHA: https://api.github.com/repos/BaksOriginal/movies/git/refs/heads/main
+// (поле object.sha) — или, если сам API лимитирует, через
+// `git ls-remote https://github.com/BaksOriginal/movies.git main` в терминале.
+const GITHUB_FALLBACK_SHA = "cba3258795994c35cea06a41c6269421788c3bc5";
+
 // ==========================================
 // АКТУАЛЬНЫЙ SHA ВЕТКИ (обход кэша jsDelivr по "@branch")
 // ==========================================
@@ -123,6 +142,24 @@ async function getGithubBranchSha(owner, repo, branch) {
             console.error(`Не удалось получить свежий SHA ${owner}/${repo}@${branch} (см. ошибку ниже), используем последний известный SHA из кэша:`, e);
             return cachedEntry.sha;
         }
+
+        // Кэш пуст (первый визит/очищенный localStorage) — раньше здесь был
+        // откат на имя ветки, что однажды привело к показу давно удалённых
+        // треков из-за часового кэша jsDelivr по имени ветки. Теперь вместо
+        // этого используем зашитый в коде GITHUB_FALLBACK_SHA — это тоже не
+        // самый свежий снимок репозитория, но это гарантированно РЕАЛЬНЫЙ
+        // коммит, а не случайно устаревший кэш ветки. Сохраняем его в
+        // localStorage как обычный кэш, чтобы при следующем заходе (когда
+        // лимит GitHub API уже сбросится) мы попробовали получить свежий SHA
+        // заново, а не застряли на fallback навсегда.
+        if (GITHUB_FALLBACK_SHA) {
+            console.error(`Не удалось получить SHA ветки ${owner}/${repo}@${branch}, и в кэше ничего нет — используем зашитый в коде резервный SHA (${GITHUB_FALLBACK_SHA}):`, e);
+            try {
+                localStorage.setItem(cacheKey, JSON.stringify({ sha: GITHUB_FALLBACK_SHA, savedAt: Date.now() }));
+            } catch (e2) { /* не критично */ }
+            return GITHUB_FALLBACK_SHA;
+        }
+
         console.error(`Не удалось получить SHA ветки ${owner}/${repo}@${branch}, и в кэше ничего нет — используем branch напрямую (риск устаревшего кэша jsDelivr):`, e);
         return branch;
     }
@@ -216,6 +253,16 @@ let watchedTitlesBoth = new Set();     // Просмотрено нами обо
 let wishlistTitles = new Set(); // Общий список вишлиста "Будем смотреть"
 let ratingsData = {}; // Оценки: { "Название (год)": [{ username, score, userId }, ...] }
 let history = [];
+// Параллельный стек: для каждого элемента history хранит значение
+// currentCategoryName, которое было актуально в момент его добавления.
+// Нужен для того, чтобы кнопка "⬅ Назад" восстанавливала не только сам
+// контент экрана, но и правильную "категорию", к которой он относится —
+// иначе, например, после захода в Паутинку и открытия там жанра из ОБЫЧНОЙ
+// категории, "Назад" возвращал верный контент секретной подкатегории, но
+// currentCategoryName оставался от последнего посещённого обычного жанра,
+// и экран секретной подкатегории переставал считаться секретным (пропадала
+// кнопка "Паутинка", появлялся неуместный счётчик тайтлов и т.д.).
+let categoryHistory = [];
 let realtimeChannel = null; // Канал для мгновенных обновлений
 
 // Текущие фильтры поиска
@@ -1477,6 +1524,7 @@ async function showHome() {
     }
     document.body.classList.remove("games-screen-active");
     history = [];
+    categoryHistory = [];
     currentCategoryName = null;
     await loadCatalogFromDB();
     
@@ -2593,6 +2641,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     }
     if (saveHistory) {
         history.push(content);
+        categoryHistory.push(currentCategoryName);
     }
 
     app.innerHTML = "";
@@ -2645,7 +2694,48 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(countFooter);
     }
 
+    // Секретный граф-режим просмотра каталога — кнопка-портал живёт только
+    // на самом верхнем экране секретной категории (сразу после клика по
+    // кнопке "Секрет" на главной), а не во всех её подкатегориях. currentCategoryName
+    // не меняется при переходе вглубь подкатегорий, поэтому одного isInSecretCategory
+    // недостаточно — дополнительно проверяем, что content это именно верхний
+    // объект dbData[currentCategoryName], а не что-то вложенное внутрь него.
+    const isTopLevelSecretScreen = isInSecretCategory && content === dbData[currentCategoryName];
+    if (isTopLevelSecretScreen) {
+        let pautinkaBtn = document.createElement("button");
+        pautinkaBtn.className = "btn-secret-gold";
+        pautinkaBtn.textContent = "🕸️ Паутинка";
+        pautinkaBtn.onclick = () => showPautinka();
+        app.appendChild(pautinkaBtn);
+    }
+
     addNavigation();
+}
+
+// Откат на один шаг назад по истории экранов. Общая логика для обычной
+// кнопки "⬅ Назад" в навигации и для кнопки возврата внутри самой Паутинки.
+// Если на вершине истории после отката лежит "отметка" Паутинки
+// (PAUTINKA_HISTORY_MARKER) — заново открывает Паутинку вместо обычного
+// экрана с данными, чтобы выход из экрана, открытого через Паутинку, вёл
+// обратно в саму Паутинку, а не перескакивал через неё.
+function goBack() {
+    history.pop();
+    categoryHistory.pop();
+    let previous = history[history.length - 1];
+
+    if (previous === PAUTINKA_HISTORY_MARKER) {
+        showPautinka(true);
+    } else if (previous) {
+        // Восстанавливаем ту "категорию", которая была актуальна именно
+        // для этого экрана — иначе, например, возврат в подкатегорию
+        // Секрета после захода в Паутинку и открытия там обычного жанра
+        // мог оставить currentCategoryName от этого обычного жанра, и
+        // экран Секрета переставал распознаваться как секретный.
+        currentCategoryName = categoryHistory[categoryHistory.length - 1] || null;
+        openData(previous, false);
+    } else {
+        showHome();
+    }
 }
 
 // Навигационная панель Назад/Домой
@@ -2661,16 +2751,7 @@ function addNavigation() {
     let back = document.createElement("button");
     back.textContent = "⬅ Назад";
 
-    back.onclick = () => {
-        history.pop();
-        let previous = history[history.length - 1];
-
-        if (previous) {
-            openData(previous, false);
-        } else {
-            showHome();
-        }
-    };
+    back.onclick = () => goBack();
 
     let home = document.createElement("button");
     home.textContent = "🏠 Домой";
@@ -2685,6 +2766,389 @@ function addNavigation() {
     } else {
         document.body.insertBefore(nav, app);
     }
+}
+
+// =======================================================
+// 🕸️ ПАУТИНКА — граф-режим просмотра каталога
+// =======================================================
+// Секретный альтернативный способ просмотра сайта: вместо списков — большая
+// "паутина" из узлов. В центре — 🏠 (выход на главную), вокруг него по кругу
+// 5 хабов (Фильмы/Мультфильмы/Сериалы/Аниме/Игры), а от каждого хаба нити
+// расходятся к его "листьям" — ЖАНРАМ этой категории (не отдельным тайтлам,
+// их было бы слишком много) или, у хаба "Игры" — к самим 6 играм.
+//
+// Экран рисуется НЕ внутри #app, а отдельным слоем прямо в <body> — у #app
+// есть анимация pageChange с transform:translateX(...), а ненулевой
+// transform на предке "запирает" все дочерние position:fixed элементы
+// внутри его рамки вместо реального viewport'а (см. комментарий в CSS).
+
+// Единый список 6 игр сайта для узлов-листьев хаба "Игры". Каждая launch-
+// функция уже сама включает setGamesNav()/pauseMusicForGames() — то есть
+// музыка (если играла) погаснет ТОЛЬКО в момент реального захода в игру,
+// а не при просто открытии Паутинки.
+const PAUTINKA_GAMES = [
+    { key: "snake",  label: "Змейка",                     emoji: "🐍", launch: () => startSnakeGame() },
+    { key: "flappy", label: "Эчпочмоня vs. Шоколадки",     emoji: "🍫", launch: () => startFlappyGame() },
+    { key: "doodle", label: "Doodle Jump",                emoji: "👾", launch: () => startDoodleGame() },
+    { key: "runner", label: "Бега Брокколи",               emoji: "🥦", launch: () => startRunnerGame() },
+    { key: "ninja",  label: "Эмодзи Ниндзя",               emoji: "⚔", launch: () => startNinjaGame() },
+    { key: "rhythm", label: "Ритм-Аркада",                 emoji: "🎵", launch: () => showRhythmMenu() },
+];
+const PAUTINKA_GAMES_HUE = 152; // единый цвет для всех 6 игр (изумрудно-бирюзовый)
+
+// Достаёт ведущий эмодзи из строки категории (как setEmojiTitle), либо null
+function extractLeadingEmoji(text) {
+    const match = String(text).match(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)/u);
+    return match ? match[1] : null;
+}
+// Убирает ведущий эмодзи + пробел из строки категории — под ним и так будет своя иконка в узле
+function stripLeadingEmoji(text) {
+    return String(text).replace(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s*/u, "");
+}
+// Эмодзи хаба категории: берём собственный из названия, а если его почему-то нет — подставляем по типу
+function getCategoryEmoji(catKey) {
+    return extractLeadingEmoji(catKey) ||
+        (catKey.includes("Мультфильм") ? "🧸" :
+         catKey.includes("Сериал") ? "📺" :
+         catKey.includes("Аниме") ? "🎌" :
+         catKey.includes("Фильм") ? "🎬" : "🗂️");
+}
+// Базовый оттенок (hue, 0-360) всей категории — тайтлы внутри неё окрашиваются в этом же "семействе" цветов
+function getCategoryBaseHue(catKey) {
+    if (catKey.includes("Мультфильм")) return 42;   // золотисто-оранжевый
+    if (catKey.includes("Сериал")) return 192;       // циан
+    if (catKey.includes("Аниме")) return 268;        // фиолетовый
+    if (catKey.includes("Фильм")) return 336;        // розовый
+    return 12; // запасной вариант — если вдруг появится ещё одна обычная категория сверх этих 4х
+}
+// Небольшое, но детерминированное смещение оттенка в зависимости от жанра —
+// чтобы разные жанры внутри одной категории отличались цветом, но узнаваемо
+// оставались в её "семье" цветов
+function getGenreHue(catKey, genre) {
+    const base = getCategoryBaseHue(catKey);
+    const offset = (hashStringToSeed(catKey + "::" + genre) % 31) - 15; // от -15 до +15 градусов
+    return (base + offset + 360) % 360;
+}
+// Экранирование текста/атрибутов при сборке SVG-разметки строками (названия
+// тайтлов приходят из базы как есть и могут содержать &, <, >, ")
+function escapeSvgText(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function escapeSvgAttr(str) {
+    return escapeSvgText(str).replace(/"/g, "&quot;");
+}
+// Обрезает длинные подписи под узлами, чтобы не разъезжались по всей паутине
+function pautinkaTruncate(text, maxLen) {
+    const t = String(text);
+    return t.length > maxLen ? t.slice(0, maxLen - 1).trimEnd() + "…" : t;
+}
+// Закрывает Паутинку (убирает полноэкранную накладку) — вызывается перед
+// любым переходом ПРОЧЬ из этого режима (домой, в игру или на список тайтлов жанра)
+function leavePautinka() {
+    const overlay = document.getElementById("pautinkaOverlay");
+    if (overlay) overlay.remove();
+}
+
+// Уникальная "отметка" в history/categoryHistory, обозначающая, что на этом
+// шаге была открыта именно Паутинка (а не обычный экран с данными). Позволяет
+// кнопке "Назад" с экрана жанра, открытого ИЗ Паутинки, вернуться в саму
+// Паутинку, а не перескакивать сразу к тому, что было открыто до неё.
+const PAUTINKA_HISTORY_MARKER = Symbol("pautinka");
+
+// Главная функция режима "Паутинка".
+// fromHistory=true — Паутинка перерисовывается при возврате кнопкой "Назад"
+// (то есть её отметка уже лежит в history/categoryHistory, повторно
+// добавлять её не нужно). fromHistory=false (обычный вызов по кнопке
+// "🕸️ Паутинка") — Паутинка добавляется в историю как новый шаг.
+async function showPautinka(fromHistory = false) {
+    isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
+    if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
+    if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+
+    if (!fromHistory) {
+        history.push(PAUTINKA_HISTORY_MARKER);
+        categoryHistory.push(null);
+    }
+    currentCategoryName = null;
+
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+    const oldOverlay = document.getElementById("pautinkaOverlay");
+    if (oldOverlay) oldOverlay.remove();
+
+    app.innerHTML = "";
+
+    // --- 1. Собираем узлы (в мировых координатах, центр (0,0) — узел "Домой") ---
+    const R1 = 230; // радиус кольца хабов вокруг Домой (было 170 — увеличено для большего простора между узлами)
+    const HOME_R = 44, HUB_R = 30, GENRE_R = 19, GAME_R = 21;
+
+    const normalCatKeys = Object.keys(dbData).filter(cat => !isSecretCategory(cat));
+    // Хабы: обычные категории + отдельный хаб "Игры"
+    const hubDefs = normalCatKeys.map(catKey => ({ kind: "category", key: catKey }));
+    hubDefs.push({ kind: "games", key: "__GAMES__" });
+
+    const numHubs = hubDefs.length;
+    const wedgeDeg = Math.min(112, (360 / numHubs) * 0.92);
+    const wedgeRad = wedgeDeg * Math.PI / 180;
+
+    const nodes = []; // {type, x, y, r, hue, emoji, label, payload}
+    const threads = []; // {x1,y1,x2,y2, hue, animated}
+
+    nodes.push({ type: "home", x: 0, y: 0, r: HOME_R, emoji: "🏠", label: "Домой" });
+
+    hubDefs.forEach((hub, i) => {
+        const angle = (-Math.PI / 2) + i * (2 * Math.PI / numHubs); // старт сверху, по часовой
+        const hubX = R1 * Math.cos(angle);
+        const hubY = R1 * Math.sin(angle);
+        const hubHue = hub.kind === "games" ? PAUTINKA_GAMES_HUE : getCategoryBaseHue(hub.key);
+
+        nodes.push({
+            type: "hub",
+            hubKind: hub.kind,
+            key: hub.key,
+            x: hubX, y: hubY, r: HUB_R,
+            hue: hubHue,
+            emoji: hub.kind === "games" ? "🕹" : getCategoryEmoji(hub.key),
+            label: hub.kind === "games" ? "Игры" : pautinkaTruncate(stripLeadingEmoji(hub.key), 16),
+        });
+        threads.push({ x1: 0, y1: 0, x2: hubX, y2: hubY, hue: hubHue, animated: true });
+
+        // --- Листья хаба: у категорий это ЖАНРЫ (финальные объекты — без
+        // отдельных тайтлов, их слишком много), у "Игры" — сами 6 игр ---
+        let leaves; // [{emoji|null, label, hue, payload}]
+        if (hub.kind === "games") {
+            leaves = PAUTINKA_GAMES.map(g => ({ emoji: g.emoji, label: g.label, hue: PAUTINKA_GAMES_HUE, gameKey: g.key }));
+        } else {
+            leaves = Object.keys(dbData[hub.key] || {}).map(genreKey => ({
+                emoji: null,
+                label: genreKey,
+                hue: getGenreHue(hub.key, genreKey),
+                catKey: hub.key,
+                genreKey: genreKey,
+            }));
+        }
+
+        const n = leaves.length;
+        if (n === 0) return;
+
+        const R2 = Math.max(R1 + 130, (n * (hub.kind === "games" ? 48 : 82)) / wedgeRad); // было R1+90 и 34/60 — увеличено для большего расстояния между листьями
+
+        leaves.forEach((leaf, j) => {
+            const leafAngle = n === 1
+                ? angle
+                : angle - wedgeRad / 2 + wedgeRad * (j + 0.5) / n;
+            const lx = R2 * Math.cos(leafAngle);
+            const ly = R2 * Math.sin(leafAngle);
+            const isGame = hub.kind === "games";
+
+            nodes.push({
+                type: isGame ? "game" : "genre",
+                x: lx, y: ly,
+                r: isGame ? GAME_R : GENRE_R,
+                hue: leaf.hue,
+                emoji: leaf.emoji,
+                label: pautinkaTruncate(leaf.label, isGame ? 20 : 18),
+                catKey: leaf.catKey,
+                genreKey: leaf.genreKey,
+                gameKey: leaf.gameKey,
+            });
+            threads.push({ x1: hubX, y1: hubY, x2: lx, y2: ly, hue: leaf.hue, animated: isGame });
+        });
+    });
+
+    // --- 2. Считаем общий bounding box и сдвигаем всё в положительные координаты ---
+    const PAD = 90;
+    let minX = 0, minY = 0, maxX = 0, maxY = 0;
+    nodes.forEach(n => {
+        const labelPad = n.r + 26; // место под подпись снизу узла
+        minX = Math.min(minX, n.x - n.r - 20);
+        maxX = Math.max(maxX, n.x + n.r + 20);
+        minY = Math.min(minY, n.y - n.r - 20);
+        maxY = Math.max(maxY, n.y + labelPad);
+    });
+    minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
+    const totalW = maxX - minX;
+    const totalH = maxY - minY;
+    const offX = -minX, offY = -minY;
+
+    nodes.forEach(n => { n.fx = n.x + offX; n.fy = n.y + offY; });
+    threads.forEach(t => {
+        t.fx1 = t.x1 + offX; t.fy1 = t.y1 + offY;
+        t.fx2 = t.x2 + offX; t.fy2 = t.y2 + offY;
+    });
+
+    // --- 3. Генерируем разметку ---
+    let threadsHtml = "";
+    threads.forEach((t, i) => {
+        const len = Math.hypot(t.fx2 - t.fx1, t.fy2 - t.fy1);
+        const color = `hsl(${t.hue} 85% 65%)`;
+        if (t.animated) {
+            threadsHtml += `<line class="pautinka-thread-base" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke-width="1.5" />`;
+            threadsHtml += `<line class="pautinka-thread-pulse" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="${color}" stroke-width="2.2" stroke-dasharray="10 ${Math.max(len - 10, 10)}" style="color:${color}; --len:${len}; animation-delay:${(i % 7) * -0.4}s;" />`;
+        } else {
+            threadsHtml += `<line class="pautinka-thread-base" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="hsla(${t.hue},70%,60%,0.28)" stroke-width="1.2" />`;
+        }
+    });
+
+    let nodesHtml = "";
+    nodes.forEach((n, idx) => {
+        const popDelay = Math.min(idx * 0.035, 1.4);
+        const floatDur = 3.2 + (idx % 5) * 0.5;
+        const floatDelay = (idx % 9) * -0.3;
+        const fillColor = n.type === "home" ? "hsl(45 90% 62%)" : `hsl(${n.hue} 72% 56%)`;
+        const strokeColor = n.type === "home" ? "hsl(45 95% 80%)" : `hsl(${n.hue} 85% 78%)`;
+        const shapeClass = "pautinka-node-shape" + (n.type === "home" ? " pautinka-home-shape" : "");
+        const emojiFontSize = n.type === "home" ? n.r * 0.98 : n.r * 1.15;
+        // Хабы (Фильмы/Мультфильмы/Сериалы/Аниме/Игры — 5 штук) больше не
+        // кликабельны: у них нет role="button"/tabindex, поэтому убрана
+        // рамка фокуса, hover-подсветка и любая обработка кликов — они
+        // теперь чисто визуальные ориентиры на паутине, "активны" только
+        // их листья (жанры/игры) и центральный узел "Домой".
+        const isStaticHub = n.type === "hub";
+        const nodeClass = "pautinka-node pautinka-node-pop" + (isStaticHub ? " pautinka-node-static" : "");
+        const interactiveAttrs = isStaticHub ? "" : `tabindex="0" role="button" aria-label="${escapeSvgAttr(n.label)}"`;
+
+        nodesHtml += `
+        <g class="${nodeClass}" data-idx="${idx}" ${interactiveAttrs} style="animation-delay:${popDelay}s;">
+            <g class="pautinka-node-float" style="animation-duration:${floatDur}s; animation-delay:${floatDelay}s;">
+                ${(n.type === "hub" || n.type === "home") ? `<circle class="pautinka-sonar" cx="${n.fx}" cy="${n.fy}" r="${n.r}" stroke="${strokeColor}" style="animation-delay:${(idx % 5) * -0.5}s;" />` : ""}
+                <circle class="${shapeClass}" cx="${n.fx}" cy="${n.fy}" r="${n.r}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" />
+                ${n.emoji ? `<text x="${n.fx}" y="${n.fy}" font-size="${emojiFontSize}" text-anchor="middle" dominant-baseline="central" style="pointer-events:none;">${n.emoji}</text>` : ""}
+                <text class="pautinka-label" x="${n.fx}" y="${n.fy + n.r + 15}" font-size="${n.type === 'hub' || n.type === 'home' ? 13 : n.type === 'genre' ? 12 : 10.5}" font-weight="${n.type === 'hub' || n.type === 'home' ? 700 : n.type === 'genre' ? 600 : 500}">${escapeSvgText(n.label)}</text>
+            </g>
+        </g>`;
+    });
+
+    const svgMarkup = `
+        <svg id="pautinkaSvg" class="pautinka-svg" viewBox="0 0 ${totalW} ${totalH}" width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
+            <g class="pautinka-threads">${threadsHtml}</g>
+            <g class="pautinka-nodes">${nodesHtml}</g>
+        </svg>`;
+
+    // --- 4. Собираем экран ---
+    const overlay = document.createElement("div");
+    overlay.id = "pautinkaOverlay";
+
+    const heading = document.createElement("div");
+    heading.className = "pautinka-heading";
+    heading.textContent = "🕸️ Паутинка";
+    overlay.appendChild(heading);
+
+    const scroll = document.createElement("div");
+    scroll.className = "pautinka-scroll";
+    scroll.innerHTML = svgMarkup;
+    overlay.appendChild(scroll);
+
+    const zoomControls = document.createElement("div");
+    zoomControls.className = "pautinka-zoom-controls";
+    zoomControls.innerHTML = `
+        <button type="button" class="round-btn" id="pautinkaZoomIn">➕</button>
+        <button type="button" class="round-btn" id="pautinkaZoomOut">➖</button>
+    `;
+    overlay.appendChild(zoomControls);
+
+    const backControls = document.createElement("div");
+    backControls.className = "pautinka-back-controls";
+    backControls.innerHTML = `<button type="button" class="round-btn" id="pautinkaBackBtn">⬅</button>`;
+    overlay.appendChild(backControls);
+
+    document.body.appendChild(overlay);
+
+    document.getElementById("pautinkaBackBtn").onclick = () => {
+        leavePautinka();
+        goBack();
+    };
+
+    const svg = document.getElementById("pautinkaSvg");
+
+    // --- 5. Центрируем стартовый вид на узле "Домой" ---
+    let zoomLevel = 1;
+    const MIN_ZOOM = 0.4, MAX_ZOOM = 2.2;
+    function applyZoom(newZoom, focusWorldX, focusWorldY) {
+        newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+        svg.style.width = (totalW * newZoom) + "px";
+        svg.style.height = (totalH * newZoom) + "px";
+        zoomLevel = newZoom;
+        if (typeof focusWorldX === "number") {
+            scroll.scrollLeft = focusWorldX * zoomLevel - scroll.clientWidth / 2;
+            scroll.scrollTop = focusWorldY * zoomLevel - scroll.clientHeight / 2;
+        }
+    }
+    applyZoom(1);
+    // Центр на узле "Домой" (nodes[0])
+    scroll.scrollLeft = nodes[0].fx * zoomLevel - scroll.clientWidth / 2;
+    scroll.scrollTop = nodes[0].fy * zoomLevel - scroll.clientHeight / 2;
+
+    document.getElementById("pautinkaZoomIn").onclick = () => {
+        const centerX = (scroll.scrollLeft + scroll.clientWidth / 2) / zoomLevel;
+        const centerY = (scroll.scrollTop + scroll.clientHeight / 2) / zoomLevel;
+        applyZoom(zoomLevel * 1.25, centerX, centerY);
+    };
+    document.getElementById("pautinkaZoomOut").onclick = () => {
+        const centerX = (scroll.scrollLeft + scroll.clientWidth / 2) / zoomLevel;
+        const centerY = (scroll.scrollTop + scroll.clientHeight / 2) / zoomLevel;
+        applyZoom(zoomLevel / 1.25, centerX, centerY);
+    };
+
+    // --- 6. Пан мышью (тач и так скроллится нативно, с инерцией) ---
+    let isDragging = false, dragStartX = 0, dragStartY = 0, dragScrollL = 0, dragScrollT = 0;
+    scroll.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "mouse") return;
+        if (e.target.closest(".pautinka-node")) return;
+        isDragging = true;
+        scroll.classList.add("pautinka-dragging");
+        dragStartX = e.clientX; dragStartY = e.clientY;
+        dragScrollL = scroll.scrollLeft; dragScrollT = scroll.scrollTop;
+    });
+    window.addEventListener("pointermove", (e) => {
+        if (!isDragging) return;
+        scroll.scrollLeft = dragScrollL - (e.clientX - dragStartX);
+        scroll.scrollTop = dragScrollT - (e.clientY - dragStartY);
+    });
+    window.addEventListener("pointerup", () => { isDragging = false; scroll.classList.remove("pautinka-dragging"); });
+
+    // --- 7. Обработчики узлов ---
+    svg.querySelectorAll(".pautinka-node").forEach(g => {
+        const meta = nodes[Number(g.dataset.idx)];
+
+        // Хабы (5 штук: Фильмы/Мультфильмы/Сериалы/Аниме/Игры) полностью
+        // некликабельны — никаких обработчиков на них не вешаем вообще.
+        if (meta.type === "hub") return;
+
+        const setActive = () => g.classList.add("pautinka-node-active");
+        const clearActive = () => g.classList.remove("pautinka-node-active");
+        g.addEventListener("pointerdown", setActive);
+        g.addEventListener("pointerup", clearActive);
+        g.addEventListener("pointerleave", clearActive);
+        g.addEventListener("pointercancel", clearActive);
+
+        const activate = () => {
+            if (meta.type === "home") {
+                leavePautinka();
+                showHome();
+            } else if (meta.type === "genre") {
+                // Жанр — финальный объект в Паутинке: ведёт на обычный экран
+                // со списком его тайтлов (со звёздочками, постерами по
+                // долгому нажатию и т.д.) — как при обычном просмотре каталога
+                leavePautinka();
+                currentCategoryName = meta.catKey;
+                openData(dbData[meta.catKey][meta.genreKey], true);
+            } else if (meta.type === "game") {
+                const game = PAUTINKA_GAMES.find(g2 => g2.key === meta.gameKey);
+                if (game) {
+                    leavePautinka();
+                    game.launch();
+                }
+            }
+        };
+
+        g.addEventListener("click", (e) => { e.stopPropagation(); activate(); });
+        g.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+        });
+    });
 }
 
 // =======================================================
