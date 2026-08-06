@@ -35,12 +35,16 @@ const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
 // ==========================================
-// KINOPOISK.DEV (только метаданные — название/год/ID, чтобы построить
-// ссылку на реальную страницу фильма на www.kinopoisk.ru; никакого видео)
+// КИНОПОИСК (только метаданные — название/год/ID, чтобы построить ссылку на
+// реальную страницу фильма на www.kinopoisk.ru; никакого видео)
 // ==========================================
-// Получите токен на https://poiskkino.dev/ (выдаётся через Telegram-бота
-// @poiskkinodev_bot) и вставьте его сюда вместо заглушки.
-const KINOPOISK_DEV_API_KEY = "WD1JBVM-JDC4EBC-NXH58KD-BX5JSBP";
+// Запрос идёт не прямо на api.kinopoisk.dev с фронтенда (у них не работает
+// CORS для браузерных запросов — preflight редиректится, а это принципиально
+// нельзя обойти на стороне клиента), а через свою Edge Function
+// "kinopoisk-search" в Supabase, которая уже без CORS-ограничений (это
+// сервер) стучится в kinopoisk.dev, храня токен в секретах проекта.
+// Разверните supabase/functions/kinopoisk-search и задайте секрет
+// KINOPOISK_DEV_TOKEN (см. инструкцию в файле функции).
 
 // ==========================================
 // СТИКЕРЫ ДЛЯ ЧАТА (хранятся в GitHub, не в БД)
@@ -2166,17 +2170,20 @@ function showStickerPicker(onPick) {
 // не нашлось. Год нужен, чтобы не перепутать одноимённые фильмы разных лет —
 // при точном совпадении года берём его, иначе допускаем разницу в 1 год
 // (премьеру в разных базах иногда считают по разным датам, конец/начало года).
-async function findKinopoiskUrl(itemText) {
-    if (!KINOPOISK_DEV_API_KEY || KINOPOISK_DEV_API_KEY.includes("ВСТАВЬТЕ")) return null;
-
+// Возвращает числовой ID тайтла на Кинопоиске (или null, если не нашлось) —
+// что дальше делать с этим ID (какую страницу и как открывать), решаете сами.
+async function findKinopoiskId(itemText) {
     const m = itemText.match(/^(.*)\s\((\d{4})\)$/);
     const title = m ? m[1] : itemText;
     const year = m ? Number(m[2]) : null;
 
     try {
-        const params = new URLSearchParams({ query: title, limit: "10", page: "1" });
-        const res = await fetch(`https://api.kinopoisk.dev/v1.4/movie/search?${params.toString()}`, {
-            headers: { "X-API-KEY": KINOPOISK_DEV_API_KEY }
+        const params = new URLSearchParams({ query: title });
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/kinopoisk-search?${params.toString()}`, {
+            headers: {
+                Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+                apikey: SUPABASE_ANON_KEY
+            }
         });
         if (!res.ok) return null;
         const json = await res.json();
@@ -2189,10 +2196,7 @@ async function findKinopoiskUrl(itemText) {
         } else {
             best = docs[0];
         }
-        if (!best) return null;
-
-        const isSeries = best.type === "tv-series" || best.type === "animated-series" || best.type === "cartoon-series";
-        return `https://www.kinopoisk.ru/${isSeries ? "series" : "film"}/${best.id}/`;
+        return best ? best.id : null;
     } catch (e) {
         console.error("Ошибка поиска на Кинопоиске:", e);
         return null;
@@ -2222,10 +2226,10 @@ function showActionMenu(itemText) {
             <div id="posterBox" style="margin: 10px 0 15px; display: flex; justify-content: center;">
                 <p style="color: #9686b8; font-size: 13px;">Ищем постер...</p>
             </div>
+            <div id="kinopoiskIdBox" style="margin: -5px 0 15px; font-size: 13px; color: #cbb8e8;"></div>
             <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
-                <button class="btn-pink-style" id="actKinopoisk" style="display:none;">🔎 Кинопоиск</button>
                 <button class="btn-pink-style" id="actComment">💬 Комментарии</button>
                 <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
                 <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
@@ -2248,16 +2252,12 @@ function showActionMenu(itemText) {
         }
     });
 
-    // Кнопка "Кинопоиск" появляется только если тайтл там нашёлся —
-    // до ответа API кнопка скрыта, ничего лишнего пользователь не видит.
-    findKinopoiskUrl(itemText).then(url => {
-        if (!overlay.isConnected || !url) return;
-        const kpBtn = overlay.querySelector("#actKinopoisk");
-        kpBtn.style.display = "";
-        kpBtn.onclick = () => {
-            overlay.remove();
-            window.open(url, "_blank");
-        };
+    // Надпись "Кинопоиск ID: ..." под постером — появляется только если
+    // тайтл нашёлся; до ответа и если не нашёлся — блок остаётся пустым.
+    findKinopoiskId(itemText).then(id => {
+        if (!overlay.isConnected || !id) return;
+        const kpBox = overlay.querySelector("#kinopoiskIdBox");
+        kpBox.textContent = `Кинопоиск ID: ${id}`;
     });
 
     // Логика кнопки трейлера
