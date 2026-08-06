@@ -35,6 +35,14 @@ const TMDB_API_KEY = "17ff3215ca3fae9d63aacaf9f5fd14c3";
 const TMDB_IMG_BASE = "https://image.tmdb.org/t/p/w342";
 
 // ==========================================
+// KINOPOISK.DEV (только метаданные — название/год/ID, чтобы построить
+// ссылку на реальную страницу фильма на www.kinopoisk.ru; никакого видео)
+// ==========================================
+// Получите токен на https://poiskkino.dev/ (выдаётся через Telegram-бота
+// @poiskkinodev_bot) и вставьте его сюда вместо заглушки.
+const KINOPOISK_DEV_API_KEY = "WD1JBVM-JDC4EBC-NXH58KD-BX5JSBP";
+
+// ==========================================
 // СТИКЕРЫ ДЛЯ ЧАТА (хранятся в GitHub, не в БД)
 // ==========================================
 // Загрузите картинки стикеров (.png/.jpg/.jpeg/.webp/.gif) в папку "stickers"
@@ -2153,6 +2161,44 @@ function showStickerPicker(onPick) {
     });
 }
 
+// Ищет тайтл на Кинопоиске по названию+году через метаданные kinopoisk.dev
+// и возвращает ссылку на его страницу на www.kinopoisk.ru, либо null, если
+// не нашлось. Год нужен, чтобы не перепутать одноимённые фильмы разных лет —
+// при точном совпадении года берём его, иначе допускаем разницу в 1 год
+// (премьеру в разных базах иногда считают по разным датам, конец/начало года).
+async function findKinopoiskUrl(itemText) {
+    if (!KINOPOISK_DEV_API_KEY || KINOPOISK_DEV_API_KEY.includes("ВСТАВЬТЕ")) return null;
+
+    const m = itemText.match(/^(.*)\s\((\d{4})\)$/);
+    const title = m ? m[1] : itemText;
+    const year = m ? Number(m[2]) : null;
+
+    try {
+        const params = new URLSearchParams({ query: title, limit: "10", page: "1" });
+        const res = await fetch(`https://api.kinopoisk.dev/v1.4/movie/search?${params.toString()}`, {
+            headers: { "X-API-KEY": KINOPOISK_DEV_API_KEY }
+        });
+        if (!res.ok) return null;
+        const json = await res.json();
+        const docs = (json && json.docs) || [];
+        if (!docs.length) return null;
+
+        let best = null;
+        if (year) {
+            best = docs.find(d => d.year === year) || docs.find(d => Math.abs((d.year || 0) - year) <= 1);
+        } else {
+            best = docs[0];
+        }
+        if (!best) return null;
+
+        const isSeries = best.type === "tv-series" || best.type === "animated-series" || best.type === "cartoon-series";
+        return `https://www.kinopoisk.ru/${isSeries ? "series" : "film"}/${best.id}/`;
+    } catch (e) {
+        console.error("Ошибка поиска на Кинопоиске:", e);
+        return null;
+    }
+}
+
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
@@ -2179,6 +2225,7 @@ function showActionMenu(itemText) {
             <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">Выберите действие для этого тайтла:</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
+                <button class="btn-pink-style" id="actKinopoisk" style="display:none;">🔎 Кинопоиск</button>
                 <button class="btn-pink-style" id="actComment">💬 Комментарии</button>
                 <button class="btn-pink-style" id="actEdit">✏️ Редактировать</button>
                 <button class="btn-pink-style" id="actDelete">❌ Удалить из базы</button>
@@ -2199,6 +2246,18 @@ function showActionMenu(itemText) {
         } else {
             posterBox.innerHTML = `<p style="color: #9686b8; font-size: 13px;">Постер к фильму не найден</p>`;
         }
+    });
+
+    // Кнопка "Кинопоиск" появляется только если тайтл там нашёлся —
+    // до ответа API кнопка скрыта, ничего лишнего пользователь не видит.
+    findKinopoiskUrl(itemText).then(url => {
+        if (!overlay.isConnected || !url) return;
+        const kpBtn = overlay.querySelector("#actKinopoisk");
+        kpBtn.style.display = "";
+        kpBtn.onclick = () => {
+            overlay.remove();
+            window.open(url, "_blank");
+        };
     });
 
     // Логика кнопки трейлера
@@ -3782,10 +3841,41 @@ async function showChatScreen() {
 // рабочего программного API для управления встроенным плеером.
 
 // ---------- Определение источника по ссылке ----------
+// Достаёт src из целиком вставленного HTML-тега <iframe ...></iframe>.
+// DOMParser не выполняет скрипты и ничего не вставляет в реальный документ —
+// мы только читаем атрибут src, а сам iframe на странице создаём сами через
+// iframe.src = ..., так что произвольная разметка внутри вставленного тега
+// никак не выполняется и не попадает в DOM как есть.
+function extractIframeSrc(html) {
+    try {
+        const doc = new DOMParser().parseFromString(String(html), "text/html");
+        const iframeEl = doc.querySelector("iframe");
+        if (!iframeEl) return null;
+        const rawSrc = iframeEl.getAttribute("src");
+        if (!rawSrc) return null;
+        const parsed = new URL(rawSrc, window.location.href);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+        return parsed.href;
+    } catch (e) {
+        return null;
+    }
+}
+
 function parseWatchPartyUrl(rawUrl) {
+    const trimmedRaw = String(rawUrl).trim();
+
+    // Пользователь вставил не ссылку, а целиком код плеера — <iframe ...>.
+    // Достаём src и дальше ведём себя как с любым другим источником: именно
+    // поэтому rawUrl (весь HTML целиком) хранится и рассылается партнёру как
+    // обычно — на его стороне тот же код точно так же выделит src.
+    if (/^<iframe[\s>]/i.test(trimmedRaw)) {
+        const src = extractIframeSrc(trimmedRaw);
+        return src ? { type: "custom", ref: src } : null;
+    }
+
     let url;
     try {
-        url = new URL(String(rawUrl).trim());
+        url = new URL(trimmedRaw);
     } catch (e) {
         return null;
     }
@@ -3825,6 +3915,7 @@ function describeWPSource(type) {
     if (type === "youtube") return "YouTube-видео";
     if (type === "rutube") return "видео с Rutube";
     if (type === "hls") return "видеопоток (m3u8)";
+    if (type === "custom") return "встроенный плеер";
     return "видеофайл";
 }
 
@@ -4058,12 +4149,44 @@ async function createWPRutubePlayer(mountEl, videoId) {
     return obj;
 }
 
+// ---------- Произвольный вставленный <iframe> (сторонний плеер) ----------
+// У чужого плеера внутри iframe нет общего протокола управления (как
+// player:play/pause у Rutube или IFrame API у YouTube), поэтому play/pause/
+// перемотку синхронизировать между партнёрами технически невозможно — можно
+// только показать обоим один и тот же встроенный плеер и сообщить, что видео
+// сменилось. Каждый жмёт play/pause/перемотку в своём плеере сам.
+async function createWPCustomIframePlayer(mountEl, src) {
+    mountEl.innerHTML = "";
+    const iframe = document.createElement("iframe");
+    // Отдельного класса под произвольный плеер в стилях сайта нет — берём тот
+    // же класс, что у рамки Rutube-плеера (та же полноширинная рамка 16:9),
+    // чтобы не заводить лишний CSS-класс без надобности.
+    iframe.className = "wp-rutube-frame wp-custom-frame";
+    iframe.src = src;
+    iframe.setAttribute("frameborder", "0");
+    iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media; picture-in-picture");
+    iframe.setAttribute("allowfullscreen", "");
+    mountEl.appendChild(iframe);
+
+    return {
+        type: "custom",
+        onPlay: null,
+        onPause: null,
+        onSeek: null,
+        play() {},
+        pause() {},
+        seekTo() {},
+        getCurrentTime() { return 0; },
+        destroy() { iframe.remove(); }
+    };
+}
+
 // ---------- Загрузка источника (своя или пришедшая от партнёра) ----------
 async function loadWatchPartySource(rawUrl, opts) {
     opts = opts || {};
     const parsed = parseWatchPartyUrl(rawUrl);
     if (!parsed) {
-        showWPStatusNote("⚠️ Ссылка не распознана. Поддерживаются YouTube, Rutube и прямые ссылки на .mp4/.webm/.m3u8");
+        showWPStatusNote("⚠️ Ссылка не распознана. Поддерживаются YouTube, Rutube, прямые ссылки на .mp4/.webm/.m3u8, а также код плеера <iframe> (кнопка 🔗)");
         return;
     }
 
@@ -4082,6 +4205,7 @@ async function loadWatchPartySource(rawUrl, opts) {
         else if (parsed.type === "hls") player = await createWPHlsPlayer(container, parsed.ref);
         else if (parsed.type === "youtube") player = await createWPYouTubePlayer(container, parsed.ref);
         else if (parsed.type === "rutube") player = await createWPRutubePlayer(container, parsed.ref);
+        else if (parsed.type === "custom") player = await createWPCustomIframePlayer(container, parsed.ref);
     } catch (e) {
         console.error("Ошибка загрузки видео для совместного просмотра:", e);
     }
@@ -4865,6 +4989,47 @@ function renderWatchPartyChatMessages() {
     }
 }
 
+// ---------- Модалка вставки кода стороннего плеера (<iframe>) ----------
+function showWPIframeModal() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "wpIframeModal";
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <h3 style="text-align: center; margin-bottom: 15px;">🔗 Вставить код плеера</h3>
+            <form class="modal-form" id="wpIframeForm">
+                <textarea id="wpIframeInput" rows="5" placeholder='<iframe src="..." width="640" height="360"></iframe>' style="width:100%; resize:vertical; font-family:monospace; font-size:13px; box-sizing:border-box;" required></textarea>
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-save">Загрузить</button>
+                    <button type="button" class="btn-cancel" id="wpIframeCancel">Отмена</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const closeModal = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+    overlay.querySelector("#wpIframeCancel").onclick = closeModal;
+
+    const textarea = overlay.querySelector("#wpIframeInput");
+    textarea.focus();
+
+    overlay.querySelector("#wpIframeForm").onsubmit = (e) => {
+        e.preventDefault();
+        const html = textarea.value.trim();
+        if (!html) return;
+
+        if (!extractIframeSrc(html)) {
+            alert("Не нашлось тега <iframe> с атрибутом src. Проверьте и вставьте код плеера целиком.");
+            return;
+        }
+
+        closeModal();
+        loadWatchPartySource(html, { initialTime: 0, autoplay: false, announce: true });
+    };
+}
+
 // ---------- Экран совместного просмотра ----------
 async function showWatchPartyScreen() {
     startTransitionLock();
@@ -4921,6 +5086,16 @@ async function showWatchPartyScreen() {
     urlInput.className = "chat-text-input";
     urlInput.placeholder = "Ссылка: YouTube, Rutube";
     urlInput.autocomplete = "off";
+    // Кнопка вставки кода стороннего плеера (целиком <iframe>) — стоит левее
+    // кнопки запуска, тот же стиль иконки, что у кнопки со стикерами в чате.
+    let wpIframeBtn = document.createElement("button");
+    wpIframeBtn.id = "wpIframeBtn";
+    wpIframeBtn.type = "button";
+    wpIframeBtn.className = "chat-sticker-btn";
+    wpIframeBtn.title = "Вставить код плеера (iframe)";
+    wpIframeBtn.textContent = "🔗";
+    wpIframeBtn.onclick = () => showWPIframeModal();
+
     let loadBtn = document.createElement("button");
     loadBtn.id = "wpLoadBtn";
     loadBtn.type = "button";
@@ -4936,6 +5111,7 @@ async function showWatchPartyScreen() {
         if (e.key === "Enter") { e.preventDefault(); doLoad(); }
     };
     urlRow.appendChild(urlInput);
+    urlRow.appendChild(wpIframeBtn);
     urlRow.appendChild(loadBtn);
     app.appendChild(urlRow);
 
