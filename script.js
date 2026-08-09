@@ -3861,16 +3861,9 @@ function extractIframeSrc(html) {
     }
 }
 
-// ---------- Локальный сервер (свои файлы на ПК) по короткому числовому вводу ----------
-// Если в строку ссылки ввести просто число, например "123" (без пробелов,
-// без ничего лишнего) — сайт соберёт из него { "iframe": "http://localhost/цифры123" }.
-// LOCAL_SERVER_BASE — ЗАМЕНИТЕ на реальный адрес вашего локального сервера,
-// когда захостите его (сейчас это просто заглушка-пример).
-const LOCAL_SERVER_BASE = "https://pleer.video/"; // <-- сюда свой адрес
 
-// Возвращает { iframe } из голого числа. Если строка не состоит целиком из
-// цифр (пробелы, буквы и т.п.) — возвращает null, и ввод дальше обрабатывается
-// как обычная ссылка (YouTube/Rutube/mp4/webm/m3u8).
+const LOCAL_SERVER_BASE = "https://pleer.video/";
+
 function buildLocalServerData(trimmedRaw) {
     if (!/^\d+$/.test(trimmedRaw)) return null;
     return {
@@ -3881,18 +3874,11 @@ function buildLocalServerData(trimmedRaw) {
 function parseWatchPartyUrl(rawUrl) {
     const trimmedRaw = String(rawUrl).trim();
 
-    // Пользователь вставил не ссылку, а целиком код плеера — <iframe ...>.
-    // Достаём src и дальше ведём себя как с любым другим источником: именно
-    // поэтому rawUrl (весь HTML целиком) хранится и рассылается партнёру как
-    // обычно — на его стороне тот же код точно так же выделит src.
     if (/^<iframe[\s>]/i.test(trimmedRaw)) {
         const src = extractIframeSrc(trimmedRaw);
         return src ? { type: "custom", ref: src } : null;
     }
 
-    // Короткий числовой ввод — свой локальный сервер (см. buildLocalServerData).
-    // Проверяем раньше, чем new URL(), потому что "123" сама по себе не
-    // является валидным URL и просто провалилась бы в return null ниже.
     const localData = buildLocalServerData(trimmedRaw);
     if (localData) {
         return { type: "custom", ref: localData.iframe };
@@ -4174,18 +4160,10 @@ async function createWPRutubePlayer(mountEl, videoId) {
     return obj;
 }
 
-// ---------- Произвольный вставленный <iframe> (сторонний плеер) ----------
-// У чужого плеера внутри iframe нет общего протокола управления (как
-// player:play/pause у Rutube или IFrame API у YouTube), поэтому play/pause/
-// перемотку синхронизировать между партнёрами технически невозможно — можно
-// только показать обоим один и тот же встроенный плеер и сообщить, что видео
-// сменилось. Каждый жмёт play/pause/перемотку в своём плеере сам.
+
 async function createWPCustomIframePlayer(mountEl, src) {
     mountEl.innerHTML = "";
     const iframe = document.createElement("iframe");
-    // Отдельного класса под произвольный плеер в стилях сайта нет — берём тот
-    // же класс, что у рамки Rutube-плеера (та же полноширинная рамка 16:9),
-    // чтобы не заводить лишний CSS-класс без надобности.
     iframe.className = "wp-rutube-frame wp-custom-frame";
     iframe.src = src;
     iframe.setAttribute("frameborder", "0");
