@@ -1647,7 +1647,7 @@ async function showHome() {
         let addBtn = document.createElement("button");
         addBtn.className = "btn-add-new";
         addBtn.textContent = "➕ Добавить тайтл";
-        addBtn.onclick = () => showAddEditModal();
+        addBtn.onclick = () => showBatchAddTitlesScreen();
         app.appendChild(addBtn);
     }
 
@@ -5434,6 +5434,328 @@ function showAddEditModal(existingItem = null) {
             }
 
             overlay.remove();
+            await refreshCurrentScreen();
+        }
+    };
+}
+
+// ==========================================
+// МАССОВОЕ ДОБАВЛЕНИЕ ТАЙТЛОВ ("таблицей")
+// ==========================================
+// Раньше кнопка "➕ Добавить тайтл" открывала showAddEditModal() — вертикальную
+// форму на один тайтл за раз, во всплывающем окне. Теперь вместо модалки —
+// отдельный полноценный экран приложения (как "Совместный просмотр" или
+// раздел "Игры"): свой заголовок, своя навигация "⬅ Назад"/"🏠 Домой" сверху,
+// а сама форма занимает весь #app. Заполнение построчное (горизонтальное):
+// несколько тайтлов одновременно, каждый — своя строка с полями
+// Название/Год/Категория/Жанр/Франшиза. Жанр и франшиза, как и раньше, можно
+// выбрать из уже существующих (через <datalist>) или вписать свои — просто
+// теперь это доступно в каждой строке отдельно.
+//
+// На широких экранах строки выглядят как таблица (общая "шапка" сверху один
+// раз, поля в ряд) — для этого на время экрана у .container снимается
+// обычное ограничение ширины в 500px (см. body.batch-add-screen-active в
+// CSS), иначе даже на десктопе пяти полям в ряд было бы физически негде
+// поместиться. На узких экранах (телефон) строки становятся отдельными
+// карточками, где перед каждым полем всплывает его подпись (см. .mobile-label
+// в CSS) — это делает адаптацию через CSS, а не через отдельную вторую вёрстку.
+const MAX_BATCH_ADD_ROWS = 10;
+const INITIAL_BATCH_ADD_ROWS = 3;
+
+// Возврат с экрана массового добавления туда, откуда его открыли — без
+// повторного похода в БД (если ничего не сохраняли, данные и не менялись).
+// Логика та же, что в refreshCurrentScreen(): последний экран из history,
+// а если history пуст (кнопка живёт на главной) — просто на главную.
+function closeBatchAddScreen() {
+    document.body.classList.remove("batch-add-screen-active");
+    if (history.length > 0) {
+        openData(history[history.length - 1], false);
+    } else {
+        showHome();
+    }
+}
+
+function showBatchAddTitlesScreen() {
+    const categories = Object.keys(dbData).filter(cat => {
+        return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
+    });
+
+    if (categories.length === 0) {
+        alert("Нет доступных категорий для добавления тайтла.");
+        return;
+    }
+
+    // Сбрасываем состояния других полноэкранных режимов (чат/вишлист/игры и
+    // т.п.) — та же гигиена, что перед открытием любого другого экрана.
+    isChatScreenOpen = false;
+    isWishlistScreenOpen = false;
+    currentWatchedBucket = null;
+    if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
+    if (typeof activeGameCleanup !== "undefined" && activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
+
+    document.body.classList.add("batch-add-screen-active");
+
+    // Собственная навигация экрана: "Назад" — на тот экран, откуда пришли
+    // (не через goBack()/history.pop(), т.к. этот экран сам не сохранён в
+    // history — как и другие полноэкранные режимы вроде "Совместного просмотра").
+    let oldNav = document.querySelector(".navigation");
+    if (oldNav) oldNav.remove();
+
+    let nav = document.createElement("div");
+    nav.className = "navigation";
+    let backBtn = document.createElement("button");
+    backBtn.textContent = "⬅ Назад";
+    backBtn.onclick = () => closeBatchAddScreen();
+    let homeBtn = document.createElement("button");
+    homeBtn.textContent = "🏠 Домой";
+    homeBtn.onclick = () => showHome();
+    nav.appendChild(backBtn);
+    nav.appendChild(homeBtn);
+    let containerEl = document.querySelector(".container");
+    if (containerEl) {
+        containerEl.insertBefore(nav, containerEl.firstChild);
+    } else {
+        document.body.insertBefore(nav, app);
+    }
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    setEmojiTitle(title, "➕ Добавить тайтлы");
+    app.appendChild(title);
+
+    const screenWrap = document.createElement("div");
+    screenWrap.className = "batch-add-screen";
+    screenWrap.innerHTML = `
+        <form class="batch-add-form" id="batchAddForm">
+            <div class="batch-header-row">
+                <span>Название</span>
+                <span>Год</span>
+                <span>Категория</span>
+                <span>Жанр</span>
+                <span>Франшиза</span>
+                <span></span>
+            </div>
+            <div class="batch-rows" id="batchRows"></div>
+
+            <div class="batch-controls">
+                <button type="button" class="btn-add-row" id="batchAddRowBtn">➕ Ещё строка</button>
+                <span class="batch-row-count" id="batchRowCount"></span>
+            </div>
+
+            <div class="modal-buttons">
+                <button type="submit" class="btn-save">Сохранить все</button>
+                <button type="button" class="btn-cancel" id="batchCancelBtn">Отмена</button>
+            </div>
+        </form>
+    `;
+    app.appendChild(screenWrap);
+
+    const batchRows = screenWrap.querySelector("#batchRows");
+    const addRowBtn = screenWrap.querySelector("#batchAddRowBtn");
+    const rowCountLabel = screenWrap.querySelector("#batchRowCount");
+    const submitBtn = screenWrap.querySelector(".btn-save");
+
+    const defaultYear = new Date().getFullYear();
+    let rowSeq = 0;
+
+    function categoryOptionsHtml(selected) {
+        return categories
+            .map(cat => `<option value="${cat}" ${cat === selected ? "selected" : ""}>${cat}</option>`)
+            .join("");
+    }
+
+    // Те же правила заполнения даталистов жанров/франшиз, что и в
+    // одиночной форме выше — просто применяются к конкретной строке rowEl,
+    // а не к единственной глобальной форме.
+    function updateGenresDatalistForRow(rowEl) {
+        const selectedCategory = rowEl.querySelector(".rCategory").value;
+        const genreDatalist = rowEl.querySelector(".rGenreList");
+        const localGenres = new Set();
+
+        const categoryData = dbData[selectedCategory];
+        if (categoryData && typeof categoryData === "object" && !Array.isArray(categoryData)) {
+            for (let genreKey in categoryData) {
+                localGenres.add(genreKey);
+            }
+        }
+
+        genreDatalist.innerHTML = Array.from(localGenres)
+            .sort()
+            .map(g => `<option value="${g}">`)
+            .join("");
+    }
+
+    function updateFranchisesDatalistForRow(rowEl) {
+        const selectedCategory = rowEl.querySelector(".rCategory").value;
+        const selectedGenre = rowEl.querySelector(".rGenre").value.trim();
+        const franDatalist = rowEl.querySelector(".rFranchiseList");
+        const localFranchises = new Set();
+
+        if (dbData[selectedCategory] && dbData[selectedCategory][selectedGenre]) {
+            const listOrObj = dbData[selectedCategory][selectedGenre];
+            if (Array.isArray(listOrObj)) {
+                listOrObj.forEach(item => {
+                    if (typeof item === "object" && item !== null) {
+                        Object.keys(item).forEach(franchiseName => localFranchises.add(franchiseName));
+                    }
+                });
+            }
+        }
+
+        franDatalist.innerHTML = Array.from(localFranchises)
+            .sort()
+            .map(f => `<option value="${f}">`)
+            .join("");
+    }
+
+    function currentRowEls() {
+        return Array.from(batchRows.querySelectorAll(".batch-row"));
+    }
+
+    function updateRowChrome() {
+        const rows = currentRowEls();
+        // Кнопку "удалить строку" прячем, если строка последняя единственная —
+        // всегда должна остаться хотя бы одна строка для заполнения.
+        rows.forEach(row => {
+            row.querySelector(".btn-remove-row").style.visibility = rows.length > 1 ? "visible" : "hidden";
+        });
+        rowCountLabel.textContent = `${rows.length} / ${MAX_BATCH_ADD_ROWS}`;
+        const atLimit = rows.length >= MAX_BATCH_ADD_ROWS;
+        addRowBtn.disabled = atLimit;
+        addRowBtn.style.opacity = atLimit ? "0.4" : "1";
+        addRowBtn.style.cursor = atLimit ? "not-allowed" : "pointer";
+    }
+
+    function addRow(prefill = {}) {
+        if (currentRowEls().length >= MAX_BATCH_ADD_ROWS) return null;
+
+        rowSeq++;
+        const rowId = `batchRow${rowSeq}`;
+
+        const rowEl = document.createElement("div");
+        rowEl.className = "batch-row";
+        rowEl.dataset.rowId = rowId;
+        rowEl.innerHTML = `
+            <div class="batch-field">
+                <label class="mobile-label">Название</label>
+                <input type="text" class="rTitle" placeholder="Например: Крик 7" value="${prefill.title || ""}">
+            </div>
+            <div class="batch-field">
+                <label class="mobile-label">Год</label>
+                <input type="number" class="rYear" placeholder="${defaultYear}" value="${prefill.year || defaultYear}">
+            </div>
+            <div class="batch-field">
+                <label class="mobile-label">Категория</label>
+                <select class="rCategory">${categoryOptionsHtml(prefill.category)}</select>
+            </div>
+            <div class="batch-field">
+                <label class="mobile-label">Жанр</label>
+                <input type="text" class="rGenre" placeholder="Например: Ужасы" list="${rowId}-genres" value="${prefill.genre || ""}">
+                <datalist class="rGenreList" id="${rowId}-genres"></datalist>
+            </div>
+            <div class="batch-field">
+                <label class="mobile-label">Франшиза</label>
+                <input type="text" class="rFranchise" placeholder="Необязательно" list="${rowId}-franchises" value="${prefill.franchise || ""}">
+                <datalist class="rFranchiseList" id="${rowId}-franchises"></datalist>
+            </div>
+            <button type="button" class="btn-remove-row" title="Удалить строку">✕</button>
+        `;
+
+        batchRows.appendChild(rowEl);
+
+        const catSelect = rowEl.querySelector(".rCategory");
+        const genreInput = rowEl.querySelector(".rGenre");
+
+        catSelect.addEventListener("change", () => {
+            updateGenresDatalistForRow(rowEl);
+            genreInput.value = "";
+            updateFranchisesDatalistForRow(rowEl);
+        });
+        genreInput.addEventListener("input", () => updateFranchisesDatalistForRow(rowEl));
+
+        rowEl.querySelector(".btn-remove-row").addEventListener("click", () => {
+            rowEl.remove();
+            updateRowChrome();
+        });
+
+        updateGenresDatalistForRow(rowEl);
+        updateFranchisesDatalistForRow(rowEl);
+        updateRowChrome();
+
+        return rowEl;
+    }
+
+    addRowBtn.onclick = () => {
+        // Удобство: новая строка подхватывает категорию и год предыдущей —
+        // тайтлы почти всегда добавляют пачками из одной категории/года,
+        // это экономит клики при заполнении 5-10 строк подряд.
+        const rows = currentRowEls();
+        const lastRow = rows[rows.length - 1];
+        const prefill = lastRow
+            ? {
+                  category: lastRow.querySelector(".rCategory").value,
+                  year: lastRow.querySelector(".rYear").value
+              }
+            : {};
+        const newRow = addRow(prefill);
+        if (newRow) newRow.querySelector(".rTitle").focus();
+    };
+
+    for (let i = 0; i < INITIAL_BATCH_ADD_ROWS; i++) addRow();
+
+    screenWrap.querySelector("#batchCancelBtn").onclick = () => closeBatchAddScreen();
+
+    screenWrap.querySelector("#batchAddForm").onsubmit = async (e) => {
+        e.preventDefault();
+
+        const rowEls = currentRowEls();
+        const toInsert = [];
+        let firstErrorRowNumber = null;
+
+        rowEls.forEach((rowEl, idx) => {
+            const titleVal = rowEl.querySelector(".rTitle").value.trim();
+            // Полностью пустую строку (не заполнили название) просто пропускаем —
+            // не нужно заставлять пользователя удалять лишние заготовленные строки.
+            if (!titleVal) return;
+
+            const yearVal = parseInt(rowEl.querySelector(".rYear").value, 10);
+            const catVal = rowEl.querySelector(".rCategory").value;
+            const genreVal = rowEl.querySelector(".rGenre").value.trim();
+            let franchiseVal = rowEl.querySelector(".rFranchise").value.trim();
+            if (franchiseVal === "") franchiseVal = null;
+
+            if (!yearVal || !catVal || !genreVal) {
+                if (firstErrorRowNumber === null) firstErrorRowNumber = idx + 1;
+                return;
+            }
+
+            toInsert.push({ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal });
+        });
+
+        if (firstErrorRowNumber !== null) {
+            alert(`Строка №${firstErrorRowNumber}: заполните год, категорию и жанр (или сотрите название, если строка не нужна).`);
+            return;
+        }
+
+        if (toInsert.length === 0) {
+            alert("Заполните хотя бы одну строку — укажите название тайтла.");
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Сохраняем…";
+
+        // Один запрос на весь пакет — Supabase/PostgREST принимает массив
+        // объектов в insert() и вставляет все строки за один INSERT.
+        const result = await db.from("titles").insert(toInsert);
+
+        if (result.error) {
+            alert("Ошибка сохранения: " + result.error.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Сохранить все";
+        } else {
+            document.body.classList.remove("batch-add-screen-active");
             await refreshCurrentScreen();
         }
     };

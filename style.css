@@ -849,6 +849,203 @@ button:nth-child(6){
     box-shadow: 0 0 22px rgba(255,46,147,0.5);
 }
 
+/* ===== Массовое добавление тайтлов ("таблицей", до 10 строк) ===== */
+/* Раньше это было модальное окно; теперь — отдельный экран приложения
+   (как "Совместный просмотр" или раздел "Игры"), поэтому пяти полям в ряд
+   на десктопе нужно больше места, чем даёт обычный .container (max-width:
+   500px, общий для всех "вертикальных" экранов сайта). На время этого
+   экрана временно раздвигаем .container — см. body.batch-add-screen-active
+   ниже. На узких экранах (телефон) это ничего не меняет: там .container и
+   так только 90% от небольшой ширины viewport'а. */
+body.batch-add-screen-active .container {
+    max-width: 960px;
+}
+
+/* Карточка-обёртка формы — визуально то же самое, чем раньше было
+   .modal-content, только живёт в обычном потоке страницы, а не всплывает
+   поверх неё полупрозрачной подложкой */
+.batch-add-screen {
+    background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
+    border: 1px solid rgba(255,46,147,0.25);
+    border-radius: 20px;
+    padding: 22px;
+    margin: 0 0 20px;
+    text-align: left;
+    box-shadow:
+        0 20px 50px rgba(0,0,0,0.5),
+        0 0 0 1px rgba(255,255,255,0.03),
+        0 0 40px rgba(139,59,255,0.22);
+}
+.batch-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Шапка таблицы и сами строки используют одну и ту же сетку колонок,
+   чтобы поля выстраивались строго друг под другом */
+.batch-header-row,
+.batch-row {
+    display: grid;
+    grid-template-columns: 2fr 0.85fr 1.3fr 1.3fr 1.3fr 34px;
+    gap: 8px;
+    align-items: center;
+}
+.batch-header-row span {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 0 2px;
+}
+
+.batch-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 55vh;
+    overflow-y: auto;
+    padding: 2px 4px 2px 0;
+}
+.batch-row {
+    padding: 4px 0;
+}
+.batch-row:nth-child(odd) {
+    background: rgba(255,255,255,0.025);
+    border-radius: 10px;
+}
+
+.batch-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0; /* чтобы длинные значения не распирали грид-колонку */
+}
+.batch-field .mobile-label {
+    display: none; /* на широких экранах подписи заменяет общая шапка таблицы */
+}
+
+.batch-row input,
+.batch-row select {
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel-deep);
+    color: var(--text);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.batch-row input:focus,
+.batch-row select:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
+}
+.batch-row input[type="number"] {
+    min-width: 0;
+}
+
+.btn-remove-row {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1.5px solid var(--pink);
+    background: transparent;
+    color: var(--pink);
+    font-weight: 700;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: box-shadow 0.2s ease, transform 0.1s ease;
+    justify-self: center;
+}
+.btn-remove-row:hover {
+    box-shadow: 0 0 14px rgba(255,46,147,0.45);
+}
+.btn-remove-row:active {
+    transform: scale(0.92);
+}
+
+.batch-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+}
+.btn-add-row {
+    background: transparent;
+    border: 1.5px solid var(--cyan);
+    color: var(--cyan);
+    text-shadow: 0 0 8px rgba(46,232,255,0.4);
+    border-radius: 10px;
+    padding: 9px 16px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, opacity 0.2s ease;
+}
+.btn-add-row:hover:not(:disabled) {
+    box-shadow: 0 0 18px rgba(46,232,255,0.4);
+}
+.btn-add-row:disabled {
+    cursor: not-allowed;
+}
+.batch-row-count {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+
+/* На телефонах таблица разваливается в стопку карточек: общая шапка прячется,
+   а перед каждым полем появляется его собственная подпись */
+@media (max-width: 720px) {
+    .batch-add-screen {
+        padding: 16px;
+    }
+    .batch-header-row {
+        display: none;
+    }
+    .batch-row {
+        grid-template-columns: 1fr 1fr;
+        padding: 12px 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        position: relative;
+        row-gap: 10px;
+    }
+    .batch-row:nth-child(odd) {
+        background: var(--panel-deep);
+    }
+    .batch-field:nth-child(1) {
+        grid-column: 1 / -1; /* Название — на всю ширину карточки */
+    }
+    .batch-field .mobile-label {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        margin-bottom: 4px;
+    }
+    .btn-remove-row {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+    }
+    .batch-rows {
+        max-height: 55vh;
+    }
+}
+
 /* Обёртка строки фильма + оценок под ней */
 .movie-item {
     display: flex;
