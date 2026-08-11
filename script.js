@@ -256,6 +256,105 @@ const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = document.getElementById("app");
+
+// ==========================================
+// ДЕЛЕГИРОВАНИЕ СОБЫТИЙ ДЛЯ КАРТОЧЕК ТАЙТЛОВ (.item)
+// ==========================================
+// Раньше renderItemRow() навешивал 8 отдельных слушателей (mousedown/
+// mouseup/mouseleave/click/touchstart/touchmove/touchend/touchcancel) на
+// КАЖДУЮ карточку .item — при большой категории (сотня+ тайтлов) это
+// сотни слушателей и замыканий, создаваемых заново при каждом открытии
+// экрана (app.innerHTML = ""). #app как узел не пересоздаётся между
+// экранами, так что вместо этого один раз ставим слушатели прямо на
+// него и определяем, по какой карточке кликнули, через e.target.closest().
+// Долгое нажатие (700мс) открывает меню редактирования/удаления тайтла,
+// как и раньше — вся логика та же, просто состояние общее на "текущее
+// нажатие", а не на каждую карточку отдельно (одновременно жать двумя
+// пальцами по разным карточкам всё равно не сценарий этого интерфейса).
+const itemPress = {
+    timer: null,
+    moving: false,
+    startX: 0,
+    startY: 0,
+    itemText: null,
+    suppressNextMouseDown: false
+};
+
+function itemPressCancel() {
+    if (itemPress.timer !== null) {
+        clearTimeout(itemPress.timer);
+        itemPress.timer = null;
+    }
+}
+
+function itemPressStart(e, itemDiv) {
+    if (e.type === "mousedown" && itemPress.suppressNextMouseDown) {
+        itemPress.suppressNextMouseDown = false;
+        return;
+    }
+    if (e.type === "touchstart") {
+        itemPress.suppressNextMouseDown = true;
+        itemPress.startX = e.touches[0].clientX;
+        itemPress.startY = e.touches[0].clientY;
+    }
+
+    itemPress.moving = false;
+    itemPress.itemText = itemDiv.dataset.itemText;
+    itemPressCancel();
+    itemPress.timer = setTimeout(() => {
+        if (!itemPress.moving) {
+            showActionMenu(itemPress.itemText);
+        }
+    }, 700);
+}
+
+app.addEventListener("mousedown", (e) => {
+    const itemDiv = e.target.closest(".item[data-item-text]");
+    if (!itemDiv) return;
+    itemPressStart(e, itemDiv);
+});
+app.addEventListener("mouseup", (e) => {
+    if (e.target.closest(".item[data-item-text]")) itemPressCancel();
+});
+// mouseleave не всплывает, поэтому делегировать его напрямую нельзя —
+// mouseout всплывает и срабатывает и при переходе на дочерний элемент
+// внутри самой карточки, поэтому дополнительно проверяем через
+// relatedTarget, что курсор действительно покинул carточку целиком
+// (та же ситуация, которую раньше решал mouseleave на каждом элементе).
+app.addEventListener("mouseout", (e) => {
+    const itemDiv = e.target.closest(".item[data-item-text]");
+    if (!itemDiv) return;
+    if (e.relatedTarget && itemDiv.contains(e.relatedTarget)) return;
+    itemPressCancel();
+});
+app.addEventListener("click", (e) => {
+    if (e.target.closest(".item[data-item-text]")) e.preventDefault();
+});
+app.addEventListener("touchstart", (e) => {
+    const itemDiv = e.target.closest(".item[data-item-text]");
+    if (!itemDiv) return;
+    itemPressStart(e, itemDiv);
+}, { passive: true });
+app.addEventListener("touchmove", (e) => {
+    if (!e.target.closest(".item[data-item-text]")) return;
+    const diffX = Math.abs(e.touches[0].clientX - itemPress.startX);
+    const diffY = Math.abs(e.touches[0].clientY - itemPress.startY);
+    if (diffX > 10 || diffY > 10) {
+        itemPress.moving = true;
+        itemPressCancel();
+    }
+}, { passive: true });
+app.addEventListener("touchend", (e) => {
+    if (!e.target.closest(".item[data-item-text]")) return;
+    itemPressCancel();
+    if (itemPress.moving) return;
+    e.preventDefault();
+    e.stopPropagation();
+}, { passive: false });
+app.addEventListener("touchcancel", (e) => {
+    if (e.target.closest(".item[data-item-text]")) itemPressCancel();
+});
+
 let currentUser = null;
 let watchedTitles = new Set(); // Производный union: просмотрено хоть кем-то (мной, партнёром или обоими) — используется для звёздочки
 let watchedByUser = {}; // "Название (год)" -> Set<user_id> — кто именно из двоих отметил тайтл просмотренным
@@ -1785,78 +1884,12 @@ function renderItemRow(itemText, container) {
         itemDiv.style.cursor = "pointer";
         itemDiv.style.userSelect = "none";
         itemDiv.style.webkitUserSelect = "none";
-        
-        let pressTimer = null;
-        let isMoving = false;
-        let startX = 0, startY = 0;
-        // На гибридных устройствах (тач + мышь) после touchstart браузер
-        // может дополнительно прислать синтетический mousedown. Раньше это
-        // запускало ВТОРОЙ независимый setTimeout, и переменная pressTimer
-        // перезаписывалась — ссылка на первый таймер терялась, cancelPress()
-        // переставал его отменять, и showActionMenu() мог вызваться дважды
-        // подряд. Это и было первопричиной того, что меню тайтла иногда
-        // открывалось "битым" — с кнопками "Редактировать"/"Удалить",
-        // привязанными к уже удалённой копии модалки. Флаг ниже гарантирует,
-        // что реальный пресс запускает таймер только один раз.
-        let suppressNextMouseDown = false;
 
-        const startPress = (e) => {
-            if (e.type === 'mousedown' && suppressNextMouseDown) {
-                suppressNextMouseDown = false;
-                return;
-            }
-            if (e.type === 'touchstart') {
-                suppressNextMouseDown = true;
-                startX = e.touches[0].clientX;
-                startY = e.touches[0].clientY;
-            }
-
-            isMoving = false;
-            pressTimer = setTimeout(() => {
-                if (!isMoving) {
-                    showActionMenu(itemText);
-                }
-            }, 700);
-        };
-
-        const cancelPress = () => {
-            if (pressTimer !== null) {
-                clearTimeout(pressTimer);
-                pressTimer = null;
-            }
-        };
-
-        const movePress = (e) => {
-            if (e.type === 'touchmove') {
-                let diffX = Math.abs(e.touches[0].clientX - startX);
-                let diffY = Math.abs(e.touches[0].clientY - startY);
-                if (diffX > 10 || diffY > 10) {
-                    isMoving = true;
-                    cancelPress();
-                }
-            }
-        };
-
-        const preventPhantomClick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-        };
-
-        itemDiv.addEventListener("mousedown", startPress);
-        itemDiv.addEventListener("mouseup", cancelPress);
-        itemDiv.addEventListener("mouseleave", cancelPress);
-        itemDiv.addEventListener("click", (e) => { e.preventDefault(); });
-
-        itemDiv.addEventListener("touchstart", startPress, { passive: true });
-        itemDiv.addEventListener("touchmove", movePress, { passive: true });
-        itemDiv.addEventListener("touchend", (e) => {
-            cancelPress();
-            if (isMoving) return;
-            if (pressTimer === null) {
-                preventPhantomClick(e);
-            }
-        }, { passive: false });
-        itemDiv.addEventListener("touchcancel", cancelPress);
+        // itemText больше не живёт в замыкании отдельных слушателей —
+        // делегированные обработчики на #app (см. объявление const app
+        // выше) читают его отсюда через e.target.closest(). Долгое
+        // нажатие (700мс) → меню редактирования/удаления, как и раньше.
+        itemDiv.dataset.itemText = itemText;
     }
     
     row.appendChild(itemDiv);
