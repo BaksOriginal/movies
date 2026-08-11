@@ -75,6 +75,19 @@ body.games-screen-active * {
     }
 }
 
+/* На больших категориях (25+ тайтлов, класс ставится из script.js в
+   openData/renderWatchedBucket/renderWishlistFolder) все карточки .item и
+   кнопки создаются одновременно при каждом открытии экрана — если у
+   каждой при этом ещё и играет entrance-анимация fadeUp, браузер должен
+   посчитать раскладку и запустить десятки/сотни анимаций одним махом.
+   На слабом железе это и давало ощутимый "рывок" при открытии больших
+   разделов. На маленьких списках анимация остаётся — там она не мешает. */
+.long-list .item,
+.long-list button,
+.long-list .movie-item{
+    animation: none !important;
+}
+
 :focus-visible{
     outline: 2px solid var(--cyan);
     outline-offset: 2px;
@@ -2373,7 +2386,12 @@ body.batch-add-screen-active .container {
 .pautinka-thread-pulse {
     fill: none;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 3px currentColor);
+    /* Было + filter:drop-shadow(0 0 3px currentColor). Каждая нить крутит
+       бесконечную stroke-dashoffset анимацию, а анимированный filter на
+       десятках таких линий одновременно (граф-режим может содержать
+       много связей) — дорогая пересчитываемая на каждый кадр операция
+       для слабого GPU. Свечение убрано, сама анимация течения и цвет
+       нити остаются. */
     animation: pautinkaThreadFlow 3s linear infinite;
     opacity: 0.9;
 }

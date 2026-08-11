@@ -2725,6 +2725,14 @@ function openData(content, saveHistory = true, customTitle = null) {
     // одним куском — макет считается один раз, а не по счётчику элементов.
     const listFragment = document.createDocumentFragment();
 
+    // На больших категориях (25+ тайтлов) карточки .item и кнопки играют
+    // entrance-анимацию (fadeUp) ВСЕ ОДНОВРЕМЕННО при каждом открытии
+    // экрана — это лишняя работа для рендера/компоновки именно тогда,
+    // когда элементов и так много. На маленьких списках анимация остаётся
+    // (там она не мешает), на больших — отключаем через класс на #app.
+    const isBigList = Array.isArray(content) && content.length > 25;
+    app.classList.toggle("long-list", isBigList);
+
     if (Array.isArray(content)) {
         content.forEach(item => {
             if (typeof item === "string") {
@@ -5995,6 +6003,7 @@ function renderWatchedBucket(bucketKey) {
         list.forEach(item => renderItemRow(item, listFragment));
         app.appendChild(listFragment);
     }
+    app.classList.toggle("long-list", list.length > 25);
 
     let countFooter = document.createElement("p");
     countFooter.className = "count-footer";
@@ -6034,6 +6043,7 @@ function renderWishlistFolder() {
         list.forEach(item => renderItemRow(item, listFragment));
         app.appendChild(listFragment);
     }
+    app.classList.toggle("long-list", list.length > 25);
 
     let countFooter = document.createElement("p");
     countFooter.className = "count-footer";
@@ -9376,7 +9386,12 @@ style.textContent = `
         opacity: 0;
         pointer-events: none;
         user-select: none;
-        filter: drop-shadow(0 0 6px rgba(255,46,147,0.55)) drop-shadow(0 0 10px rgba(139,59,255,0.35));
+        /* Было два слоя анимированного filter:drop-shadow — на каждый
+           кадр анимации браузер пересчитывает блюр заново (а не просто
+           двигает готовый слой), что на слабом Android заметно грузит
+           GPU даже при всего 10 сердечках одновременно. text-shadow даёт
+           похожее свечение почти без этой цены. */
+        text-shadow: 0 0 6px rgba(255,46,147,0.55), 0 0 10px rgba(139,59,255,0.35);
         animation: floatUp linear forwards;
     }
 
