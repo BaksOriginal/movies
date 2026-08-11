@@ -2717,17 +2717,25 @@ function openData(content, saveHistory = true, customTitle = null) {
         app.appendChild(buildSearchBar(lastSearchQuery));
     }
 
+    // Раньше каждая кнопка/строка добавлялась прямо в #app по одной —
+    // для больших категорий (сотня+ тайтлов) это означало отдельный
+    // layout/reflow браузера на каждый appendChild подряд, что и давало
+    // заметные просадки при открытии таких экранов (особенно на Android).
+    // Собираем список в DocumentFragment "за кадром" и вставляем в #app
+    // одним куском — макет считается один раз, а не по счётчику элементов.
+    const listFragment = document.createDocumentFragment();
+
     if (Array.isArray(content)) {
         content.forEach(item => {
             if (typeof item === "string") {
-                renderItemRow(item, app);
+                renderItemRow(item, listFragment);
             } 
             else if (typeof item === "object" && item !== null) {
                 for (let franchiseName in item) {
                     let button = document.createElement("button");
                     button.textContent = franchiseName;
                     button.onclick = () => openData(item[franchiseName], true);
-                    app.appendChild(button);
+                    listFragment.appendChild(button);
                 }
             }
         });
@@ -2738,9 +2746,11 @@ function openData(content, saveHistory = true, customTitle = null) {
             let button = document.createElement("button");
             button.textContent = key;
             button.onclick = () => openData(value, true);
-            app.appendChild(button);
+            listFragment.appendChild(button);
         }
     }
+
+    app.appendChild(listFragment);
 
     // Показываем общее количество тайтлов внизу экрана категории/жанра
     // (кроме секретной категории — там подсчёт не нужен вовсе)
@@ -2797,6 +2807,16 @@ function goBack() {
     }
 }
 
+// Показала бы кнопка "⬅ Назад" (goBack()) в итоге главную страницу?
+// Экран текущего шага всегда лежит на вершине history в момент вызова
+// (см. openData()) — если под ним больше ничего нет, goBack() снимет его
+// и попадёт на пустую историю, а значит вызовет showHome(). В этом случае
+// саму кнопку "Назад" смысла показывать нет — "Домой" рядом уже делает
+// ровно то же самое.
+function backWouldGoHome() {
+    return history.length <= 1;
+}
+
 // Навигационная панель Назад/Домой
 function addNavigation() {
     let oldNav = document.querySelector(".navigation");
@@ -2807,16 +2827,19 @@ function addNavigation() {
     let nav = document.createElement("div");
     nav.className = "navigation";
 
-    let back = document.createElement("button");
-    back.textContent = "⬅ Назад";
+    if (!backWouldGoHome()) {
+        let back = document.createElement("button");
+        back.textContent = "⬅ Назад";
 
-    back.onclick = () => goBack();
+        back.onclick = () => goBack();
+
+        nav.appendChild(back);
+    }
 
     let home = document.createElement("button");
     home.textContent = "🏠 Домой";
     home.onclick = showHome;
 
-    nav.appendChild(back);
     nav.appendChild(home);
 
     let container = document.querySelector(".container");
@@ -3013,7 +3036,11 @@ async function showPautinka(fromHistory = false) {
                 genreKey: leaf.genreKey,
                 gameKey: leaf.gameKey,
             });
-            threads.push({ x1: hubX, y1: hubY, x2: lx, y2: ly, hue: leaf.hue, animated: isGame });
+            // Раньше здесь стояло `animated: isGame` — импульс по нити
+            // "бежал" только у листьев хаба "Игры", у обычных категорий
+            // (Фильмы/Сериалы/... -> жанр) нити оставались статичными.
+            // Теперь пульс идёт по ВСЕМ нитям одинаково.
+            threads.push({ x1: hubX, y1: hubY, x2: lx, y2: ly, hue: leaf.hue, animated: true });
         });
     });
 
@@ -3041,11 +3068,21 @@ async function showPautinka(fromHistory = false) {
     // --- 3. Генерируем разметку ---
     let threadsHtml = "";
     threads.forEach((t, i) => {
-        const len = Math.hypot(t.fx2 - t.fx1, t.fy2 - t.fy1);
         const color = `hsl(${t.hue} 85% 65%)`;
         if (t.animated) {
             threadsHtml += `<line class="pautinka-thread-base" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke-width="1.5" />`;
-            threadsHtml += `<line class="pautinka-thread-pulse" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="${color}" stroke-width="2.2" stroke-dasharray="10 ${Math.max(len - 10, 10)}" style="color:${color}; --len:${len}; animation-delay:${(i % 7) * -0.4}s;" />`;
+            // pathLength="100" нормализует длину ЛЮБОЙ нити к 100 условным
+            // единицам, независимо от её реальной длины в пикселях. Раньше
+            // тут была CSS-переменная (--len, реальная длина в px), заданная
+            // инлайново на каждой линии, а общий @keyframes читал её через
+            // var(--len). Safari считает такие var() в keyframes отдельно
+            // для каждого элемента, а Chrome/Firefox — один раз на всё
+            // правило анимации, поэтому у всех нитей с разной длиной
+            // получался один и тот же (чужой) сдвиг, и импульс был
+            // фактически не виден нигде, кроме iPhone. С pathLength нужный
+            // сдвиг всегда один и тот же (см. @keyframes pautinkaThreadFlow
+            // в CSS) — переменная больше не нужна вовсе.
+            threadsHtml += `<line class="pautinka-thread-pulse" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="${color}" stroke-width="2.2" pathLength="100" stroke-dasharray="8 92" style="color:${color}; animation-delay:${(i % 7) * -0.4}s;" />`;
         } else {
             threadsHtml += `<line class="pautinka-thread-base" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="hsla(${t.hue},70%,60%,0.28)" stroke-width="1.2" />`;
         }
@@ -3108,17 +3145,7 @@ async function showPautinka(fromHistory = false) {
     `;
     overlay.appendChild(zoomControls);
 
-    const backControls = document.createElement("div");
-    backControls.className = "pautinka-back-controls";
-    backControls.innerHTML = `<button type="button" class="round-btn" id="pautinkaBackBtn">⬅</button>`;
-    overlay.appendChild(backControls);
-
     document.body.appendChild(overlay);
-
-    document.getElementById("pautinkaBackBtn").onclick = () => {
-        leavePautinka();
-        goBack();
-    };
 
     const svg = document.getElementById("pautinkaSvg");
 
@@ -3799,7 +3826,9 @@ async function showChatScreen() {
     // Подстраховка на случай проблем с realtime: обновляем чат каждые 4 секунды
     if (chatPollInterval) clearInterval(chatPollInterval);
     chatPollInterval = setInterval(async () => {
-        if (!isChatScreenOpen) return;
+        // На свёрнутой/неактивной вкладке никто эти сообщения не видит —
+        // не тратим на них сеть и CPU, подхватим при возврате на вкладку.
+        if (!isChatScreenOpen || document.hidden) return;
         await loadChatMessages();
         renderChatMessages();
     }, 4000);
@@ -5233,7 +5262,7 @@ async function showWatchPartyScreen() {
     // чужое сообщение — звук всё равно должен прозвучать.
     if (watchPartyChatPollInterval) clearInterval(watchPartyChatPollInterval);
     watchPartyChatPollInterval = setInterval(async () => {
-        if (!isWatchPartyScreenOpen) return;
+        if (!isWatchPartyScreenOpen || document.hidden) return;
 
         const prevLastId = watchPartyChatMessages.length
             ? watchPartyChatMessages[watchPartyChatMessages.length - 1].id
@@ -5503,13 +5532,17 @@ function showBatchAddTitlesScreen() {
 
     let nav = document.createElement("div");
     nav.className = "navigation";
-    let backBtn = document.createElement("button");
-    backBtn.textContent = "⬅ Назад";
-    backBtn.onclick = () => closeBatchAddScreen();
+    // "Назад" не нужен, если экран открыт прямо с главной — closeBatchAddScreen()
+    // в этом случае и так вызовет showHome() (см. её реализацию выше).
+    if (history.length > 0) {
+        let backBtn = document.createElement("button");
+        backBtn.textContent = "⬅ Назад";
+        backBtn.onclick = () => closeBatchAddScreen();
+        nav.appendChild(backBtn);
+    }
     let homeBtn = document.createElement("button");
     homeBtn.textContent = "🏠 Домой";
     homeBtn.onclick = () => showHome();
-    nav.appendChild(backBtn);
     nav.appendChild(homeBtn);
     let containerEl = document.querySelector(".container");
     if (containerEl) {
@@ -5922,7 +5955,9 @@ function renderWatchedTop() {
         app.appendChild(btn);
     }
 
-    renderWatchedNav(() => showHome());
+    // Это верхний экран раздела — "Назад" отсюда вёл бы ровно туда же, куда
+    // и "Домой", так что оставляем только её.
+    renderWatchedNav(null);
 }
 
 // Экран одной подкатегории (мной / партнёром / нами) со списком тайтлов
@@ -5954,7 +5989,11 @@ function renderWatchedBucket(bucketKey) {
         empty.textContent = "Здесь пока пусто.";
         app.appendChild(empty);
     } else {
-        list.forEach(item => renderItemRow(item, app));
+        // Тот же приём, что и в openData(): собираем строки за кадром и
+        // вставляем одним куском, а не по одной в живой #app.
+        const listFragment = document.createDocumentFragment();
+        list.forEach(item => renderItemRow(item, listFragment));
+        app.appendChild(listFragment);
     }
 
     let countFooter = document.createElement("p");
@@ -5991,7 +6030,9 @@ function renderWishlistFolder() {
         empty.textContent = "Здесь пока пусто.";
         app.appendChild(empty);
     } else {
-        list.forEach(item => renderItemRow(item, app));
+        const listFragment = document.createDocumentFragment();
+        list.forEach(item => renderItemRow(item, listFragment));
+        app.appendChild(listFragment);
     }
 
     let countFooter = document.createElement("p");
@@ -5999,7 +6040,8 @@ function renderWishlistFolder() {
     countFooter.textContent = `Всего тайтлов: ${list.length}`;
     app.appendChild(countFooter);
 
-    renderWatchedNav(() => showHome());
+    // Тоже верхний экран раздела — "Назад" здесь дублировал бы "Домой".
+    renderWatchedNav(null);
 }
 
 function getAllTitlesFromCategory(dataBranch) {
@@ -6224,6 +6266,7 @@ function setupMusicAutoplay() {
 
     document.addEventListener("click", playHandler);
 }
+
 // =======================================================
 // ИГРЫ (Змейка / Flappy Bird / Doodle Jump) — общая таблица лидеров на двоих
 // =======================================================
@@ -6473,6 +6516,45 @@ function showPlayOverlay(canvas, onPlay) {
     });
 }
 
+// Определяем "настоящий десктоп" — устройство с мышью (точный поинтер +
+// поддержка hover). У тачскринов (телефоны/планшеты) matchMedia тут даст
+// false, даже если ширина экрана большая — это то, что нам и нужно, чтобы
+// не путать большие планшеты с ПК. Используется и для увеличения canvas,
+// и (см. style.css, .dpad) для скрытия сенсорных кнопок управления.
+function isDesktopPointer() {
+    return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+}
+
+// Общая настройка canvas под десктоп: логика игр везде считает координаты
+// в "логических" единицах (переменные W/H/SIZE), поэтому саму игровую
+// математику не трогаем — вместо этого один раз растягиваем и сам canvas,
+// и систему координат внутри него через ctx.scale(). Так весь существующий
+// код отрисовки (который рисует в координатах 0..logicalW/0..logicalH)
+// автоматически рисует более крупную и чёткую картинку на ПК, а хитбоксы,
+// скорость и вся игровая логика остаются как были.
+// desktopScale — во сколько раз увеличить видимый размер именно на ПК
+// (на телефоне/планшете размер не меняется вообще).
+function setupResponsiveCanvas(canvas, logicalW, logicalH, desktopScale) {
+    let scale = 1;
+    if (isDesktopPointer()) {
+        // Подстраховка на случай узкого окна браузера на ПК (например,
+        // свёрнутое вбок окно вполовину экрана) — не даём canvas вылезти
+        // за пределы того, что реально доступно по ширине.
+        const availableW = (document.documentElement.clientWidth || window.innerWidth) * 0.92;
+        scale = Math.max(1, Math.min(desktopScale, availableW / logicalW));
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const displayW = Math.round(logicalW * scale);
+    const displayH = Math.round(logicalH * scale);
+    canvas.style.width = displayW + "px";
+    canvas.style.height = displayH + "px";
+    canvas.width = Math.round(displayW * dpr);
+    canvas.height = Math.round(displayH * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(canvas.width / logicalW, canvas.height / logicalH);
+    return ctx;
+}
+
 // Экран выбора игры со сводными таблицами лидеров
 async function showGamesScreen() {
     startTransitionLock();
@@ -6578,7 +6660,7 @@ function startSnakeGame() {
     app.appendChild(wrap);
 
     const canvas = wrap.querySelector("#snakeCanvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = setupResponsiveCanvas(canvas, SIZE, SIZE, 1.8);
     const scoreEl = wrap.querySelector("#snakeScore");
     const bestEl = wrap.querySelector("#snakeBest");
 
@@ -6823,7 +6905,7 @@ function startFlappyGame() {
     app.appendChild(wrap);
 
     const canvas = wrap.querySelector("#flappyCanvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = setupResponsiveCanvas(canvas, W, H, 1.6);
     const scoreEl = wrap.querySelector("#flappyScore");
     const bestEl = wrap.querySelector("#flappyBest");
 
@@ -7131,7 +7213,7 @@ function startDoodleGame() {
     app.appendChild(wrap);
 
     const canvas = wrap.querySelector("#doodleCanvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = setupResponsiveCanvas(canvas, W, H, 1.6);
     const scoreEl = wrap.querySelector("#doodleScore");
     const bestEl = wrap.querySelector("#doodleBest");
 
@@ -7825,7 +7907,7 @@ function startRunnerGame() {
     app.appendChild(wrap);
 
     const canvas = wrap.querySelector("#runnerCanvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = setupResponsiveCanvas(canvas, W, H, 2.0);
     const scoreEl = wrap.querySelector("#runnerScore");
     const bestEl = wrap.querySelector("#runnerBest");
 
@@ -8221,7 +8303,7 @@ function startNinjaGame() {
     app.appendChild(wrap);
 
     const canvas = wrap.querySelector("#ninjaCanvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = setupResponsiveCanvas(canvas, W, H, 1.6);
     const scoreEl = wrap.querySelector("#ninjaScore");
     const bestEl = wrap.querySelector("#ninjaBest");
     const livesEl = wrap.querySelector("#ninjaLives");
@@ -8823,7 +8905,7 @@ async function startRhythmLevel(track) {
         return;
     }
 
-    const LANE_KEYS = ["D", "F", "J", "K"];
+    const LANE_KEYS = ["A", "F", "J", "K"];
     wrap.innerHTML = `
         <div class="rhythm-topbar">
             <div class="rhythm-stat">Счёт: <span id="rhythmScore">0</span></div>
@@ -8832,15 +8914,16 @@ async function startRhythmLevel(track) {
         </div>
         <div class="rhythm-combo-wrap"><div class="rhythm-combo" id="rhythmCombo"></div></div>
         <div class="rhythm-arena" id="rhythmArena">
-            ${LANE_KEYS.map((k, i) => `<div class="rhythm-lane" data-lane="${i}"><div class="rhythm-hitline"></div></div>`).join("")}
+            ${LANE_KEYS.map((k, i) => `<div class="rhythm-lane" data-lane="${i}"><div class="rhythm-hitline"></div><div class="rhythm-key-hint">${k}</div></div>`).join("")}
             <div class="rhythm-judgement" id="rhythmJudgement"></div>
             <div class="rhythm-countdown" id="rhythmCountdown"></div>
         </div>
     `;
-    // Ряд кнопок D/F/J/K под ареной убран — игра заточена под телефон, и
-    // попадание по ноте теперь происходит тапом прямо по самому тайлу
-    // (см. tryHitTile ниже), а не по фиксированной кнопке снизу.
-    // LANE_KEYS оставлен только для физической клавиатуры (десктоп, см. keyHandler).
+    // Кликабельного ряда кнопок под ареной нет — игра заточена под телефон, и
+    // попадание по ноте происходит тапом прямо по самому тайлу (см. tryHitTile
+    // ниже), а не по фиксированной кнопке снизу. LANE_KEYS используется для
+    // физической клавиатуры (десктоп, см. keyHandler) — подсказка с буквой
+    // (.rhythm-key-hint) в верстке выше показывается только на ПК, см. CSS.
 
     const arena = wrap.querySelector("#rhythmArena");
     const laneEls = Array.from(wrap.querySelectorAll(".rhythm-lane"));
