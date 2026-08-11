@@ -418,6 +418,47 @@ let watchPartyLeaveTimer = null; // Отложенная проверка "па�
 let watchPartyChatMessages = []; // Сообщения чата совместного просмотра (своя таблица watch_party_messages)
 let watchPartyChatReplyTarget = null; // Сообщение, на которое сейчас отвечаем в чате совместного просмотра
 let watchPartyChatPollInterval = null; // Подстраховка на случай проблем с realtime (как у обычного чата)
+
+// ---------- Аудио/видео звонок внутри совместного просмотра (WebRTC) ----------
+// Сигналинг (offer/answer/ICE) идёт через тот же самый канал watch_party_room
+// (broadcast-событие "webrtc", отдельное от "sync", которым синхронизируется
+// плеер) — отдельного сервера для этого не нужно. Используем паттерн
+// "perfect negotiation" (см. MDN), чтобы при одновременном включении камеры/
+// микрофона с обеих сторон не было конфликта офферов: роль "вежливого" пира
+// детерминированно определяется сравнением user id (см. isWatchPartyPolitePeer).
+const WATCH_PARTY_RTC_CONFIG = {
+    iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        // TURN нужен, когда прямое P2P-соединение невозможно (типичный случай —
+        // мобильный интернет: оператор прячет телефон за жёстким NAT, и один
+        // только STUN тут не помогает, ICE-кандидаты не сходятся, поэтому
+        // разрешения на микро/камеру запрашиваются успешно, но медиапоток до
+        // партнёра не долетает). Ниже — бесплатный публичный TURN (Open Relay
+        // Project / Metered) в качестве запасного пути. Он не бесконечный и не
+        // приватный (трафик идёт через чужой сервер третьей стороны, хоть и
+        // зашифрован) — для постоянного использования лучше завести свой TURN,
+        // например на metered.ca, Xirsys или Cloudflare Calls (у всех есть
+        // бесплатный тариф), и подставить свои учётные данные сюда.
+        { urls: "stun:stun.relay.metered.ca:80" },
+        { urls: "turn:global.relay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+        { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+        { urls: "turn:global.relay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+        { urls: "turn:global.relay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+    ]
+};
+let watchPartyPeerConnection = null; // RTCPeerConnection, создаётся лениво при первом включении микро/камеры
+let watchPartyLocalStream = null; // Наши локальные треки (микрофон/камера), включённые прямо сейчас
+let watchPartyRemoteStream = null; // Треки, приезжающие от партнёра
+let watchPartyMicOn = false;
+let watchPartyCamOn = false;
+let watchPartyFacingMode = "user"; // "user" (фронтальная) / "environment" (основная) — для разворота камеры на телефоне
+let watchPartyHasMultipleCameras = false; // Показывать ли кнопку разворота камеры (проверяется через enumerateDevices)
+let watchPartyMakingOffer = false; // Флаг "perfect negotiation" — сейчас формируем свой оффер
+let watchPartyIgnoreOffer = false; // Флаг "perfect negotiation" — этот входящий оффер нужно проигнорировать (коллизия)
+let watchPartyPartnerId = null; // id партнёра — вычисляется из Presence, нужен для роли "вежливого" пира
+let watchPartyPartnerMediaState = { mic: false, cam: false }; // Последнее известное состояние микро/камеры партнёра
+let watchPartyCallAudioCtx = null; // Отдельный AudioContext для звука оповещения о включении/выключении микро/камеры
 let youtubeAPIReadyPromise = null; // Кэш промиса загрузки YouTube IFrame API (грузим один раз)
 let hlsJsReadyPromise = null; // Кэш промиса загрузки hls.js (грузим один раз, только если реально нужен m3u8)
 
@@ -4420,14 +4461,28 @@ function updateWPPresenceUI() {
     if (!watchPartyChannel || !currentUser) return;
     const state = watchPartyChannel.presenceState();
     let foundPartner = null;
+    let foundPartnerId = null;
     for (const key in state) {
         if (key === currentUser.id) continue;
         const entries = state[key];
-        if (entries && entries.length) foundPartner = entries[entries.length - 1];
+        if (entries && entries.length) {
+            foundPartner = entries[entries.length - 1];
+            foundPartnerId = key;
+        }
     }
+    const partnerWasOffline = !watchPartyPartnerOnline;
     watchPartyPartnerOnline = !!foundPartner;
     watchPartyPartnerPresence = foundPartner;
+    if (foundPartnerId) watchPartyPartnerId = foundPartnerId;
     renderWPStatusBar();
+
+    // Партнёр только что появился на связи, а у нас включён микро/камера —
+    // значит, соединение (если оно было) скорее всего умерло вместе с его
+    // предыдущей вкладкой. Пробуем пересобрать звонок, чтобы не заставлять
+    // руками выключать/включать кнопки заново.
+    if (partnerWasOffline && watchPartyPartnerOnline && (watchPartyMicOn || watchPartyCamOn) && !watchPartyPeerConnection) {
+        ensureWatchPartyPeerConnection();
+    }
 }
 
 function joinPartnerWatchParty() {
@@ -4459,6 +4514,7 @@ function initWatchPartyChannel() {
 
     channel
         .on("broadcast", { event: "sync" }, ({ payload }) => handleRemoteWPPayload(payload))
+        .on("broadcast", { event: "webrtc" }, ({ payload }) => handleWatchPartyRTCSignal(payload))
         .on("postgres_changes", { event: "*", schema: "public", table: "watch_party_messages" }, (payload) => onWatchPartyChatRealtimeChange(payload))
         .on("presence", { event: "sync" }, () => updateWPPresenceUI())
         .on("presence", { event: "join" }, ({ key }) => {
@@ -4504,6 +4560,7 @@ function initWatchPartyChannel() {
                     applyRemoteWP(() => watchPartyPlayer.pause());
                     watchPartySelfState.playing = false;
                 }
+                closeWatchPartyPeerConnectionOnly(); // сам звонок разорвался вместе с партнёром — сохраняем состояние наших кнопок mic/cam, но чистим RTC
                 showWPStatusNote("⚠️ Партнёр отключился — видео поставлено на паузу");
             }, WP_LEAVE_GRACE_MS);
         })
@@ -4547,6 +4604,7 @@ function leaveWatchPartyScreen() {
     if (watchPartyLeaveTimer) { clearTimeout(watchPartyLeaveTimer); watchPartyLeaveTimer = null; }
     if (watchPartyChatPollInterval) { clearInterval(watchPartyChatPollInterval); watchPartyChatPollInterval = null; }
     if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
+    cleanupWatchPartyCall(); // важно: до закрытия канала, чтобы партнёр успел получить "bye"
     if (watchPartyChannel) {
         // Важно: обнуляем ссылку ДО removeChannel. Статус CLOSED от этого
         // канала может прилететь в .subscribe()-колбэк асинхронно, и та
@@ -4595,6 +4653,423 @@ function showWPStatusNote(text) {
     el.style.opacity = "1";
     clearTimeout(el._hideTimer);
     el._hideTimer = setTimeout(() => { el.style.opacity = "0"; }, 3500);
+}
+
+// ==========================================
+// АУДИО/ВИДЕО ЗВОНОК СОВМЕСТНОГО ПРОСМОТРА (WebRTC)
+// ==========================================
+// Две независимые кнопки — микрофон и камера. Каждая сама по себе добавляет/
+// убирает свой трек в общее соединение (одно на двоих, лениво создаётся по
+// требованию). Сигналинг — через canал watch_party_room (событие "webrtc"),
+// офферы/ответы/ICE-кандидаты просто рассылаются партнёру broadcast'ом.
+
+// "Вежливый" пир — тот, чей id меньше лексикографически. Оба клиента
+// вычисляют это одинаково, не сговариваясь, поэтому роли никогда не
+// расходятся. Вежливый пир уступает при коллизии офферов (откатывает свой).
+function isWatchPartyPolitePeer() {
+    if (!currentUser || !watchPartyPartnerId) return true;
+    return currentUser.id < watchPartyPartnerId;
+}
+
+function broadcastWatchPartyRTC(type, extra) {
+    if (!watchPartyChannel || !currentUser) return;
+    watchPartyChannel.send({
+        type: "broadcast",
+        event: "webrtc",
+        payload: Object.assign({ type: type, senderId: currentUser.id }, extra || {})
+    });
+}
+
+// Создаёт (если ещё не создано) единое RTCPeerConnection на весь звонок —
+// и микрофон, и камера используют одно и то же соединение.
+function ensureWatchPartyPeerConnection() {
+    if (watchPartyPeerConnection) return watchPartyPeerConnection;
+    if (!currentUser) return null;
+
+    const pc = new RTCPeerConnection(WATCH_PARTY_RTC_CONFIG);
+    watchPartyPeerConnection = pc;
+    watchPartyRemoteStream = new MediaStream();
+
+    pc.ontrack = (e) => {
+        watchPartyRemoteStream.addTrack(e.track);
+        e.track.onended = () => {
+            try { watchPartyRemoteStream.removeTrack(e.track); } catch (err) {}
+            updateWatchPartyRemoteMedia();
+        };
+        updateWatchPartyRemoteMedia();
+    };
+
+    pc.onicecandidate = (e) => {
+        if (e.candidate) broadcastWatchPartyRTC("ice", { candidate: e.candidate.toJSON() });
+    };
+
+    // Срабатывает сам, когда меняется набор треков (добавили/убрали
+    // микро/камеру) — именно здесь и формируется оффер по паттерну
+    // "perfect negotiation".
+    pc.onnegotiationneeded = async () => {
+        try {
+            watchPartyMakingOffer = true;
+            await pc.setLocalDescription();
+            broadcastWatchPartyRTC("desc", { description: pc.localDescription });
+        } catch (err) {
+            console.error("Ошибка согласования звонка совместного просмотра:", err);
+        } finally {
+            watchPartyMakingOffer = false;
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed") {
+            // Соединение развалилось (обычно из-за сети) — закрываем и,
+            // если у нас всё ещё включены микро/камера, пробуем пересобрать.
+            const shouldRetry = watchPartyMicOn || watchPartyCamOn;
+            closeWatchPartyPeerConnectionOnly();
+            if (shouldRetry && watchPartyPartnerOnline) ensureWatchPartyPeerConnection();
+        }
+    };
+
+    return pc;
+}
+
+// Обработчик входящих сигналов от партнёра (offer/answer/ICE/статус
+// микро-камеры/прощание при выходе с экрана).
+async function handleWatchPartyRTCSignal(payload) {
+    if (!payload || !currentUser || payload.senderId === currentUser.id) return;
+    watchPartyPartnerId = payload.senderId;
+
+    if (payload.type === "desc") {
+        const pc = ensureWatchPartyPeerConnection();
+        if (!pc) return;
+        const description = payload.description;
+        const isPolite = isWatchPartyPolitePeer();
+        const offerCollision = description.type === "offer" &&
+            (watchPartyMakingOffer || pc.signalingState !== "stable");
+
+        watchPartyIgnoreOffer = !isPolite && offerCollision;
+        if (watchPartyIgnoreOffer) return; // мы "невежливый" пир — партнёр сам откатит свой оффер
+
+        try {
+            await pc.setRemoteDescription(description);
+            if (description.type === "offer") {
+                await pc.setLocalDescription();
+                broadcastWatchPartyRTC("desc", { description: pc.localDescription });
+            }
+        } catch (err) {
+            console.error("Ошибка обработки offer/answer звонка совместного просмотра:", err);
+        }
+        return;
+    }
+
+    if (payload.type === "ice") {
+        const pc = watchPartyPeerConnection;
+        if (!pc) return;
+        try {
+            await pc.addIceCandidate(payload.candidate);
+        } catch (err) {
+            if (!watchPartyIgnoreOffer) console.error("Ошибка ICE-кандидата звонка совместного просмотра:", err);
+        }
+        return;
+    }
+
+    if (payload.type === "media-state") {
+        const prev = watchPartyPartnerMediaState;
+        watchPartyPartnerMediaState = { mic: !!payload.mic, cam: !!payload.cam };
+        renderWatchPartyCallControls();
+        // Звук — только партнёру, только на реальное изменение состояния
+        // (а не на повторную рассылку того же самого).
+        if (prev.mic !== watchPartyPartnerMediaState.mic) {
+            playWatchPartyToggleSound(watchPartyPartnerMediaState.mic);
+            showWPStatusNote(watchPartyPartnerMediaState.mic ? "🎤 Партнёр включил микрофон" : "🔇 Партнёр выключил микрофон");
+        }
+        if (prev.cam !== watchPartyPartnerMediaState.cam) {
+            playWatchPartyToggleSound(watchPartyPartnerMediaState.cam);
+            showWPStatusNote(watchPartyPartnerMediaState.cam ? "🎥 Партнёр включил камеру" : "📷 Партнёр выключил камеру");
+        }
+        return;
+    }
+
+    if (payload.type === "bye") {
+        closeWatchPartyPeerConnectionOnly();
+        watchPartyPartnerMediaState = { mic: false, cam: false };
+        renderWatchPartyCallControls();
+        return;
+    }
+}
+
+// Синтезирует короткий звук оповещения о включении/выключении микро/камеры
+// партнёром — намеренно НЕ похож на "динь-динь" нового сообщения в чате
+// (playWatchPartyBellSound): здесь короткое скользящее "свуп" по частоте
+// (вверх — включили, вниз — выключили), пилообразная волна вместо синусоиды.
+function playWatchPartyToggleSound(turnedOn) {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!watchPartyCallAudioCtx) watchPartyCallAudioCtx = new AudioCtx();
+        if (watchPartyCallAudioCtx.state === "suspended") watchPartyCallAudioCtx.resume();
+
+        const ctx = watchPartyCallAudioCtx;
+        const now = ctx.currentTime;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+
+        const startFreq = turnedOn ? 420 : 620;
+        const endFreq = turnedOn ? 780 : 260;
+        osc.frequency.setValueAtTime(startFreq, now);
+        osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.16);
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.2, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.24);
+    } catch (e) {
+        console.error("Не удалось воспроизвести звук переключения микро/камеры:", e);
+    }
+}
+
+// Закрывает только RTCPeerConnection и остатки удалённого потока — наши
+// собственные локальные треки (и кнопки mic/cam) не трогает, чтобы при
+// возврате партнёра можно было тихо пересобрать соединение.
+function closeWatchPartyPeerConnectionOnly() {
+    if (watchPartyPeerConnection) {
+        try { watchPartyPeerConnection.close(); } catch (e) {}
+        watchPartyPeerConnection = null;
+    }
+    watchPartyRemoteStream = null;
+    watchPartyMakingOffer = false;
+    watchPartyIgnoreOffer = false;
+    updateWatchPartyRemoteMedia();
+}
+
+// Полная остановка звонка (наши треки тоже глушим) — вызывается при выходе
+// с экрана совместного просмотра.
+function cleanupWatchPartyCall() {
+    broadcastWatchPartyRTC("bye", {});
+    if (watchPartyLocalStream) {
+        watchPartyLocalStream.getTracks().forEach(t => t.stop());
+        watchPartyLocalStream = null;
+    }
+    closeWatchPartyPeerConnectionOnly();
+    watchPartyMicOn = false;
+    watchPartyCamOn = false;
+    watchPartyPartnerMediaState = { mic: false, cam: false };
+    renderWatchPartyCallControls();
+}
+
+// Превращает DOMException от getUserMedia в понятное пользователю сообщение —
+// вместо одной и той же общей фразы на любую причину сбоя (иначе не отличить
+// "запретили доступ" от "камера занята другим приложением" или "сайт открыт
+// не по HTTPS").
+function describeWatchPartyMediaError(err, kind) {
+    const device = kind === "audio" ? "микрофону" : "камере";
+    const name = err && err.name;
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        return "Доступ к " + device + " запрещён. Проверьте: 1) разрешение для этого сайта в самом браузере (значок замка / "
+            + "«ⓘ» рядом с адресной строкой → Разрешения); 2) разрешение на камеру/микрофон для самого браузера в настройках "
+            + "телефона (Android: Настройки → Приложения → [браузер] → Разрешения; iOS: Настройки → [браузер], или Настройки → "
+            + "Safari → Камера/Микрофон, если это Safari). Если сайт открыт из встроенного браузера мессенджера/соцсети — "
+            + "откройте ссылку в обычном браузере, встроенные WebView часто блокируют это в принципе.";
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        return "Не найдено устройство (" + device + "). Возможно, оно отключено в настройках телефона.";
+    }
+    if (name === "NotReadableError" || name === "TrackStartError") {
+        return device.charAt(0).toUpperCase() + device.slice(1) + " уже используется другим приложением — закройте его и попробуйте снова.";
+    }
+    if (name === "SecurityError") {
+        return "Браузер блокирует доступ по соображениям безопасности — сайт должен быть открыт по HTTPS (не http://).";
+    }
+    return "Не удалось получить доступ к " + device + " (" + (name || "неизвестная ошибка") + "). Подробности — в консоли браузера.";
+}
+
+// ---------- Включение/выключение микрофона ----------
+async function toggleWatchPartyMic() {
+    if (!currentUser) return;
+    if (watchPartyMicOn) {
+        if (watchPartyPeerConnection) {
+            watchPartyPeerConnection.getSenders().forEach(sender => {
+                if (sender.track && sender.track.kind === "audio") {
+                    const track = sender.track; // removeTrack() ниже сам обнулит sender.track — сохраняем ссылку заранее
+                    watchPartyPeerConnection.removeTrack(sender);
+                    track.stop();
+                }
+            });
+        }
+        if (watchPartyLocalStream) {
+            watchPartyLocalStream.getAudioTracks().forEach(t => {
+                watchPartyLocalStream.removeTrack(t);
+                t.stop();
+            });
+        }
+        watchPartyMicOn = false;
+        renderWatchPartyCallControls();
+        broadcastWatchPartyRTC("media-state", { mic: watchPartyMicOn, cam: watchPartyCamOn });
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const track = stream.getAudioTracks()[0];
+        if (!watchPartyLocalStream) watchPartyLocalStream = new MediaStream();
+        watchPartyLocalStream.addTrack(track);
+        const pc = ensureWatchPartyPeerConnection();
+        if (pc) pc.addTrack(track, watchPartyLocalStream);
+        watchPartyMicOn = true;
+        renderWatchPartyCallControls();
+        broadcastWatchPartyRTC("media-state", { mic: watchPartyMicOn, cam: watchPartyCamOn });
+    } catch (err) {
+        console.error("Не удалось включить микрофон:", err);
+        alert(describeWatchPartyMediaError(err, "audio"));
+    }
+}
+
+// ---------- Включение/выключение камеры ----------
+async function toggleWatchPartyCam() {
+    if (!currentUser) return;
+    if (watchPartyCamOn) {
+        if (watchPartyPeerConnection) {
+            watchPartyPeerConnection.getSenders().forEach(sender => {
+                if (sender.track && sender.track.kind === "video") {
+                    const track = sender.track; // removeTrack() ниже сам обнулит sender.track — сохраняем ссылку заранее
+                    watchPartyPeerConnection.removeTrack(sender);
+                    track.stop();
+                }
+            });
+        }
+        if (watchPartyLocalStream) {
+            watchPartyLocalStream.getVideoTracks().forEach(t => {
+                watchPartyLocalStream.removeTrack(t);
+                t.stop();
+            });
+        }
+        watchPartyCamOn = false;
+        renderWatchPartyCallControls();
+        updateWatchPartyLocalPreview();
+        broadcastWatchPartyRTC("media-state", { mic: watchPartyMicOn, cam: watchPartyCamOn });
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: watchPartyFacingMode }
+        });
+        const track = stream.getVideoTracks()[0];
+        if (!watchPartyLocalStream) watchPartyLocalStream = new MediaStream();
+        watchPartyLocalStream.addTrack(track);
+        const pc = ensureWatchPartyPeerConnection();
+        if (pc) pc.addTrack(track, watchPartyLocalStream);
+        watchPartyCamOn = true;
+        renderWatchPartyCallControls();
+        updateWatchPartyLocalPreview();
+        broadcastWatchPartyRTC("media-state", { mic: watchPartyMicOn, cam: watchPartyCamOn });
+        detectWatchPartyMultipleCameras();
+    } catch (err) {
+        console.error("Не удалось включить камеру:", err);
+        alert(describeWatchPartyMediaError(err, "video"));
+    }
+}
+
+// Разворот камеры (фронтальная/основная) — актуально на телефоне.
+// Меняем трек через replaceTrack, это НЕ требует пересогласования (SDP).
+async function switchWatchPartyCamera() {
+    if (!watchPartyCamOn || !watchPartyLocalStream) return;
+    watchPartyFacingMode = watchPartyFacingMode === "user" ? "environment" : "user";
+    try {
+        const newStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: watchPartyFacingMode }
+        });
+        const newTrack = newStream.getVideoTracks()[0];
+        const oldTrack = watchPartyLocalStream.getVideoTracks()[0];
+        if (oldTrack) {
+            watchPartyLocalStream.removeTrack(oldTrack);
+            oldTrack.stop();
+        }
+        watchPartyLocalStream.addTrack(newTrack);
+
+        if (watchPartyPeerConnection) {
+            const sender = watchPartyPeerConnection.getSenders().find(s => s.track && s.track.kind === "video");
+            if (sender) await sender.replaceTrack(newTrack);
+            else watchPartyPeerConnection.addTrack(newTrack, watchPartyLocalStream);
+        }
+        updateWatchPartyLocalPreview();
+    } catch (err) {
+        console.error("Не удалось развернуть камеру:", err);
+        watchPartyFacingMode = watchPartyFacingMode === "user" ? "environment" : "user"; // откатываем при неудаче
+    }
+}
+
+// Показываем кнопку разворота камеры, только если на устройстве реально
+// больше одной камеры (иначе на десктопе она будет просто бесполезной).
+async function detectWatchPartyMultipleCameras() {
+    try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        watchPartyHasMultipleCameras = devices.filter(d => d.kind === "videoinput").length > 1;
+        renderWatchPartyCallControls();
+    } catch (e) {}
+}
+
+// ---------- Обновление DOM ----------
+function updateWatchPartyLocalPreview() {
+    const box = document.getElementById("wpLocalPreviewBox");
+    const video = document.getElementById("wpLocalVideo");
+    const flipBtn = document.getElementById("wpFlipCamBtn");
+    if (!box || !video) return;
+
+    if (watchPartyCamOn && watchPartyLocalStream) {
+        video.srcObject = watchPartyLocalStream;
+        video.play().catch(() => {});
+        video.classList.toggle("wp-mirror", watchPartyFacingMode === "user");
+        box.classList.add("wp-preview-visible");
+    } else {
+        video.srcObject = null;
+        box.classList.remove("wp-preview-visible");
+    }
+    if (flipBtn) flipBtn.style.display = (watchPartyCamOn && watchPartyHasMultipleCameras) ? "flex" : "none";
+}
+
+function updateWatchPartyRemoteMedia() {
+    const box = document.getElementById("wpRemotePreviewBox");
+    const video = document.getElementById("wpRemoteVideo");
+    const badge = document.getElementById("wpAudioOnlyBadge");
+    if (!box || !video) return;
+
+    const hasStream = !!(watchPartyRemoteStream && watchPartyRemoteStream.getTracks().length);
+    if (video.srcObject !== watchPartyRemoteStream) {
+        video.srcObject = watchPartyRemoteStream;
+    }
+    if (hasStream) {
+        video.play().catch(() => {});
+    }
+
+    const hasRemoteVideo = !!(watchPartyRemoteStream && watchPartyRemoteStream.getVideoTracks().length);
+    const hasRemoteAudio = !!(watchPartyRemoteStream && watchPartyRemoteStream.getAudioTracks().length);
+
+    box.classList.toggle("wp-preview-visible", hasRemoteVideo || hasRemoteAudio);
+    video.style.visibility = hasRemoteVideo ? "visible" : "hidden";
+    if (badge) badge.style.display = (hasRemoteAudio && !hasRemoteVideo) ? "flex" : "none";
+}
+
+function renderWatchPartyCallControls() {
+    const micBtn = document.getElementById("wpMicBtn");
+    if (micBtn) {
+        micBtn.classList.toggle("wp-call-btn-active", watchPartyMicOn);
+        micBtn.textContent = watchPartyMicOn ? "🎤" : "🔇";
+        micBtn.title = watchPartyMicOn ? "Выключить микрофон" : "Включить микрофон";
+    }
+    const camBtn = document.getElementById("wpCamBtn");
+    if (camBtn) {
+        camBtn.classList.toggle("wp-call-btn-active", watchPartyCamOn);
+        camBtn.textContent = watchPartyCamOn ? "🎥" : "📷";
+        camBtn.title = watchPartyCamOn ? "Выключить камеру" : "Включить камеру";
+    }
+    updateWatchPartyLocalPreview();
+    updateWatchPartyRemoteMedia();
 }
 
 // ==========================================
@@ -5149,6 +5624,92 @@ async function showWatchPartyScreen() {
     playerContainer.className = "wp-player-container";
     playerContainer.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Вставьте ссылку ниже, чтобы начать</p>';
     app.appendChild(playerContainer);
+
+    // ---------- Панель аудио/видео звонка (микро + камера) ----------
+    let callPanel = document.createElement("div");
+    callPanel.className = "wp-call-panel";
+
+    let callButtonsRow = document.createElement("div");
+    callButtonsRow.className = "wp-call-buttons-row";
+
+    let micBtn = document.createElement("button");
+    micBtn.id = "wpMicBtn";
+    micBtn.type = "button";
+    micBtn.className = "wp-call-btn";
+    micBtn.textContent = "🔇";
+    micBtn.title = "Включить микрофон";
+    micBtn.onclick = () => toggleWatchPartyMic();
+    callButtonsRow.appendChild(micBtn);
+
+    let camBtn = document.createElement("button");
+    camBtn.id = "wpCamBtn";
+    camBtn.type = "button";
+    camBtn.className = "wp-call-btn";
+    camBtn.textContent = "📷";
+    camBtn.title = "Включить камеру";
+    camBtn.onclick = () => toggleWatchPartyCam();
+    callButtonsRow.appendChild(camBtn);
+
+    callPanel.appendChild(callButtonsRow);
+
+    let callPreviews = document.createElement("div");
+    callPreviews.className = "wp-call-previews";
+
+    // Наше собственное превью (видно только когда камера включена)
+    let localPreviewBox = document.createElement("div");
+    localPreviewBox.id = "wpLocalPreviewBox";
+    localPreviewBox.className = "wp-preview-box";
+    let localVideo = document.createElement("video");
+    localVideo.id = "wpLocalVideo";
+    localVideo.className = "wp-preview-video";
+    localVideo.muted = true; // своё видео всегда без звука — иначе эхо
+    localVideo.autoplay = true;
+    localVideo.playsInline = true;
+    localPreviewBox.appendChild(localVideo);
+    let localLabel = document.createElement("div");
+    localLabel.className = "wp-preview-label";
+    localLabel.textContent = "Вы";
+    localPreviewBox.appendChild(localLabel);
+    let flipCamBtn = document.createElement("button");
+    flipCamBtn.id = "wpFlipCamBtn";
+    flipCamBtn.type = "button";
+    flipCamBtn.className = "wp-flip-cam-btn";
+    flipCamBtn.title = "Сменить камеру";
+    flipCamBtn.textContent = "🔄";
+    flipCamBtn.style.display = "none";
+    flipCamBtn.onclick = () => switchWatchPartyCamera();
+    localPreviewBox.appendChild(flipCamBtn);
+    callPreviews.appendChild(localPreviewBox);
+
+    // Превью партнёра (видео, если у него включена камера; иначе просто
+    // играет его звук с микрофона, а тут показывается значок "только звук")
+    let remotePreviewBox = document.createElement("div");
+    remotePreviewBox.id = "wpRemotePreviewBox";
+    remotePreviewBox.className = "wp-preview-box";
+    let remoteVideo = document.createElement("video");
+    remoteVideo.id = "wpRemoteVideo";
+    remoteVideo.className = "wp-preview-video";
+    remoteVideo.autoplay = true;
+    remoteVideo.playsInline = true;
+    remotePreviewBox.appendChild(remoteVideo);
+    let remoteLabel = document.createElement("div");
+    remoteLabel.className = "wp-preview-label";
+    remoteLabel.textContent = "Партнёр";
+    remotePreviewBox.appendChild(remoteLabel);
+    let audioOnlyBadge = document.createElement("div");
+    audioOnlyBadge.id = "wpAudioOnlyBadge";
+    audioOnlyBadge.className = "wp-audio-only-badge";
+    audioOnlyBadge.textContent = "🎙️";
+    audioOnlyBadge.style.display = "none";
+    remotePreviewBox.appendChild(audioOnlyBadge);
+    callPreviews.appendChild(remotePreviewBox);
+
+    callPanel.appendChild(callPreviews);
+    app.appendChild(callPanel);
+
+    watchPartyPartnerMediaState = { mic: false, cam: false };
+    renderWatchPartyCallControls();
+    detectWatchPartyMultipleCameras();
 
     // Строка вставки ссылки + кнопка запуска рядом с ней
     let urlRow = document.createElement("div");
