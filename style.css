@@ -1556,6 +1556,89 @@ body.batch-add-screen-active .container {
     animation: newDotPulse 1.6s ease infinite;
 }
 
+/* Увеличенные варианты для страницы звонка в свайп-блоке — там на них
+   выделена вся ширина экрана, а не узкая полоска под ссылкой */
+.wp-call-btn.wp-call-btn-lg {
+    width: 64px;
+    height: 64px;
+    min-height: 64px;
+    font-size: 26px;
+}
+
+.wp-call-previews-lg {
+    gap: 16px;
+    margin-top: 4px;
+}
+
+.wp-preview-box.wp-preview-box-lg {
+    width: 42%;
+    max-width: 170px;
+    height: 0;
+    padding-bottom: 56%; /* держим пропорции через padding-bottom, а не фиксированную высоту, чтобы адаптировалось под ширину страницы */
+}
+
+.wp-preview-box.wp-preview-box-lg .wp-preview-video {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* ===== Свайп-блок: чат / аудио-видео звонок (как карусель Instagram) ===== */
+.wp-swipe-wrap {
+    margin-top: 4px;
+}
+
+.wp-swipe-track {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    border-radius: 18px;
+}
+
+.wp-swipe-track::-webkit-scrollbar {
+    display: none;
+}
+
+.wp-swipe-page {
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+}
+
+.wp-swipe-page:first-child {
+    padding-right: 1px; /* подстраховка от сабпиксельного дребезга между страницами на некоторых мобильных браузерах */
+}
+
+.wp-swipe-dots {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 9px;
+    margin: 10px 0 4px;
+}
+
+.wp-swipe-dot {
+    width: 8px;
+    height: 8px;
+    min-height: 8px;
+    padding: 0;
+    margin: 0;
+    border-radius: 50%;
+    border: none;
+    background: var(--line);
+    transition: background 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.wp-swipe-dot.wp-swipe-dot-active {
+    background: var(--cyan);
+    box-shadow: 0 0 8px rgba(46,232,255,0.7);
+    transform: scale(1.25);
+}
+
 /* ===== Экран "Игры": карточки игр и таблица лидеров ===== */
 .game-card {
     background: linear-gradient(150deg, var(--panel-2), var(--panel));

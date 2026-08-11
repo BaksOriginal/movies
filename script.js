@@ -4774,6 +4774,21 @@ async function handleWatchPartyRTCSignal(payload) {
     if (payload.type === "media-state") {
         const prev = watchPartyPartnerMediaState;
         watchPartyPartnerMediaState = { mic: !!payload.mic, cam: !!payload.cam };
+
+        // Не полагаемся только на track.onended — в некоторых браузерах при
+        // renegotiation (партнёр выключил камеру/микро) трек на нашей стороне
+        // не всегда получает событие "ended" вовремя (или вообще), и превью
+        // зависает с последним кадром. Явный сигнал mic/cam — надёжный
+        // источник истины, поэтому лишние треки подчищаем сами.
+        if (watchPartyRemoteStream) {
+            if (!watchPartyPartnerMediaState.cam) {
+                watchPartyRemoteStream.getVideoTracks().forEach(t => watchPartyRemoteStream.removeTrack(t));
+            }
+            if (!watchPartyPartnerMediaState.mic) {
+                watchPartyRemoteStream.getAudioTracks().forEach(t => watchPartyRemoteStream.removeTrack(t));
+            }
+        }
+
         renderWatchPartyCallControls();
         // Звук — только партнёру, только на реальное изменение состояния
         // (а не на повторную рассылку того же самого).
@@ -4843,6 +4858,7 @@ function closeWatchPartyPeerConnectionOnly() {
     watchPartyRemoteStream = null;
     watchPartyMakingOffer = false;
     watchPartyIgnoreOffer = false;
+    watchPartyPartnerMediaState = { mic: false, cam: false };
     updateWatchPartyRemoteMedia();
 }
 
@@ -5039,20 +5055,23 @@ function updateWatchPartyRemoteMedia() {
     const badge = document.getElementById("wpAudioOnlyBadge");
     if (!box || !video) return;
 
-    const hasStream = !!(watchPartyRemoteStream && watchPartyRemoteStream.getTracks().length);
     if (video.srcObject !== watchPartyRemoteStream) {
         video.srcObject = watchPartyRemoteStream;
     }
-    if (hasStream) {
+    if (watchPartyRemoteStream && watchPartyRemoteStream.getTracks().length) {
         video.play().catch(() => {});
     }
 
-    const hasRemoteVideo = !!(watchPartyRemoteStream && watchPartyRemoteStream.getVideoTracks().length);
-    const hasRemoteAudio = !!(watchPartyRemoteStream && watchPartyRemoteStream.getAudioTracks().length);
+    // Видимость держим на явном сигнале от партнёра (media-state), а не на
+    // том, жив ли ещё трек в потоке — иначе при выключении камеры/микро
+    // партнёром превью может зависнуть с последним кадром до следующего
+    // события (см. комментарий в handleWatchPartyRTCSignal).
+    const showCam = watchPartyPartnerMediaState.cam;
+    const showAudioOnly = watchPartyPartnerMediaState.mic && !watchPartyPartnerMediaState.cam;
 
-    box.classList.toggle("wp-preview-visible", hasRemoteVideo || hasRemoteAudio);
-    video.style.visibility = hasRemoteVideo ? "visible" : "hidden";
-    if (badge) badge.style.display = (hasRemoteAudio && !hasRemoteVideo) ? "flex" : "none";
+    box.classList.toggle("wp-preview-visible", showCam || showAudioOnly);
+    video.style.visibility = showCam ? "visible" : "hidden";
+    if (badge) badge.style.display = showAudioOnly ? "flex" : "none";
 }
 
 function renderWatchPartyCallControls() {
@@ -5070,6 +5089,23 @@ function renderWatchPartyCallControls() {
     }
     updateWatchPartyLocalPreview();
     updateWatchPartyRemoteMedia();
+}
+
+// ---------- Свайп между страницами "Чат" / "Аудио-видео" ----------
+function scrollWatchPartySwipeToPage(index) {
+    const track = document.getElementById("wpSwipeTrack");
+    if (!track) return;
+    const page = track.children[index];
+    if (page) track.scrollTo({ left: page.offsetLeft, behavior: "smooth" });
+}
+
+function updateWatchPartySwipeDots() {
+    const track = document.getElementById("wpSwipeTrack");
+    if (!track || !track.clientWidth) return;
+    const dots = document.querySelectorAll(".wp-swipe-dot");
+    if (!dots.length) return;
+    const idx = Math.round(track.scrollLeft / track.clientWidth);
+    dots.forEach((d, i) => d.classList.toggle("wp-swipe-dot-active", i === idx));
 }
 
 // ==========================================
@@ -5625,92 +5661,6 @@ async function showWatchPartyScreen() {
     playerContainer.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Вставьте ссылку ниже, чтобы начать</p>';
     app.appendChild(playerContainer);
 
-    // ---------- Панель аудио/видео звонка (микро + камера) ----------
-    let callPanel = document.createElement("div");
-    callPanel.className = "wp-call-panel";
-
-    let callButtonsRow = document.createElement("div");
-    callButtonsRow.className = "wp-call-buttons-row";
-
-    let micBtn = document.createElement("button");
-    micBtn.id = "wpMicBtn";
-    micBtn.type = "button";
-    micBtn.className = "wp-call-btn";
-    micBtn.textContent = "🔇";
-    micBtn.title = "Включить микрофон";
-    micBtn.onclick = () => toggleWatchPartyMic();
-    callButtonsRow.appendChild(micBtn);
-
-    let camBtn = document.createElement("button");
-    camBtn.id = "wpCamBtn";
-    camBtn.type = "button";
-    camBtn.className = "wp-call-btn";
-    camBtn.textContent = "📷";
-    camBtn.title = "Включить камеру";
-    camBtn.onclick = () => toggleWatchPartyCam();
-    callButtonsRow.appendChild(camBtn);
-
-    callPanel.appendChild(callButtonsRow);
-
-    let callPreviews = document.createElement("div");
-    callPreviews.className = "wp-call-previews";
-
-    // Наше собственное превью (видно только когда камера включена)
-    let localPreviewBox = document.createElement("div");
-    localPreviewBox.id = "wpLocalPreviewBox";
-    localPreviewBox.className = "wp-preview-box";
-    let localVideo = document.createElement("video");
-    localVideo.id = "wpLocalVideo";
-    localVideo.className = "wp-preview-video";
-    localVideo.muted = true; // своё видео всегда без звука — иначе эхо
-    localVideo.autoplay = true;
-    localVideo.playsInline = true;
-    localPreviewBox.appendChild(localVideo);
-    let localLabel = document.createElement("div");
-    localLabel.className = "wp-preview-label";
-    localLabel.textContent = "Вы";
-    localPreviewBox.appendChild(localLabel);
-    let flipCamBtn = document.createElement("button");
-    flipCamBtn.id = "wpFlipCamBtn";
-    flipCamBtn.type = "button";
-    flipCamBtn.className = "wp-flip-cam-btn";
-    flipCamBtn.title = "Сменить камеру";
-    flipCamBtn.textContent = "🔄";
-    flipCamBtn.style.display = "none";
-    flipCamBtn.onclick = () => switchWatchPartyCamera();
-    localPreviewBox.appendChild(flipCamBtn);
-    callPreviews.appendChild(localPreviewBox);
-
-    // Превью партнёра (видео, если у него включена камера; иначе просто
-    // играет его звук с микрофона, а тут показывается значок "только звук")
-    let remotePreviewBox = document.createElement("div");
-    remotePreviewBox.id = "wpRemotePreviewBox";
-    remotePreviewBox.className = "wp-preview-box";
-    let remoteVideo = document.createElement("video");
-    remoteVideo.id = "wpRemoteVideo";
-    remoteVideo.className = "wp-preview-video";
-    remoteVideo.autoplay = true;
-    remoteVideo.playsInline = true;
-    remotePreviewBox.appendChild(remoteVideo);
-    let remoteLabel = document.createElement("div");
-    remoteLabel.className = "wp-preview-label";
-    remoteLabel.textContent = "Партнёр";
-    remotePreviewBox.appendChild(remoteLabel);
-    let audioOnlyBadge = document.createElement("div");
-    audioOnlyBadge.id = "wpAudioOnlyBadge";
-    audioOnlyBadge.className = "wp-audio-only-badge";
-    audioOnlyBadge.textContent = "🎙️";
-    audioOnlyBadge.style.display = "none";
-    remotePreviewBox.appendChild(audioOnlyBadge);
-    callPreviews.appendChild(remotePreviewBox);
-
-    callPanel.appendChild(callPreviews);
-    app.appendChild(callPanel);
-
-    watchPartyPartnerMediaState = { mic: false, cam: false };
-    renderWatchPartyCallControls();
-    detectWatchPartyMultipleCameras();
-
     // Строка вставки ссылки + кнопка запуска рядом с ней
     let urlRow = document.createElement("div");
     urlRow.className = "chat-input-row wp-url-row";
@@ -5754,20 +5704,35 @@ async function showWatchPartyScreen() {
     note.className = "wp-note";
     app.appendChild(note);
 
-    // ---------- Чат (компактный, встроенный, своя таблица watch_party_messages) ----------
+    // ---------- Свайп-блок: страница 1 — чат, страница 2 — аудио/видео звонок ----------
+    // Прокручиваемый контейнер с CSS scroll-snap — свайп между чатом и звонком
+    // получается нативным и плавным (инерция/анимация — от самого браузера,
+    // без ручного отслеживания touch-событий). Под ним — два кружка-индикатора
+    // (как в Instagram-каруселях), по тапу тоже переключают страницу.
+    let swipeWrap = document.createElement("div");
+    swipeWrap.className = "wp-swipe-wrap";
+
+    let swipeTrack = document.createElement("div");
+    swipeTrack.id = "wpSwipeTrack";
+    swipeTrack.className = "wp-swipe-track";
+
+    // ---------- Страница 1: чат (своя таблица watch_party_messages) ----------
+    let chatPage = document.createElement("div");
+    chatPage.className = "wp-swipe-page";
+
     let chatLabel = document.createElement("div");
     chatLabel.className = "wp-chat-label";
     chatLabel.textContent = "💬 Чат";
-    app.appendChild(chatLabel);
+    chatPage.appendChild(chatLabel);
 
     let wpChatBox = document.createElement("div");
     wpChatBox.className = "chat-box wp-chat-box";
     wpChatBox.id = "wpChatBox";
-    app.appendChild(wpChatBox);
+    chatPage.appendChild(wpChatBox);
 
     let wpReplyBarBox = document.createElement("div");
     wpReplyBarBox.id = "wpChatReplyBarBox";
-    app.appendChild(wpReplyBarBox);
+    chatPage.appendChild(wpReplyBarBox);
     watchPartyChatReplyTarget = null;
     renderWPChatReplyBar();
 
@@ -5850,7 +5815,130 @@ async function showWatchPartyScreen() {
     wpInputRow.appendChild(wpChatInput);
     wpInputRow.appendChild(wpStickerBtn);
     wpInputRow.appendChild(wpSendBtn);
-    app.appendChild(wpInputRow);
+    chatPage.appendChild(wpInputRow);
+    swipeTrack.appendChild(chatPage);
+
+    // ---------- Страница 2: аудио/видео звонок (крупнее, на всю ширину страницы) ----------
+    let callPage = document.createElement("div");
+    callPage.className = "wp-swipe-page";
+
+    let callLabel = document.createElement("div");
+    callLabel.className = "wp-chat-label";
+    callLabel.textContent = "📞 Аудио/видео";
+    callPage.appendChild(callLabel);
+
+    let callButtonsRow = document.createElement("div");
+    callButtonsRow.className = "wp-call-buttons-row";
+
+    let micBtn = document.createElement("button");
+    micBtn.id = "wpMicBtn";
+    micBtn.type = "button";
+    micBtn.className = "wp-call-btn wp-call-btn-lg";
+    micBtn.textContent = "🔇";
+    micBtn.title = "Включить микрофон";
+    micBtn.onclick = () => toggleWatchPartyMic();
+    callButtonsRow.appendChild(micBtn);
+
+    let camBtn = document.createElement("button");
+    camBtn.id = "wpCamBtn";
+    camBtn.type = "button";
+    camBtn.className = "wp-call-btn wp-call-btn-lg";
+    camBtn.textContent = "📷";
+    camBtn.title = "Включить камеру";
+    camBtn.onclick = () => toggleWatchPartyCam();
+    callButtonsRow.appendChild(camBtn);
+
+    callPage.appendChild(callButtonsRow);
+
+    let callPreviews = document.createElement("div");
+    callPreviews.className = "wp-call-previews wp-call-previews-lg";
+
+    // Наше собственное превью (видно только когда камера включена)
+    let localPreviewBox = document.createElement("div");
+    localPreviewBox.id = "wpLocalPreviewBox";
+    localPreviewBox.className = "wp-preview-box wp-preview-box-lg";
+    let localVideo = document.createElement("video");
+    localVideo.id = "wpLocalVideo";
+    localVideo.className = "wp-preview-video";
+    localVideo.muted = true; // своё видео всегда без звука — иначе эхо
+    localVideo.autoplay = true;
+    localVideo.playsInline = true;
+    localPreviewBox.appendChild(localVideo);
+    let localLabel = document.createElement("div");
+    localLabel.className = "wp-preview-label";
+    localLabel.textContent = "Вы";
+    localPreviewBox.appendChild(localLabel);
+    let flipCamBtn = document.createElement("button");
+    flipCamBtn.id = "wpFlipCamBtn";
+    flipCamBtn.type = "button";
+    flipCamBtn.className = "wp-flip-cam-btn";
+    flipCamBtn.title = "Сменить камеру";
+    flipCamBtn.textContent = "🔄";
+    flipCamBtn.style.display = "none";
+    flipCamBtn.onclick = () => switchWatchPartyCamera();
+    localPreviewBox.appendChild(flipCamBtn);
+    callPreviews.appendChild(localPreviewBox);
+
+    // Превью партнёра (видео, если у него включена камера; иначе просто
+    // играет его звук с микрофона, а тут показывается значок "только звук")
+    let remotePreviewBox = document.createElement("div");
+    remotePreviewBox.id = "wpRemotePreviewBox";
+    remotePreviewBox.className = "wp-preview-box wp-preview-box-lg";
+    let remoteVideo = document.createElement("video");
+    remoteVideo.id = "wpRemoteVideo";
+    remoteVideo.className = "wp-preview-video";
+    remoteVideo.autoplay = true;
+    remoteVideo.playsInline = true;
+    remotePreviewBox.appendChild(remoteVideo);
+    let remoteLabel = document.createElement("div");
+    remoteLabel.className = "wp-preview-label";
+    remoteLabel.textContent = "Партнёр";
+    remotePreviewBox.appendChild(remoteLabel);
+    let audioOnlyBadge = document.createElement("div");
+    audioOnlyBadge.id = "wpAudioOnlyBadge";
+    audioOnlyBadge.className = "wp-audio-only-badge";
+    audioOnlyBadge.textContent = "🎙️";
+    audioOnlyBadge.style.display = "none";
+    remotePreviewBox.appendChild(audioOnlyBadge);
+    callPreviews.appendChild(remotePreviewBox);
+
+    callPage.appendChild(callPreviews);
+    swipeTrack.appendChild(callPage);
+
+    swipeWrap.appendChild(swipeTrack);
+
+    // ---------- Кружки-индикаторы (как в каруселях Instagram) ----------
+    let swipeDots = document.createElement("div");
+    swipeDots.className = "wp-swipe-dots";
+    let chatDot = document.createElement("button");
+    chatDot.type = "button";
+    chatDot.className = "wp-swipe-dot wp-swipe-dot-active";
+    chatDot.title = "Чат";
+    chatDot.onclick = () => scrollWatchPartySwipeToPage(0);
+    let callDot = document.createElement("button");
+    callDot.type = "button";
+    callDot.className = "wp-swipe-dot";
+    callDot.title = "Аудио/видео";
+    callDot.onclick = () => scrollWatchPartySwipeToPage(1);
+    swipeDots.appendChild(chatDot);
+    swipeDots.appendChild(callDot);
+    swipeWrap.appendChild(swipeDots);
+
+    app.appendChild(swipeWrap);
+
+    // Отслеживаем прокрутку свайп-трека, чтобы подсвечивать активный кружок
+    let wpSwipeScrollRAF = null;
+    swipeTrack.addEventListener("scroll", () => {
+        if (wpSwipeScrollRAF) return;
+        wpSwipeScrollRAF = requestAnimationFrame(() => {
+            wpSwipeScrollRAF = null;
+            updateWatchPartySwipeDots();
+        });
+    }, { passive: true });
+
+    watchPartyPartnerMediaState = { mic: false, cam: false };
+    renderWatchPartyCallControls();
+    detectWatchPartyMultipleCameras();
 
     initWatchPartyChannel();
     renderWPStatusBar();
