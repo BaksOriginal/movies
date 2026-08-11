@@ -128,6 +128,23 @@ body{
 
 }
 
+/* На планшетах и десктопе раньше ширина упиралась в те же 500px, что и на
+   телефоне — на большом экране сайт превращался в узкую полоску по центру.
+   Здесь и ниже (1100px) даём контейнеру чуть подрасти, оставляя тот же
+   макет "в одну колонку" — он и задуман компактным, просто теперь не
+   игнорирует лишнее место на широких экранах совсем. */
+@media (min-width: 700px) {
+    .container {
+        max-width: 620px;
+        padding: 32px 0 50px;
+    }
+}
+@media (min-width: 1100px) {
+    .container {
+        max-width: 680px;
+    }
+}
+
 
 
 /* Заголовок */
@@ -136,7 +153,11 @@ h1{
 
     font-family: var(--font-display);
 
-    font-size:32px;
+    /* Было фиксированных 32px — на очень узких телефонах (<360px) слишком
+       крупно для длинных заголовков с эмодзи, на широком десктопе слишком
+       мелко относительно подросшего .container. clamp() плавно
+       подстраивает размер между этими крайностями. */
+    font-size: clamp(24px, 6vw, 36px);
 
     font-weight:700;
 
@@ -205,7 +226,10 @@ h1 .emoji-native{
     border-radius:25px;
 
 
-    font-size:16px;
+    /* clamp() вместо фиксированных 16px — на узких телефонах текст ("⬅
+       Назад" / "🏠 Домой" рядом в одной строке) иначе легко упирается в
+       перенос. */
+    font-size: clamp(13px, 3.8vw, 16px);
 
 }
 
@@ -234,7 +258,11 @@ button{
     text-shadow: 0 0 10px rgba(139,59,255,0.4);
 
 
-    font-size:20px;
+    /* Было фиксированных 20px — на телефонах уже 360px и меньше длинные
+       названия тайтлов заворачивались в 2-3 строки чаще, чем нужно.
+       clamp() уменьшает размер только на самых узких экранах, а с ~445px
+       и на десктопе остаётся ровно 20px, как было. */
+    font-size: clamp(16px, 4.5vw, 20px);
 
     font-weight:600;
 
@@ -635,7 +663,13 @@ button:nth-child(6){
 
 /* Шапка пользователя (имя + кнопки музыки/выхода) */
 .user-header {
-    max-width: 500px;
+    /* Было своих независимых max-width:500px — при расширении .container
+       на десктопе (см. брейкпоинты 700px/1100px выше в файле) эта шапка
+       так и оставалась зажатой в те же 500px по центру более широкого
+       контейнера, из-за чего имя и кнопки визуально жались друг к другу
+       на большом экране, как на телефоне. max-width:100% отдаёт ширину
+       ровно .container — теперь растёт вместе с ним. */
+    max-width: 100%;
     margin: 0 auto 14px;
     padding: 2px 4px;
     display: flex;
@@ -659,7 +693,9 @@ button:nth-child(6){
 
 /* Плашка с "печатающимся" заголовком — неоновый градиент, живее прежнего */
 .movie-time-plate {
-    max-width: 500px;
+    /* Тот же фикс, что и у .user-header чуть выше — растёт вместе с
+       .container, а не зажата в отдельных 500px. */
+    max-width: 100%;
     margin: 0 auto 18px;
     padding: 20px 18px;
     border-radius: 16px;
@@ -1543,6 +1579,16 @@ body.batch-add-screen-active .container {
     box-shadow: var(--glow-cyan);
 }
 
+/* На ПК (есть мышь + hover) сенсорные кнопки управления не нужны —
+   везде уже продублировано физической клавиатурой (стрелки/WASD, см. script.js),
+   поэтому просто прячем весь блок с кнопками. На телефонах/планшетах
+   (нет hover или неточный поинтер) блок остаётся видимым как раньше. */
+@media (hover: hover) and (pointer: fine) {
+    .dpad {
+        display: none;
+    }
+}
+
 /* Кружок "недавно добавлено" (в течение 2 суток) — неоновая цианoвая пульсация */
 .new-title-dot {
     display: inline-block;
@@ -2143,6 +2189,27 @@ body.batch-add-screen-active .container {
     box-shadow: 0 0 14px rgba(255,255,255,0.85);
 }
 
+/* Подсказка буквы клавиши под линией удара — не кнопка (не кликабельна),
+   просто текст, чтобы было понятно, чем бить по дорожке с клавиатуры.
+   Скрыта по умолчанию: на телефоне/планшете (тап по тайлам) она не нужна
+   и только мешала бы — показываем её исключительно на ПК. */
+.rhythm-key-hint {
+    display: none;
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 14px;
+    text-align: center;
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: rgba(255,255,255,0.45);
+    pointer-events: none;
+    user-select: none;
+}
+@media (hover: hover) and (pointer: fine) {
+    .rhythm-key-hint { display: block; }
+}
+
 .rhythm-judgement {
     position: absolute;
     left: 0; right: 0; top: 38%;
@@ -2217,6 +2284,14 @@ body.batch-add-screen-active .container {
     .rhythm-arena { height: 62vh; min-height: 360px; }
 }
 
+/* Ряда кнопок под дорожками тут нет (управление тапом по тайлам/клавиатурой,
+   см. LANE_KEYS в startRhythmLevel в script.js) — на ПК даём арене
+   вырасти пошире и повыше, раз внизу не нужно место под кнопки. */
+@media (hover: hover) and (pointer: fine) {
+    .rhythm-wrap { max-width: 640px; }
+    .rhythm-arena { height: 74vh; max-height: 760px; }
+}
+
 /* ============================================================
    🕸️ ПАУТИНКА — граф-режим просмотра каталога
    ============================================================ */
@@ -2286,17 +2361,6 @@ body.batch-add-screen-active .container {
     font-weight: 700;
 }
 
-.pautinka-back-controls {
-    position: fixed;
-    left: 16px;
-    bottom: 22px;
-    z-index: 502;
-}
-.pautinka-back-controls .round-btn {
-    font-size: 18px !important;
-    font-weight: 700;
-}
-
 .pautinka-svg {
     display: block;
 }
@@ -2309,12 +2373,16 @@ body.batch-add-screen-active .container {
 .pautinka-thread-pulse {
     fill: none;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 4px currentColor);
+    filter: drop-shadow(0 0 3px currentColor);
     animation: pautinkaThreadFlow 3s linear infinite;
     opacity: 0.9;
 }
 @keyframes pautinkaThreadFlow {
-    to { stroke-dashoffset: calc(var(--len, 100) * -1); }
+    /* pathLength="100" на самой линии (см. showPautinka() в script.js)
+       делает эту цифру одинаковой и верной для КАЖДОЙ нити независимо от
+       её реальной длины в пикселях — раньше здесь стоял var(--len) и
+       анимация была видна только в Safari/iOS, см. комментарий в JS. */
+    to { stroke-dashoffset: -100; }
 }
 
 /* --- Узлы --- */
@@ -2395,3 +2463,4 @@ body.batch-add-screen-active .container {
 .pautinka-home-shape {
     filter: drop-shadow(0 0 14px rgba(255,209,92,0.65));
 }
+
