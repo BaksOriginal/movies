@@ -166,7 +166,7 @@
 // service_role-ключом. Если index.html лежит не на том же домене, что
 // и Vercel-функции — замените на полный https-адрес.
 // ==========================================
-const CATALOG_API_URL = "https://github.com/BaksOriginal/movies/edit/main/movie_bot/webapp/api/catalog";
+const CATALOG_API_URL = "https://movies-bot-gamma.vercel.app/api/catalog";
 
 async function apiGetCatalog(initData) {
     const res = await fetch(`${CATALOG_API_URL}?initData=${encodeURIComponent(initData)}`);
