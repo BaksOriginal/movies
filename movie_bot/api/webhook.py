@@ -16,6 +16,15 @@
    (bot_authorized_users) — второй раз пароль не спросится.
 3. Авторизованному пользователю бот присылает кнопку, открывающую
    мини-приложение (форма добавления фильмов, стилизованная под сайт).
+
+ИЗМЕНЕНИЕ БЕЗОПАСНОСТИ: bot_authorized_users теперь закрыта RLS-политикой
+от анонимного доступа (см. rls_migration.sql) — раньше anon-ключ мог
+читать/писать эту таблицу напрямую, а значит кто угодно мог вставить
+туда свой user_id в обход пароля. Поэтому здесь используется
+SUPABASE_SERVICE_ROLE_KEY (обходит RLS) вместо анонимного ключа.
+Это секретный ключ уровня "root" для базы — держите его только в
+переменных окружения Vercel, никогда не коммитьте и не отправляйте
+в браузер.
 """
 
 import json
@@ -28,13 +37,13 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 WEBAPP_URL = os.environ["WEBAPP_URL"]  # https-ссылка на webapp/index.html (см. README)
 
 SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co"
-SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE"
+SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 VALID_PASSWORDS = {"maxii1360", "asmodayrules"}
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 REST_HEADERS = {
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+    "apikey": SUPABASE_SERVICE_ROLE_KEY,
+    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
     "Content-Type": "application/json",
 }
 
