@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Добавить фильмы</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jura:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+    :root{
+        --void: #0a0613;
+        --void-2: #170a26;
+        --panel: #1a1128;
+        --panel-2: #241733;
+        --panel-deep: #120b1d;
+        --line: rgba(255,255,255,0.08);
+
+        --pink: #ff2e93;
+        --pink-soft: #ff7fc4;
+        --purple: #8b3bff;
+        --purple-deep: #5a1fb0;
+        --cyan: #2ee8ff;
+        --gold: #ffd15c;
+
+        --text: #f2e9ff;
+        --text-dim: #b9a8da;
+        --text-faint: #9686b8;
+
+        --font-body: 'Jura', 'Segoe UI', Arial, sans-serif;
+    }
+    *{box-sizing:border-box;}
+    body{
+        margin:0;
+        padding:16px;
+        font-family: var(--font-body);
+        background: radial-gradient(1200px 800px at 50% -10%, var(--void-2), var(--void) 60%);
+        color: var(--text);
+        min-height:100vh;
+    }
+    h1{
+        font-size:20px;
+        text-align:center;
+        margin: 4px 0 18px;
+        background: linear-gradient(90deg, var(--pink-soft), var(--purple) 55%, var(--cyan));
+        -webkit-background-clip:text;
+        background-clip:text;
+        color:transparent;
+    }
+    .card{
+        background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
+        border: 1px solid rgba(255,46,147,0.25);
+        border-radius: 18px;
+        padding: 16px;
+        margin-bottom: 14px;
+        box-shadow: 0 14px 40px rgba(0,0,0,0.5), 0 0 30px rgba(139,59,255,0.18);
+        position: relative;
+    }
+    .card .mobile-label{
+        display:block;
+        font-size:11px;
+        font-weight:700;
+        color: var(--text-dim);
+        text-transform:uppercase;
+        letter-spacing:0.3px;
+        margin: 8px 0 4px;
+    }
+    .card .mobile-label:first-child{margin-top:0;}
+    .card input, .card select{
+        width:100%;
+        padding:10px;
+        border:1px solid var(--line);
+        border-radius:8px;
+        font-size:16px;
+        background: var(--panel-deep);
+        color: var(--text);
+        font-family: var(--font-body);
+    }
+    .card input:focus, .card select:focus{
+        outline:none;
+        border-color: var(--cyan);
+        box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
+    }
+    .btn-remove-row{
+        position:absolute;
+        top:12px; right:12px;
+        width:30px; height:30px;
+        border-radius:8px;
+        border: 1.5px solid var(--pink);
+        background: transparent;
+        color: var(--pink);
+        font-weight:700;
+        cursor:pointer;
+    }
+    .controls{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        margin: 4px 0 18px;
+    }
+    .btn-add-row{
+        background: transparent;
+        border: 1.5px solid var(--cyan);
+        color: var(--cyan);
+        border-radius: 10px;
+        padding: 9px 16px;
+        font-weight:700;
+        font-size:14px;
+        font-family: var(--font-body);
+        cursor:pointer;
+    }
+    .btn-add-row:disabled{opacity:0.4; cursor:not-allowed;}
+    .row-count{font-size:13px; color: var(--text-dim); font-weight:600;}
+    .btn-save{
+        width:100%;
+        background: transparent;
+        border: 1.5px solid #34e07a;
+        color: #34e07a;
+        padding:13px;
+        border-radius:10px;
+        font-weight:700;
+        font-size:16px;
+        font-family: var(--font-body);
+        cursor:pointer;
+    }
+    .btn-save:disabled{opacity:0.5;}
+    #status{
+        margin-top:14px;
+        font-size:14px;
+        line-height:1.5;
+        white-space:pre-wrap;
+    }
+    .status-ok{color:#34e07a;}
+    .status-warn{color: var(--gold);}
+    .status-err{color: var(--pink);}
+    #gate{
+        text-align:center;
+        padding: 40px 16px;
+        color: var(--text-dim);
+    }
+</style>
+</head>
+<body>
+
+<div id="gate" style="display:none;">
+    <h1>Доступ закрыт</h1>
+    <p>Похоже, ты не проходил проверку пароля в боте. Открой бота и напиши /start.</p>
+</div>
+
+<div id="appRoot" style="display:none;">
+    <h1>🎬 Добавить фильмы</h1>
+    <div id="rows"></div>
+    <div class="controls">
+        <button type="button" class="btn-add-row" id="addRowBtn">➕ Ещё строка</button>
+        <span class="row-count" id="rowCount"></span>
+    </div>
+    <button type="button" class="btn-save" id="saveBtn">Сохранить все</button>
+    <div id="status"></div>
+</div>
+
+<script>
+// ==========================================
+// SUPABASE — те же настройки, что и на сайте
+// ==========================================
+const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
+
+async function sb(path, options = {}) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        ...options,
+        headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+            "Content-Type": "application/json",
+            ...(options.headers || {})
+        }
+    });
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Supabase ${res.status}: ${text}`);
+    }
+    return res.status === 204 ? null : res.json();
+}
+
+const MAX_ROWS = 10;
+const INITIAL_ROWS = 3;
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+let existingTitles = [];   // все строки таблицы "titles" — для проверки дублей и даталистов
+let categories = [];
+let rowSeq = 0;
+
+function norm(s) {
+    return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isDuplicate(row) {
+    return existingTitles.some(t =>
+        norm(t.title) === norm(row.title) &&
+        Number(t.year) === Number(row.year) &&
+        norm(t.category) === norm(row.category) &&
+        norm(t.genre) === norm(row.genre) &&
+        norm(t.franchise || "") === norm(row.franchise || "")
+    );
+}
+
+async function loadCatalog() {
+    existingTitles = await sb("titles?select=title,year,category,genre,franchise");
+    categories = [...new Set(existingTitles.map(t => t.category))]
+        .filter(c => c && !c.includes("Секрет") && !c.includes("🔒") && !c.includes("❤️"))
+        .sort();
+}
+
+function genresFor(category) {
+    return [...new Set(existingTitles.filter(t => t.category === category).map(t => t.genre))].sort();
+}
+function franchisesFor(category, genre) {
+    return [...new Set(
+        existingTitles.filter(t => t.category === category && norm(t.genre) === norm(genre) && t.franchise)
+            .map(t => t.franchise)
+    )].sort();
+}
+
+function rowsContainer() { return document.getElementById("rows"); }
+function currentRows() { return Array.from(rowsContainer().querySelectorAll(".card")); }
+
+function updateChrome() {
+    const rows = currentRows();
+    rows.forEach(r => {
+        r.querySelector(".btn-remove-row").style.visibility = rows.length > 1 ? "visible" : "hidden";
+    });
+    document.getElementById("rowCount").textContent = `${rows.length} / ${MAX_ROWS}`;
+    document.getElementById("addRowBtn").disabled = rows.length >= MAX_ROWS;
+}
+
+function addRow(prefill = {}) {
+    if (currentRows().length >= MAX_ROWS) return;
+    rowSeq++;
+    const id = `row${rowSeq}`;
+    const defaultYear = new Date().getFullYear();
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.rowId = id;
+    card.innerHTML = `
+        <button type="button" class="btn-remove-row" title="Удалить">✕</button>
+        <label class="mobile-label">Название</label>
+        <input type="text" class="rTitle" placeholder="Например: Крик 7" value="${prefill.title || ""}">
+
+        <label class="mobile-label">Год</label>
+        <input type="number" class="rYear" value="${prefill.year || defaultYear}">
+
+        <label class="mobile-label">Категория</label>
+        <select class="rCategory">
+            ${categories.map(c => `<option value="${c}" ${c === prefill.category ? "selected" : ""}>${c}</option>`).join("")}
+        </select>
+
+        <label class="mobile-label">Жанр</label>
+        <input type="text" class="rGenre" list="${id}-genres" placeholder="Например: Ужасы" value="${prefill.genre || ""}">
+        <datalist id="${id}-genres"></datalist>
+
+        <label class="mobile-label">Франшиза (необязательно)</label>
+        <input type="text" class="rFranchise" list="${id}-franchises" placeholder="Необязательно">
+        <datalist id="${id}-franchises"></datalist>
+    `;
+    rowsContainer().appendChild(card);
+
+    const catSel = card.querySelector(".rCategory");
+    const genreInput = card.querySelector(".rGenre");
+    const genreList = card.querySelector(`#${id}-genres`);
+    const franList = card.querySelector(`#${id}-franchises`);
+
+    function refreshGenres() {
+        genreList.innerHTML = genresFor(catSel.value).map(g => `<option value="${g}">`).join("");
+    }
+    function refreshFranchises() {
+        franList.innerHTML = franchisesFor(catSel.value, genreInput.value).map(f => `<option value="${f}">`).join("");
+    }
+    catSel.addEventListener("change", () => { refreshGenres(); genreInput.value = ""; refreshFranchises(); });
+    genreInput.addEventListener("input", refreshFranchises);
+    card.querySelector(".btn-remove-row").addEventListener("click", () => { card.remove(); updateChrome(); });
+
+    refreshGenres();
+    refreshFranchises();
+    updateChrome();
+}
+
+function readRow(card) {
+    let franchise = card.querySelector(".rFranchise").value.trim();
+    return {
+        title: card.querySelector(".rTitle").value.trim(),
+        year: parseInt(card.querySelector(".rYear").value, 10),
+        category: card.querySelector(".rCategory").value,
+        genre: card.querySelector(".rGenre").value.trim(),
+        franchise: franchise === "" ? null : franchise
+    };
+}
+
+function setStatus(text, cls) {
+    const el = document.getElementById("status");
+    el.textContent = text;
+    el.className = cls || "";
+}
+
+async function handleSave() {
+    const saveBtn = document.getElementById("saveBtn");
+    const rows = currentRows().map(readRow).filter(r => r.title !== "");
+
+    if (rows.length === 0) {
+        setStatus("Заполни хотя бы одно название.", "status-err");
+        return;
+    }
+    for (const r of rows) {
+        if (!r.year || !r.category || !r.genre) {
+            setStatus(`Проверь строку "${r.title}" — не хватает года, категории или жанра.`, "status-err");
+            return;
+        }
+    }
+
+    // Отсеиваем дубли — как между собой в пределах формы, так и с тем,
+    // что уже лежит в базе (тайтл считается тем же, если совпадают
+    // название+год+категория+жанр+франшиза; id может быть любым).
+    const toInsert = [];
+    const duplicates = [];
+    const seenInForm = [];
+
+    for (const r of rows) {
+        const dupInDb = isDuplicate(r);
+        const dupInForm = seenInForm.some(s =>
+            norm(s.title) === norm(r.title) && s.year === r.year &&
+            norm(s.category) === norm(r.category) && norm(s.genre) === norm(r.genre) &&
+            norm(s.franchise || "") === norm(r.franchise || "")
+        );
+        if (dupInDb || dupInForm) {
+            duplicates.push(r.title);
+        } else {
+            toInsert.push(r);
+            seenInForm.push(r);
+        }
+    }
+
+    if (toInsert.length === 0) {
+        setStatus(`Все строки уже есть в базе (дубли): ${duplicates.join(", ")}`, "status-warn");
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Сохраняем…";
+
+    try {
+        await sb("titles", { method: "POST", body: JSON.stringify(toInsert) });
+        await loadCatalog();
+
+        let msg = `Добавлено: ${toInsert.length} — ${toInsert.map(r => r.title).join(", ")}`;
+        if (duplicates.length) msg += `\n\nПропущено как дубли: ${duplicates.join(", ")}`;
+        setStatus(msg, "status-ok");
+
+        rowsContainer().innerHTML = "";
+        for (let i = 0; i < INITIAL_ROWS; i++) addRow();
+
+        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+    } catch (e) {
+        setStatus("Ошибка сохранения: " + e.message, "status-err");
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Сохранить все";
+    }
+}
+
+async function init() {
+    // Доступ разрешён только тем, кто уже прошёл проверку пароля в боте
+    // (их Telegram ID сохранён в таблице bot_authorized_users).
+    const userId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id;
+
+    if (!userId) {
+        document.getElementById("gate").style.display = "block";
+        return;
+    }
+
+    let authorized = false;
+    try {
+        const rows = await sb(`bot_authorized_users?user_id=eq.${userId}&select=user_id`);
+        authorized = rows.length > 0;
+    } catch (e) {
+        setStatus("Не удалось проверить доступ: " + e.message, "status-err");
+    }
+
+    if (!authorized) {
+        document.getElementById("gate").style.display = "block";
+        return;
+    }
+
+    document.getElementById("appRoot").style.display = "block";
+    await loadCatalog();
+    for (let i = 0; i < INITIAL_ROWS; i++) addRow();
+
+    document.getElementById("addRowBtn").addEventListener("click", () => {
+        const rows = currentRows();
+        const last = rows[rows.length - 1];
+        const prefill = last ? { category: last.querySelector(".rCategory").value, year: last.querySelector(".rYear").value } : {};
+        addRow(prefill);
+    });
+    document.getElementById("saveBtn").addEventListener("click", handleSave);
+}
+
+init();
+</script>
+</body>
+</html>
