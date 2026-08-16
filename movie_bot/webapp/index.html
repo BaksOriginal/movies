@@ -160,26 +160,34 @@
 
 <script>
 // ==========================================
-// SUPABASE — те же настройки, что и на сайте
+// API — мини-апп больше НЕ ходит в Supabase напрямую (без ключей в
+// браузере). Всё идёт через свой же серверлесс-эндпоинт api/catalog.py,
+// который проверяет подпись initData и сам обращается к Supabase
+// service_role-ключом. Если index.html лежит не на том же домене, что
+// и Vercel-функции — замените на полный https-адрес.
 // ==========================================
-const SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE";
+const CATALOG_API_URL = "/api/catalog";
 
-async function sb(path, options = {}) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-        ...options,
-        headers: {
-            "apikey": SUPABASE_ANON_KEY,
-            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-            "Content-Type": "application/json",
-            ...(options.headers || {})
-        }
+async function apiGetCatalog(initData) {
+    const res = await fetch(`${CATALOG_API_URL}?initData=${encodeURIComponent(initData)}`);
+    if (res.status === 403) return { unauthorized: true };
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`API ${res.status}: ${text}`);
+    }
+    return { rows: await res.json() };
+}
+
+async function apiInsertTitles(initData, rows) {
+    const res = await fetch(CATALOG_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, rows })
     });
     if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(`Supabase ${res.status}: ${text}`);
+        throw new Error(`API ${res.status}: ${text}`);
     }
-    return res.status === 204 ? null : res.json();
 }
 
 const MAX_ROWS = 10;
@@ -205,11 +213,19 @@ function isDuplicate(row) {
     );
 }
 
-async function loadCatalog() {
-    existingTitles = await sb("titles?select=title,year,category,genre,franchise");
+// Возвращает "unauthorized" вместо бросания исключения — вызывающий
+// код (init) сам решает, показать ли экран "доступ закрыт" или ошибку.
+async function loadCatalog(initData) {
+    const result = await apiGetCatalog(initData);
+    if (result.unauthorized) return "unauthorized";
+
+    existingTitles = result.rows;
+    console.log(`[loadCatalog] получено строк: ${existingTitles.length}`, existingTitles.slice(0, 3));
     categories = [...new Set(existingTitles.map(t => t.category))]
         .filter(c => c && !c.includes("Секрет") && !c.includes("🔒") && !c.includes("❤️"))
         .sort();
+    console.log(`[loadCatalog] категорий после фильтра: ${categories.length}`, categories);
+    return "ok";
 }
 
 function genresFor(category) {
@@ -349,8 +365,8 @@ async function handleSave() {
     saveBtn.textContent = "Сохраняем…";
 
     try {
-        await sb("titles", { method: "POST", body: JSON.stringify(toInsert) });
-        await loadCatalog();
+        await apiInsertTitles(tg.initData, toInsert);
+        await loadCatalog(tg.initData);
 
         let msg = `Добавлено: ${toInsert.length} — ${toInsert.map(r => r.title).join(", ")}`;
         if (duplicates.length) msg += `\n\nПропущено как дубли: ${duplicates.join(", ")}`;
@@ -369,31 +385,45 @@ async function handleSave() {
 }
 
 async function init() {
-    // Доступ разрешён только тем, кто уже прошёл проверку пароля в боте
-    // (их Telegram ID сохранён в таблице bot_authorized_users).
-    const userId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id;
-
-    if (!userId) {
+    // initData (подписанная строка) — не initDataUnsafe! Сервер сам
+    // проверит подпись и достанет из неё настоящий user_id; то, что
+    // лежит в initDataUnsafe в браузере, можно подделать в devtools,
+    // поэтому клиент им для решений об авторизации больше не пользуется.
+    if (!tg || !tg.initData) {
         document.getElementById("gate").style.display = "block";
         return;
     }
 
-    let authorized = false;
+    let outcome;
     try {
-        const rows = await sb(`bot_authorized_users?user_id=eq.${userId}&select=user_id`);
-        authorized = rows.length > 0;
+        outcome = await loadCatalog(tg.initData);
     } catch (e) {
-        setStatus("Не удалось проверить доступ: " + e.message, "status-err");
+        console.error("[loadCatalog] ошибка:", e);
+        document.getElementById("appRoot").style.display = "block";
+        setStatus("Не удалось загрузить каталог: " + e.message, "status-err");
+        for (let i = 0; i < INITIAL_ROWS; i++) addRow();
+        wireControls();
+        return;
     }
 
-    if (!authorized) {
+    if (outcome === "unauthorized") {
         document.getElementById("gate").style.display = "block";
         return;
     }
 
     document.getElementById("appRoot").style.display = "block";
-    await loadCatalog();
+    if (existingTitles.length === 0) {
+        // Запрос прошёл успешно, но вернул 0 тайтлов — либо таблица titles
+        // правда пуста, либо что-то не так на сервере (проверьте логи
+        // функции api/catalog в Vercel).
+        setStatus("Каталог загрузился, но база вернула 0 тайтлов — категории/жанры/франшизы пусты.", "status-warn");
+    }
+
     for (let i = 0; i < INITIAL_ROWS; i++) addRow();
+    wireControls();
+}
+
+function wireControls() {
 
     document.getElementById("addRowBtn").addEventListener("click", () => {
         const rows = currentRows();
