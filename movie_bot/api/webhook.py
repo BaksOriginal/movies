@@ -83,8 +83,7 @@ def save_authorized(user_id: int, username: str | None) -> None:
 def send_menu(chat_id: int) -> None:
     tg_send_message(
         chat_id,
-        "Доступ подтверждён ✅\n\nЖми кнопку ниже, чтобы открыть форму добавления фильмов "
-        "(до 10 строк за раз, как на сайте).",
+        "Жми на кнопочку ниже",
         webapp_keyboard(),
     )
 
@@ -105,7 +104,7 @@ def process_update(update: dict) -> None:
         elif text == "/add":
             tg_send_message(chat_id, "Сначала введи пароль. Набери /start.")
         else:
-            tg_send_message(chat_id, "Привет! 🔒 Это приватный бот для добавления фильмов.\nВведи пароль:")
+            tg_send_message(chat_id, "Это приватный бот!\nВведи пароль:")
         return
 
     if is_authorized(user_id):
@@ -114,10 +113,10 @@ def process_update(update: dict) -> None:
 
     if text in VALID_PASSWORDS:
         save_authorized(user_id, user.get("username"))
-        tg_send_message(chat_id, "Пароль верный! Доступ открыт навсегда. ✅")
+        tg_send_message(chat_id, "Доступ разрешен!")
         send_menu(chat_id)
     else:
-        tg_send_message(chat_id, "Неверный пароль. Попробуй ещё раз:")
+        tg_send_message(chat_id, "Неверный пароль!")
 
 
 class handler(BaseHTTPRequestHandler):
