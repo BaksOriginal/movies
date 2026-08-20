@@ -415,6 +415,19 @@ let watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0
 let watchPartyPartnerPresence = null; // Последнее известное состояние партнёра (из Presence)
 let watchPartyPartnerOnline = false;
 let watchPartyLeaveTimer = null; // Отложенная проверка "партнёр правда вышел" (см. initWatchPartyChannel)
+// Счётчик неудачных попыток переподключения канала подряд. Раньше при
+// заблокированном на уровне сети WebSocket (адблокер/антивирус с SSL-
+// инспекцией/VPN) канал пересоздавался каждые 2 сек БЕСКОНЕЧНО — сам по
+// себе это было не страшно, но частые мгновенные обрывы хендшейка
+// ("WebSocket is closed before the connection is established") — известный
+// триггер бага внутри клиентской библиотеки supabase-js/realtime-js, из-за
+// которого её собственный внутренний таймер переподключения рекурсивно
+// вызывает сам себя и в итоге роняет вкладку в "RangeError: Maximum call
+// stack size exceeded". Ограничиваем количество автоматических попыток и
+// после исчерпания лимита останавливаемся и явно показываем ошибку вместо
+// того, чтобы продолжать долбиться в стену.
+let watchPartyReconnectAttempts = 0;
+const WP_MAX_RECONNECT_ATTEMPTS = 5;
 let watchPartyChatMessages = []; // Сообщения чата совместного просмотра (своя таблица watch_party_messages)
 let watchPartyChatReplyTarget = null; // Сообщение, на которое сейчас отвечаем в чате совместного просмотра
 let watchPartyChatPollInterval = null; // Подстраховка на случай проблем с realtime (как у обычного чата)
@@ -1678,6 +1691,7 @@ async function showHome() {
     history = [];
     categoryHistory = [];
     currentCategoryName = null;
+    gameLaunchedFromPautinka = false;
     await loadCatalogFromDB();
     
     let nav = document.querySelector(".navigation");
@@ -3019,6 +3033,12 @@ function leavePautinka() {
 // Паутинку, а не перескакивать сразу к тому, что было открыто до неё.
 const PAUTINKA_HISTORY_MARKER = Symbol("pautinka");
 
+// Если true — текущая игра была запущена узлом-игрой прямо из Паутинки
+// (в обход обычного экрана "🕹 Игры"), и кнопка "⬅" внутри игры должна
+// возвращать в Паутинку, а не в список игр. Сбрасывается при любом обычном
+// заходе в раздел игр (showGamesScreen) и на главном экране (showHome).
+let gameLaunchedFromPautinka = false;
+
 // Главная функция режима "Паутинка".
 // fromHistory=true — Паутинка перерисовывается при возврате кнопкой "Назад"
 // (то есть её отметка уже лежит в history/categoryHistory, повторно
@@ -3307,6 +3327,7 @@ async function showPautinka(fromHistory = false) {
                 const game = PAUTINKA_GAMES.find(g2 => g2.key === meta.gameKey);
                 if (game) {
                     leavePautinka();
+                    gameLaunchedFromPautinka = true;
                     game.launch();
                 }
             }
@@ -4572,6 +4593,7 @@ function initWatchPartyChannel() {
             if (watchPartyChannel !== channel) return;
 
             if (status === "SUBSCRIBED") {
+                watchPartyReconnectAttempts = 0; // подключение реально удалось — счётчик неудач обнуляем
                 await trackWPPresence();
                 updateWPPresenceUI();
             } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
@@ -4579,13 +4601,22 @@ function initWatchPartyChannel() {
                 // судя по логам ("Realtime send() is automatically falling back
                 // to REST API"), сокет периодически рвётся, и без пересоздания
                 // канала play/pause/seek у партнёров тихо перестают долетать
-                // друг до друга. Пересобираем канал через пару секунд.
+                // друг до друга. Пересобираем канал через паузу с нарастающей
+                // задержкой (2с, 4с, 6с...) — резкие мгновенные повторы именно
+                // на заблокированном WebSocket и провоцируют внутренний баг
+                // supabase-js со стек-оверфлоу (см. комментарий у объявления
+                // watchPartyReconnectAttempts).
                 console.error("Канал совместного просмотра отвалился со статусом:", status);
                 db.removeChannel(channel);
                 watchPartyChannel = null;
-                if (isWatchPartyScreenOpen) {
-                    setTimeout(() => { if (isWatchPartyScreenOpen) initWatchPartyChannel(); }, 2000);
+                watchPartyReconnectAttempts++;
+                if (!isWatchPartyScreenOpen) return;
+                if (watchPartyReconnectAttempts > WP_MAX_RECONNECT_ATTEMPTS) {
+                    showWPConnectionFailed();
+                    return;
                 }
+                const delay = 2000 * watchPartyReconnectAttempts;
+                setTimeout(() => { if (isWatchPartyScreenOpen) initWatchPartyChannel(); }, delay);
             }
         });
 
@@ -4620,9 +4651,38 @@ function leaveWatchPartyScreen() {
     watchPartyPartnerPresence = null;
     watchPartyPartnerOnline = false;
     watchPartyChatReplyTarget = null;
+    watchPartyReconnectAttempts = 0; // следующий заход в экран получает чистый лимит попыток
 }
 
 // ---------- Мелкие UI-хелперы экрана ----------
+// Показывается, когда WebSocket-канал не смог подключиться WP_MAX_RECONNECT_ATTEMPTS
+// раз подряд — обычно значит, что соединение блокируется на этом устройстве/
+// сети (адблокер, антивирус с проверкой HTTPS, VPN или корпоративный
+// файрвол), а не что сам сайт сломан. Даёт понятную причину вместо вечного
+// "Подключаемся..." и кнопку, чтобы попробовать ещё раз вручную (например,
+// после отключения блокировщика), не перезагружая страницу целиком.
+function showWPConnectionFailed() {
+    const bar = document.getElementById("watchPartyStatusBar");
+    if (!bar) return;
+    bar.innerHTML = '';
+    const dot = document.createElement("span");
+    dot.className = "wp-status-dot wp-offline";
+    bar.appendChild(dot);
+    bar.appendChild(document.createTextNode(
+        " Не удалось подключить синхронизацию — похоже, соединение блокируется (адблокер, антивирус или VPN на этом устройстве). "
+    ));
+    const retryBtn = document.createElement("button");
+    retryBtn.type = "button";
+    retryBtn.className = "wp-status-retry-btn";
+    retryBtn.textContent = "🔄 Попробовать снова";
+    retryBtn.onclick = () => {
+        watchPartyReconnectAttempts = 0;
+        bar.innerHTML = '<span class="wp-status-dot wp-offline"></span> Подключаемся...';
+        initWatchPartyChannel();
+    };
+    bar.appendChild(retryBtn);
+}
+
 function renderWPStatusBar() {
     const bar = document.getElementById("watchPartyStatusBar");
     if (bar) {
@@ -5059,7 +5119,25 @@ function updateWatchPartyRemoteMedia() {
         video.srcObject = watchPartyRemoteStream;
     }
     if (watchPartyRemoteStream && watchPartyRemoteStream.getTracks().length) {
-        video.play().catch(() => {});
+        // video.srcObject приходит из RTCPeerConnection.ontrack — а это
+        // срабатывает уже ПОСЛЕ обмена сигналами, то есть вне синхронного
+        // контекста клика по кнопке микро/камеры. Android Chrome в таком
+        // случае считает, что "недавнего" пользовательского жеста не было,
+        // и молча блокирует play() для элемента со звуковой дорожкой —
+        // получаем постоянный чёрный экран вместо видео партнёра. Safari/iOS
+        // делает исключение для потоков WebRTC, поэтому там всё работало.
+        // Обходим стандартным способом: если запуск "как есть" не удался,
+        // на мгновение заглушаем звук (autoplay muted-видео разрешён везде
+        // без всяких жестов) и снимаем mute сразу после того, как
+        // воспроизведение реально стартовало — это уже не требует нового
+        // жеста, так как проигрывание уже идёт.
+        const playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch(() => {
+                video.muted = true;
+                video.play().then(() => { video.muted = false; }).catch(() => {});
+            });
+        }
     }
 
     // Видимость держим на явном сигнале от партнёра (media-state), а не на
@@ -7139,8 +7217,13 @@ function setGamesNav(showBackToMenu) {
 
     if (showBackToMenu) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅ Игры";
-        backBtn.onclick = () => showGamesScreen();
+        if (gameLaunchedFromPautinka) {
+            backBtn.textContent = "⬅ Паутинка";
+            backBtn.onclick = () => showPautinka(true);
+        } else {
+            backBtn.textContent = "⬅ Игры";
+            backBtn.onclick = () => showGamesScreen();
+        }
         nav.appendChild(backBtn);
     }
 
@@ -7262,6 +7345,7 @@ async function showGamesScreen() {
         activeGameCleanup = null;
     }
     currentCategoryName = null;
+    gameLaunchedFromPautinka = false;
 
     app.innerHTML = "";
 
