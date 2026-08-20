@@ -1064,7 +1064,11 @@ body.batch-add-screen-active .container {
     }
     .batch-row {
         grid-template-columns: 1fr 1fr;
-        padding: 12px 10px;
+        /* Увеличенный верхний отступ освобождает место под абсолютно
+           спозиционированную кнопку .btn-remove-row (top:10px, высота 32px),
+           иначе она перекрывает поле "Название" (первое поле, растянутое
+           на всю ширину карточки) */
+        padding: 46px 10px 12px;
         border: 1px solid var(--line);
         border-radius: 12px;
         position: relative;
@@ -1289,6 +1293,7 @@ body.batch-add-screen-active .container {
 .wp-status-bar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     font-size: 13px;
     color: var(--text-dim);
@@ -1297,6 +1302,25 @@ body.batch-add-screen-active .container {
     background: var(--panel-2);
     border: 1px solid var(--line);
     border-radius: 16px;
+}
+
+.wp-status-retry-btn {
+    background: transparent;
+    border: 1.5px solid var(--pink);
+    color: var(--pink);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-weight: 700;
+    font-size: 12px;
+    font-family: var(--font-body);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.wp-status-retry-btn:hover {
+    box-shadow: 0 0 12px rgba(255,46,147,0.35);
+}
+.wp-status-retry-btn:active {
+    transform: scale(0.96);
 }
 
 .wp-status-dot {
