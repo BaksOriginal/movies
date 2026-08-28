@@ -447,6 +447,50 @@ button:active{
     touch-action: none; /* чтобы жест "царапания" не скроллил страницу на телефоне */
 }
 
+/* ===== Плашка "Разработчик" внутри "Секрета" — вместо скретч-карточки ===== */
+/* Крупное фото-постер на всю ширину карточки (примерно пол-экрана по высоте
+   на телефонах), подпись — плашкой поверх низа фото с затемнением, как на
+   постере, а не мини-аватарка сбоку от текста. */
+.dev-plaque{
+    display: block;
+    padding: 0 !important;
+    overflow: hidden;
+    position: relative;
+    cursor: default;
+
+    /* золотая тема — как у .secret-scratch-card рядом */
+    border-color: rgba(255, 205, 130, 0.55);
+    box-shadow:
+        0 6px 18px rgba(0,0,0,0.4),
+        0 0 14px rgba(255, 190, 110, 0.22);
+}
+.dev-plaque:hover{
+    border-color: rgba(255, 205, 130, 0.85);
+    box-shadow:
+        0 6px 18px rgba(0,0,0,0.4),
+        0 0 20px rgba(255, 190, 110, 0.32);
+}
+
+.dev-plaque-photo{
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: inherit;
+}
+
+.dev-plaque-text{
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 22px 18px 16px;
+    background: linear-gradient(to top, rgba(10,6,19,0.95) 20%, rgba(10,6,19,0.6) 60%, rgba(10,6,19,0) 100%);
+    color: #ffd782;
+    text-shadow: 0 0 10px rgba(255, 190, 120, 0.5);
+    font-weight: 700;
+    font-size: 19px;
+    line-height: 1.3;
+    text-align: center;
+}
+
 
 
 /* Задержки только для кнопок */
@@ -863,6 +907,39 @@ button:nth-child(6){
     border-color: var(--cyan);
     box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
 }
+
+/* Текстовое поле модалки "Рандомайзер" */
+.randomizer-textarea {
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 15px;
+    width: 100%;
+    min-height: 90px;
+    box-sizing: border-box;
+    background: var(--panel-deep);
+    color: var(--text);
+    font-family: var(--font-body);
+    resize: vertical;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.randomizer-textarea:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
+}
+.randomizer-result {
+    min-height: 26px;
+    text-align: center;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-dim);
+}
+.randomizer-result.randomizer-result-hit {
+    color: var(--gold);
+    text-shadow: 0 0 12px rgba(255,209,92,0.5);
+    animation: modalPopIn 0.3s cubic-bezier(0.22, 0.9, 0.32, 1.28) both;
+}
 .modal-buttons {
     display: flex;
     gap: 10px;
@@ -1064,11 +1141,12 @@ body.batch-add-screen-active .container {
     }
     .batch-row {
         grid-template-columns: 1fr 1fr;
-        /* Увеличенный верхний отступ освобождает место под абсолютно
-           спозиционированную кнопку .btn-remove-row (top:10px, высота 32px),
-           иначе она перекрывает поле "Название" (первое поле, растянутое
-           на всю ширину карточки) */
-        padding: 46px 10px 12px;
+        /* Стиль и отступы — как у .card/.btn-remove-row в мини-приложении
+           "Добавить фильмы" (index.html): кнопка занимает угол карточки
+           (30x30, top/right 12px), а верхний паддинг карточки заметно
+           больше её нижней границы (12+30=42px), так что поле "Название"
+           начинается уже ПОСЛЕ кнопки и не перекрывается текстовым полем. */
+        padding: 52px 12px 14px;
         border: 1px solid var(--line);
         border-radius: 12px;
         position: relative;
@@ -1091,8 +1169,10 @@ body.batch-add-screen-active .container {
     }
     .btn-remove-row {
         position: absolute;
-        top: 10px;
-        right: 10px;
+        top: 12px;
+        right: 12px;
+        width: 30px;
+        height: 30px;
     }
     .batch-rows {
         max-height: 55vh;
@@ -1229,6 +1309,24 @@ body.batch-add-screen-active .container {
 }
 
 .btn-secret-gold:active {
+    filter: brightness(0.92);
+}
+
+/* Кнопка "Рандомайзер" — неоновый циан, живёт сразу под кнопкой(ами) Секрета */
+.btn-randomizer-cyan {
+    background: transparent !important;
+    border: 1.5px solid var(--cyan) !important;
+    color: var(--cyan) !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4), var(--glow-cyan) !important;
+    animation: fadeUp 0.35s ease both !important;
+    text-shadow: 0 0 10px rgba(46,232,255,0.5);
+}
+
+.btn-randomizer-cyan:hover {
+    box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 28px rgba(46,232,255,0.55) !important;
+}
+
+.btn-randomizer-cyan:active {
     filter: brightness(0.92);
 }
 
