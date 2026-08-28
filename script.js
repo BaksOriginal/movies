@@ -1920,12 +1920,12 @@ function showRandomizerModal() {
                     id="randomizerInput"
                     class="randomizer-textarea"
                     rows="4"
-                    placeholder="Введите позиции через запятую, например: чипсы, напиток, печенье"
+                    placeholder="Позиции через запятую, например: чипсы, напиток, печенье"
                 ></textarea>
                 <div id="randomizerResult" class="randomizer-result"></div>
             </div>
             <div class="modal-buttons">
-                <button type="button" class="btn-save" id="randomizerPickBtn">🎲 Рандомайзер</button>
+                <button type="button" class="btn-save" id="randomizerPickBtn">🎲 Рандом</button>
                 <button type="button" class="btn-cancel" id="randomizerCloseBtn">Закрыть</button>
             </div>
         </div>
@@ -1946,7 +1946,7 @@ function showRandomizerModal() {
 
         if (items.length === 0) {
             resultEl.classList.remove("randomizer-result-hit");
-            resultEl.textContent = "Сначала введи хотя бы одну позицию через запятую.";
+            resultEl.textContent = "Сначала введи хотя бы одну позицию через запятую";
             return;
         }
 
