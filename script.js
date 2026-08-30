@@ -407,6 +407,17 @@ let currentWatchedBucket = null; // null | 'top' | 'mine' | 'partner' | 'both'
 let isWishlistScreenOpen = false;
 
 // ==========================================
+// КАЛЕНДАРЬ ПРОСМОТРОВ ("Запланировать" на дату)
+// ==========================================
+// Требуется таблица public.scheduled_items в Supabase — см. SQL-инструкцию
+// в комментарии перед loadScheduledFromDB() ниже.
+let isCalendarScreenOpen = false;
+let scheduledByTitle = {}; // "Название (год)" -> "YYYY-MM-DD" (дата, на которую запланирован просмотр)
+let scheduledByDate = {};  // "YYYY-MM-DD" -> ["Название (год)", ...] — производное от scheduledByTitle
+let calendarViewYear = null;  // Год открытого сейчас месяца в календаре (null = ещё не открывался)
+let calendarViewMonth = null; // Месяц открытого сейчас месяца, 0-индексация (январь = 0)
+
+// ==========================================
 // Состояние совместного просмотра (Watch Party)
 // ==========================================
 // Синхронизация построена на Supabase Realtime: канал с двумя механизмами —
@@ -562,8 +573,15 @@ db.auth.onAuthStateChange(async (event, session) => {
         // при самом первом открытии страницы.
         const wasAlreadyInitialized = isAppInitialized;
         isAppInitialized = true;
+
+        // Чистим прошедшие дни календаря из БД — только на новый заход в
+        // приложение, а не на каждое фоновое обновление токена/вкладки.
+        // Идёт фоном, не блокируя загрузку остальных данных.
+        if (!wasAlreadyInitialized) {
+            cleanupPastScheduledItems();
+        }
         
-        // Загружаем списки просмотренного, вишлиста и оценок одним запросом
+        // Загружаем списки просмотренного, вишлиста, оценок и календаря одним запросом
         loadUserDataFromDB().then(() => {
             subscribeToChanges(); 
             
@@ -587,7 +605,10 @@ db.auth.onAuthStateChange(async (event, session) => {
         wishlistTitles.clear();
         ratingsData = {};
         chatMessages = [];
+        scheduledByTitle = {};
+        scheduledByDate = {};
         isChatScreenOpen = false;
+        isCalendarScreenOpen = false;
         isAppInitialized = false;
         saveSessionBackup(null);
         
@@ -735,6 +756,152 @@ async function loadWishlistFromDB() {
     wishlistTitles = new Set(data.map(item => item.title));
 }
 
+// ==========================================
+// КАЛЕНДАРЬ ПРОСМОТРОВ
+// ==========================================
+// Требуется таблица public.scheduled_items в Supabase. Выполните один раз
+// в SQL Editor вашего проекта:
+//
+//   create table if not exists public.scheduled_items (
+//     id bigint generated always as identity primary key,
+//     user_id uuid not null references auth.users(id) on delete cascade,
+//     title text not null unique,
+//     scheduled_date date not null,
+//     created_at timestamptz not null default now()
+//   );
+//
+//   alter table public.scheduled_items enable row level security;
+//
+//   create policy "scheduled_items_select" on public.scheduled_items
+//     for select using (true);
+//   create policy "scheduled_items_insert" on public.scheduled_items
+//     for insert with check (true);
+//   create policy "scheduled_items_update" on public.scheduled_items
+//     for update using (true);
+//   create policy "scheduled_items_delete" on public.scheduled_items
+//     for delete using (true);
+//
+//   alter publication supabase_realtime add table public.scheduled_items;
+//
+// title сделан UNIQUE — у одного тайтла может быть только одна активная
+// запланированная дата одновременно; "перенос" на другой день — это просто
+// UPSERT той же строки с новой датой.
+
+// Локальная (не UTC) дата в формате "YYYY-MM-DD" — важно для правильной
+// границы "сегодня/прошлое" в часовом поясе самого пользователя, а не UTC.
+function toDateKey(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function todayDateKey() {
+    return toDateKey(new Date());
+}
+
+function parseDateKey(dateKey) {
+    const [y, m, d] = dateKey.split("-").map(Number);
+    return new Date(y, m - 1, d);
+}
+
+function capitalizeFirst(text) {
+    if (!text) return text;
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// Короткая дата для кнопки в модалке звёздочки, напр. "05.09.26"
+function formatScheduledDateShort(dateKey) {
+    return parseDateKey(dateKey).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
+// Полная дата для заголовка модалки дня, напр. "5 сентября 2026"
+function formatScheduledDateHuman(dateKey) {
+    return capitalizeFirst(parseDateKey(dateKey).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }));
+}
+
+// Пересчитывает scheduledByDate (дата -> список тайтлов) на основе
+// scheduledByTitle (тайтл -> дата). Вызывать после любого изменения
+// scheduledByTitle, как recomputeWatchedBuckets() для просмотренного.
+function recomputeScheduledByDate() {
+    scheduledByDate = {};
+    for (const t in scheduledByTitle) {
+        const key = scheduledByTitle[t];
+        if (!scheduledByDate[key]) scheduledByDate[key] = [];
+        scheduledByDate[key].push(t);
+    }
+    for (const key in scheduledByDate) {
+        scheduledByDate[key].sort((a, b) => a.localeCompare(b, "ru"));
+    }
+}
+
+// Загрузка календаря запланированных просмотров
+async function loadScheduledFromDB() {
+    if (!currentUser) return;
+    const { data, error } = await db.from('scheduled_items').select('title, scheduled_date');
+    if (error) {
+        console.error("Ошибка при загрузке календаря просмотров:", error);
+        return;
+    }
+    const temp = {};
+    data.forEach(row => { temp[row.title] = row.scheduled_date; });
+    scheduledByTitle = temp;
+    recomputeScheduledByDate();
+}
+
+// Ставит/переносит дату просмотра для тайтла (UPSERT по уникальному title —
+// если тайтл уже был запланирован на другую дату, просто переезжает на новую)
+async function scheduleTitle(title, dateKey) {
+    if (!currentUser) return;
+
+    const previousDate = scheduledByTitle[title];
+    scheduledByTitle[title] = dateKey;
+    recomputeScheduledByDate();
+    refreshUIFromState();
+
+    const { error } = await db.from('scheduled_items')
+        .upsert({ user_id: currentUser.id, title: title, scheduled_date: dateKey }, { onConflict: 'title' });
+
+    if (error) {
+        console.error("Ошибка при сохранении даты просмотра:", error);
+        if (previousDate) { scheduledByTitle[title] = previousDate; } else { delete scheduledByTitle[title]; }
+        recomputeScheduledByDate();
+        refreshUIFromState();
+        alert("Не удалось сохранить дату просмотра.");
+    }
+}
+
+// Убирает тайтл из календаря совсем (без переноса и без отметки просмотренным)
+async function removeScheduledTitle(title) {
+    if (!currentUser) return;
+
+    const previousDate = scheduledByTitle[title];
+    if (!previousDate) return;
+    delete scheduledByTitle[title];
+    recomputeScheduledByDate();
+    refreshUIFromState();
+
+    const { error } = await db.from('scheduled_items').delete().eq('title', title);
+    if (error) {
+        console.error("Ошибка при удалении из календаря:", error);
+        scheduledByTitle[title] = previousDate;
+        recomputeScheduledByDate();
+        refreshUIFromState();
+    }
+}
+
+// Чистит уже прошедшие дни из БД, чтобы таблица не росла бесконечно старыми
+// записями (дни в прошлом всё равно никогда не подсвечиваются и не кликабельны
+// в календаре). Вызывается один раз при каждом новом заходе в приложение —
+// не при каждом мягком обновлении токена/вкладки.
+async function cleanupPastScheduledItems() {
+    const todayKey = todayDateKey();
+    const { error } = await db.from('scheduled_items').delete().lt('scheduled_date', todayKey);
+    if (error) {
+        console.error("Ошибка при очистке прошедших дней календаря:", error);
+    }
+}
+
 // Проверка: относится ли категория к "секретным" (исключаются из фильтров и поиска)
 function isSecretCategory(catKey) {
     return catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️");
@@ -762,7 +929,7 @@ async function loadRatingsFromDB() {
 // Поэтому теперь всегда идём напрямую, тремя параллельными запросами.
 async function loadUserDataFromDB() {
     if (!currentUser) return;
-    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB()]);
+    await Promise.all([loadWatchedFromDB(), loadWishlistFromDB(), loadRatingsFromDB(), loadScheduledFromDB()]);
 }
 
 // В системе всего 2 пользователя — сопоставляем email с красивым именем
@@ -861,6 +1028,12 @@ function subscribeToChanges() {
         .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'ratings' },
+            () => { updateUIOnLiveChange(); }
+        )
+        // Следим за календарём запланированных просмотров
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'scheduled_items' },
             () => { updateUIOnLiveChange(); }
         )
         // Следим за чатом (отдельно от каталога, поиск это не затрагивает)
@@ -963,6 +1136,8 @@ function refreshUIFromState() {
         renderWatchedBucket(currentWatchedBucket);
     } else if (isWishlistScreenOpen) {
         renderWishlistFolder();
+    } else if (isCalendarScreenOpen) {
+        renderCalendarScreen();
     }
 }
 
@@ -995,6 +1170,16 @@ async function markWatched(title, forBoth) {
         wishlistTitles.delete(title);
         db.from('wishlist_items').delete().eq('title', title).then(({ error }) => {
             if (error) console.error("Не удалось убрать из вишлиста при отметке просмотренного:", error);
+        });
+    }
+
+    // Если тайтл был запланирован в календаре — просмотренное снимает его
+    // оттуда тоже (нет смысла держать в планах то, что уже посмотрели)
+    if (scheduledByTitle.hasOwnProperty(title)) {
+        delete scheduledByTitle[title];
+        recomputeScheduledByDate();
+        db.from('scheduled_items').delete().eq('title', title).then(({ error }) => {
+            if (error) console.error("Не удалось убрать из календаря при отметке просмотренного:", error);
         });
     }
 
@@ -1070,6 +1255,14 @@ function showStarChoiceModal(title) {
         optionsHtml += `<button id="choiceWish" class="btn-pink-style">🍿 Будем смотреть</button>`;
     }
 
+    const scheduledDate = scheduledByTitle[title];
+    if (scheduledDate) {
+        optionsHtml += `<button id="choiceReschedule" class="btn-pink-style">🗓️ Перенести (сейчас: ${formatScheduledDateShort(scheduledDate)})</button>`;
+        optionsHtml += `<button id="choiceRemoveSchedule" class="btn-pink-style">❌ Убрать из календаря</button>`;
+    } else {
+        optionsHtml += `<button id="choiceSchedule" class="btn-pink-style">🗓️ Запланировать</button>`;
+    }
+
     optionsHtml += `<button id="choiceRate" class="btn-pink-style">⭐ Оценить</button>`;
     optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
 
@@ -1118,6 +1311,22 @@ function showStarChoiceModal(title) {
         };
     }
 
+    const scheduleBtn = document.getElementById("choiceSchedule") || document.getElementById("choiceReschedule");
+    if (scheduleBtn) {
+        scheduleBtn.onclick = () => {
+            overlay.remove();
+            showScheduleDateModal(title);
+        };
+    }
+
+    const removeScheduleBtn = document.getElementById("choiceRemoveSchedule");
+    if (removeScheduleBtn) {
+        removeScheduleBtn.onclick = () => {
+            overlay.remove();
+            removeScheduledTitle(title);
+        };
+    }
+
     const watchMeBtn = document.getElementById("choiceWatchMe");
     if (watchMeBtn) {
         watchMeBtn.onclick = () => {
@@ -1141,6 +1350,47 @@ function showStarChoiceModal(title) {
 
     document.getElementById("choiceCancel").onclick = () => {
         overlay.remove();
+    };
+}
+
+// Модальное окно выбора даты для "Запланировать"/"Перенести". originDateKey —
+// необязательная дата-по-умолчанию (используется при переносе из модалки дня
+// календаря, чтобы поле было предзаполнено текущей датой этого дня).
+function showScheduleDateModal(title, originDateKey) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "scheduleDateModal";
+
+    const displayTitle = title.replace(/\s*\(\d{4}\)$/, "");
+    const todayKey = todayDateKey();
+    const currentValue = scheduledByTitle[title] || originDateKey || todayKey;
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3>🗓️ Дата просмотра</h3>
+            <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">"${displayTitle}"</p>
+            <div class="modal-form">
+                <input type="date" id="scheduleDateInput" min="${todayKey}" value="${currentValue}">
+            </div>
+            <div class="modal-buttons">
+                <button id="scheduleDateSave" class="btn-save">Сохранить</button>
+                <button id="scheduleDateCancel" class="btn-cancel">Отмена</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    document.getElementById("scheduleDateCancel").onclick = () => overlay.remove();
+
+    document.getElementById("scheduleDateSave").onclick = async () => {
+        const input = document.getElementById("scheduleDateInput");
+        const chosen = input.value;
+        if (!chosen) { alert("Выберите дату."); return; }
+        if (chosen < todayKey) { alert("Нельзя выбрать прошедшую дату — только сегодня или позже."); return; }
+        overlay.remove();
+        await scheduleTitle(title, chosen);
     };
 }
 
@@ -1685,6 +1935,7 @@ async function showHome() {
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -1859,6 +2110,16 @@ async function showHome() {
         hrBeforeWatchLists.className = "neon-divider";
         app.appendChild(hrBeforeWatchLists);
     }
+
+    // Кнопка "Календарь" — сразу перед "Будем смотреть"
+    let calendarBtn = document.createElement("button");
+    calendarBtn.id = "calendarMainBtn";
+    calendarBtn.className = "btn-pink-style";
+    calendarBtn.textContent = "📅 Календарь";
+    calendarBtn.onclick = () => {
+        showCalendarScreen();
+    };
+    app.appendChild(calendarBtn);
 
     let wishlistBtn = document.createElement("button");
     wishlistBtn.id = "wishlistMainBtn";
@@ -2709,6 +2970,7 @@ async function showAllCommentsScreen() {
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -2874,6 +3136,7 @@ function openData(content, saveHistory = true, customTitle = null) {
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;
@@ -3140,6 +3403,7 @@ async function showPautinka(fromHistory = false) {
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
     if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
 
@@ -3909,6 +4173,7 @@ async function showChatScreen() {
     isChatScreenOpen = true;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     currentCategoryName = null;
 
     let oldNav = document.querySelector(".navigation");
@@ -5790,6 +6055,7 @@ async function showWatchPartyScreen() {
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     currentCategoryName = null;
     if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
     if (typeof activeGameCleanup !== "undefined" && activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
@@ -6378,6 +6644,7 @@ function showBatchAddTitlesScreen() {
     // т.п.) — та же гигиена, что перед открытием любого другого экрана.
     isChatScreenOpen = false;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     currentWatchedBucket = null;
     if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
     if (typeof activeGameCleanup !== "undefined" && activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
@@ -6800,6 +7067,7 @@ function renderWatchedTop() {
     currentCategoryName = "🎬 Просмотрено";
     currentWatchedBucket = 'top';
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
 
     app.innerHTML = "";
 
@@ -6831,6 +7099,7 @@ function renderWatchedBucket(bucketKey) {
     currentCategoryName = "🎬 Просмотрено";
     currentWatchedBucket = bucketKey;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
 
     const bucket = WATCHED_BUCKETS[bucketKey];
     if (!bucket) { renderWatchedTop(); return; }
@@ -6876,6 +7145,7 @@ function renderWishlistFolder() {
     currentCategoryName = "🍿 Будем смотреть";
     currentWatchedBucket = null;
     isWishlistScreenOpen = true;
+    isCalendarScreenOpen = false;
 
     app.innerHTML = "";
 
@@ -6904,6 +7174,233 @@ function renderWishlistFolder() {
 
     // Тоже верхний экран раздела — "Назад" здесь дублировал бы "Домой".
     renderWatchedNav(null);
+}
+
+// =======================================================
+// 📅 КАЛЕНДАРЬ ПРОСМОТРОВ — отдельный экран (как "Будем смотреть"/"Просмотрено")
+// =======================================================
+// Открывается кнопкой с главной, живёт вне обычной history/openData —
+// поэтому "Назад" здесь не нужен, только "Домой" (см. renderWatchedNav(null)
+// ниже, тот же приём, что и у других верхнеуровневых разделов).
+function showCalendarScreen() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
+    isCalendarScreenOpen = true;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = "📅 Календарь просмотров";
+
+    // Открываем на текущем месяце, если до этого календарь ещё не открывался
+    // за эту сессию — а если пользователь уже листал месяцы вперёд/назад,
+    // повторное открытие возвращает его туда же, где он был.
+    if (calendarViewYear === null) {
+        const now = new Date();
+        calendarViewYear = now.getFullYear();
+        calendarViewMonth = now.getMonth();
+    }
+
+    renderCalendarScreen();
+}
+
+function renderCalendarScreen() {
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    setEmojiTitle(title, "📅 Календарь просмотров");
+    app.appendChild(title);
+
+    // Переключатель месяца
+    let monthNav = document.createElement("div");
+    monthNav.className = "calendar-month-nav";
+
+    let prevBtn = document.createElement("button");
+    prevBtn.className = "calendar-nav-btn";
+    prevBtn.textContent = "←";
+    prevBtn.onclick = () => {
+        calendarViewMonth--;
+        if (calendarViewMonth < 0) { calendarViewMonth = 11; calendarViewYear--; }
+        renderCalendarScreen();
+    };
+
+    let monthLabel = document.createElement("span");
+    monthLabel.className = "calendar-month-label";
+    const labelDate = new Date(calendarViewYear, calendarViewMonth, 1);
+    monthLabel.textContent = capitalizeFirst(labelDate.toLocaleDateString("ru-RU", { month: "long", year: "numeric" }));
+
+    let nextBtn = document.createElement("button");
+    nextBtn.className = "calendar-nav-btn";
+    nextBtn.textContent = "→";
+    nextBtn.onclick = () => {
+        calendarViewMonth++;
+        if (calendarViewMonth > 11) { calendarViewMonth = 0; calendarViewYear++; }
+        renderCalendarScreen();
+    };
+
+    monthNav.appendChild(prevBtn);
+    monthNav.appendChild(monthLabel);
+    monthNav.appendChild(nextBtn);
+    app.appendChild(monthNav);
+
+    // Заголовки дней недели (Пн-Вс)
+    let weekDaysRow = document.createElement("div");
+    weekDaysRow.className = "calendar-grid calendar-weekdays";
+    ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].forEach(d => {
+        let cell = document.createElement("div");
+        cell.className = "calendar-weekday";
+        cell.textContent = d;
+        weekDaysRow.appendChild(cell);
+    });
+    app.appendChild(weekDaysRow);
+
+    // Сетка дней месяца
+    let grid = document.createElement("div");
+    grid.className = "calendar-grid";
+
+    const firstOfMonth = new Date(calendarViewYear, calendarViewMonth, 1);
+    // JS отдаёт 0=Вс..6=Сб, приводим к неделе с понедельника (0=Пн..6=Вс)
+    let startWeekday = (firstOfMonth.getDay() + 6) % 7;
+
+    const daysInMonth = new Date(calendarViewYear, calendarViewMonth + 1, 0).getDate();
+    const todayKey = todayDateKey();
+
+    for (let i = 0; i < startWeekday; i++) {
+        let emptySlot = document.createElement("div");
+        emptySlot.className = "calendar-day calendar-day-empty-slot";
+        grid.appendChild(emptySlot);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateObj = new Date(calendarViewYear, calendarViewMonth, day);
+        const dateKey = toDateKey(dateObj);
+        const titlesForDay = scheduledByDate[dateKey] || [];
+
+        let cell = document.createElement("div");
+        cell.className = "calendar-day";
+        if (dateKey === todayKey) cell.classList.add("calendar-day-today");
+        if (dateKey < todayKey) cell.classList.add("calendar-day-past");
+
+        if (titlesForDay.length > 0) {
+            cell.classList.add("calendar-day-active");
+            cell.onclick = () => showDayPlansModal(dateKey);
+        } else {
+            cell.classList.add("calendar-day-inactive");
+        }
+
+        let dayNum = document.createElement("span");
+        dayNum.className = "calendar-day-number";
+        dayNum.textContent = String(day);
+        cell.appendChild(dayNum);
+
+        if (titlesForDay.length > 0) {
+            let dot = document.createElement("span");
+            dot.className = "calendar-day-dot";
+            dot.textContent = titlesForDay.length > 1 ? String(titlesForDay.length) : "●";
+            cell.appendChild(dot);
+        }
+
+        grid.appendChild(cell);
+    }
+
+    app.appendChild(grid);
+
+    let hint = document.createElement("p");
+    hint.className = "count-footer";
+    hint.textContent = "Нажмите на выделенный день, чтобы посмотреть, увидеть и изменить план.";
+    app.appendChild(hint);
+
+    // Верхний экран раздела — "Назад" отсюда вёл бы туда же, куда "Домой".
+    renderWatchedNav(null);
+}
+
+// Модальное окно одного дня календаря: список запланированных тайтлов и
+// действия — перенести на другой день, удалить, отметить просмотренным.
+// Пересобирает сама себя после каждого действия (если в дне ещё что-то
+// осталось), чтобы можно было разобраться сразу с несколькими тайтлами
+// подряд, не открывая день заново.
+function showDayPlansModal(dateKey) {
+    const existing = document.getElementById("dayPlansModal");
+    if (existing) existing.remove();
+
+    const titlesForDay = (scheduledByDate[dateKey] || []).slice();
+    if (titlesForDay.length === 0) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "dayPlansModal";
+
+    let itemsHtml = "";
+    titlesForDay.forEach((t, idx) => {
+        const displayTitle = t.replace(/\s*\(\d{4}\)$/, "");
+        itemsHtml += `
+        <div class="day-plan-item">
+            <div class="day-plan-title">${displayTitle}</div>
+            <div class="day-plan-actions">
+                <button class="day-plan-move" data-idx="${idx}">📅 Перенести</button>
+                <button class="day-plan-delete" data-idx="${idx}">🗑 Удалить</button>
+                <button class="day-plan-watch-me" data-idx="${idx}">🙋 Просмотрено мной</button>
+                <button class="day-plan-watch-both" data-idx="${idx}">❤️ Просмотрено нами</button>
+            </div>
+        </div>`;
+    });
+
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <h3>${formatScheduledDateHuman(dateKey)}</h3>
+            <div class="day-plan-list">${itemsHtml}</div>
+            <div class="action-buttons" style="margin-top: 6px;">
+                <button id="dayPlansClose" class="btn-cancel-gray">Закрыть</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.getElementById("dayPlansClose").onclick = () => overlay.remove();
+
+    // Если после действия в дне ещё остались тайтлы — пересобираем модалку
+    // на том же дне; если день опустел — просто закрываем её.
+    const reopenOrClose = () => {
+        overlay.remove();
+        if ((scheduledByDate[dateKey] || []).length > 0) {
+            showDayPlansModal(dateKey);
+        }
+    };
+
+    overlay.querySelectorAll(".day-plan-move").forEach(btn => {
+        btn.onclick = () => {
+            const t = titlesForDay[parseInt(btn.dataset.idx, 10)];
+            overlay.remove();
+            showScheduleDateModal(t, dateKey);
+        };
+    });
+
+    overlay.querySelectorAll(".day-plan-delete").forEach(btn => {
+        btn.onclick = async () => {
+            const t = titlesForDay[parseInt(btn.dataset.idx, 10)];
+            await removeScheduledTitle(t);
+            reopenOrClose();
+        };
+    });
+
+    overlay.querySelectorAll(".day-plan-watch-me").forEach(btn => {
+        btn.onclick = async () => {
+            const t = titlesForDay[parseInt(btn.dataset.idx, 10)];
+            await markWatched(t, false);
+            reopenOrClose();
+        };
+    });
+
+    overlay.querySelectorAll(".day-plan-watch-both").forEach(btn => {
+        btn.onclick = async () => {
+            const t = titlesForDay[parseInt(btn.dataset.idx, 10)];
+            await markWatched(t, true);
+            reopenOrClose();
+        };
+    });
 }
 
 function getAllTitlesFromCategory(dataBranch) {
@@ -7428,6 +7925,7 @@ async function showGamesScreen() {
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
     if (chatPollInterval) {
         clearInterval(chatPollInterval);
         chatPollInterval = null;

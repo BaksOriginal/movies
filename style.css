@@ -2164,6 +2164,188 @@ body.batch-add-screen-active .container {
     margin: 18px 0 4px;
 }
 
+/* ===== 📅 Календарь просмотров ===== */
+.calendar-month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: 6px 0 20px;
+}
+
+.calendar-nav-btn {
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 18px !important;
+    flex-shrink: 0;
+}
+
+.calendar-month-label {
+    font-family: var(--font-display);
+    font-size: clamp(15px, 4.2vw, 18px);
+    min-width: 150px;
+    color: var(--text);
+    letter-spacing: 0.3px;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+}
+
+.calendar-weekdays {
+    margin-bottom: 10px;
+}
+
+.calendar-weekday {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+    padding: 4px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.calendar-day {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: var(--font-body);
+    cursor: default;
+    border: 1px solid var(--line);
+    background: var(--panel-deep);
+    color: var(--text-faint);
+    transition: box-shadow 0.2s ease, transform 0.15s ease, background 0.2s ease, opacity 0.2s ease;
+    animation: none;
+}
+
+.calendar-day-empty-slot {
+    visibility: hidden;
+    border: none;
+    background: transparent;
+}
+
+/* Дни без планов — тусклее, чтобы контрастировать с горящими днями */
+.calendar-day-inactive {
+    opacity: 0.5;
+}
+
+/* Дни с запланированными фильмами — яркие, светятся неоном */
+.calendar-day-active {
+    cursor: pointer;
+    opacity: 1;
+    background: linear-gradient(150deg, var(--panel-2), var(--panel));
+    border-color: var(--pink);
+    color: var(--text);
+    box-shadow: var(--glow-pink);
+}
+
+.calendar-day-active:hover {
+    box-shadow: 0 0 24px rgba(255, 46, 147, 0.6);
+    transform: translateY(-1px);
+}
+
+.calendar-day-active:active {
+    transform: scale(0.94);
+}
+
+.calendar-day-today {
+    box-shadow: 0 0 0 1.5px var(--cyan) inset;
+}
+
+.calendar-day-today.calendar-day-active {
+    box-shadow: var(--glow-pink), 0 0 0 1.5px var(--cyan) inset;
+}
+
+/* Прошедшие дни — если по какой-то причине в них ещё остались данные до
+   серверной чистки, они всё равно не должны "гореть" ярче обычного */
+.calendar-day-past {
+    opacity: 0.35;
+}
+
+.calendar-day-number {
+    position: relative;
+    z-index: 1;
+}
+
+.calendar-day-dot {
+    position: absolute;
+    bottom: 4px;
+    right: 5px;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--pink-soft);
+    background: rgba(255, 46, 147, 0.18);
+    border-radius: 999px;
+    min-width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    line-height: 1;
+}
+
+/* Список фильмов в модалке одного дня календаря */
+.day-plan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: left;
+    margin: 4px 0 6px;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+.day-plan-item {
+    background: var(--panel-deep);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.day-plan-title {
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 10px;
+}
+
+.day-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.day-plan-actions button {
+    flex: 1 1 auto;
+    width: auto;
+    min-height: 40px;
+    margin: 0;
+    padding: 8px 10px;
+    font-size: clamp(11px, 3.2vw, 12.5px);
+    animation: none;
+}
+
+/* Тёмная тема для нативного date-picker'а в модалках "Запланировать"/"Перенести" */
+.modal-form input[type="date"] {
+    color-scheme: dark;
+}
+
 /* ===== Комментарии ===== */
 .comments-list {
     display: flex;
