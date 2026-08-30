@@ -934,11 +934,148 @@ button:nth-child(6){
     font-size: 17px;
     font-weight: 700;
     color: var(--text-dim);
+    margin-top: 10px;
 }
 .randomizer-result.randomizer-result-hit {
     color: var(--gold);
     text-shadow: 0 0 12px rgba(255,209,92,0.5);
     animation: modalPopIn 0.3s cubic-bezier(0.22, 0.9, 0.32, 1.28) both;
+}
+
+/* Модалка "Рандомайзер" — чуть шире обычной, чтобы колесу было комфортно */
+.randomizer-modal-content {
+    max-width: 420px;
+    /* У .modal-content задан overflow-y:auto, а overflow-x не указан —
+       по спеке CSS в этом случае браузер сам "поднимает" overflow-x до
+       auto тоже (нельзя, чтобы одна ось скроллилась, а другая была
+       буквально visible). Из-за этого любой горизонтальный вылет —
+       квадратный canvas колеса при повороте (его хитбокс на диагональных
+       углах шире собственной ширины, хотя нарисованный в нём круг
+       визуально никуда не "растёт"), кольцо свечения или разлетающиеся
+       искры — превращался в настоящую горизонтальную прокрутку модалки.
+       Явно фиксируем overflow-x:hidden, чтобы прокрутка была только
+       вертикальной, как и задумывалось. */
+    overflow-x: hidden;
+}
+
+/* --- КОЛЕСО ФОРТУНЫ --- */
+.randomizer-wheel-area {
+    display: none;
+    justify-content: center;
+    margin: 14px 0 4px;
+}
+.randomizer-wheel-area.randomizer-wheel-area-visible {
+    display: flex;
+}
+.randomizer-wheel-stage {
+    position: relative;
+    width: 230px;
+    height: 230px;
+    max-width: 100%;
+}
+.randomizer-wheel-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    transform-origin: 50% 50%;
+    will-change: transform;
+    box-shadow:
+        0 0 0 4px rgba(10,6,19,0.9),
+        0 10px 30px rgba(0,0,0,0.5),
+        0 0 30px rgba(139,59,255,0.35);
+}
+/* Вспышка яркости на самом колесе в момент остановки */
+.randomizer-wheel-stage-flash .randomizer-wheel-canvas {
+    animation: randomizerWheelFlash 0.9s ease-out;
+}
+@keyframes randomizerWheelFlash {
+    0%   { filter: brightness(1) saturate(1); }
+    25%  { filter: brightness(1.9) saturate(1.45); }
+    100% { filter: brightness(1) saturate(1); }
+}
+
+/* Неподвижный указатель сверху колеса — треугольник, "смотрящий" вниз */
+.randomizer-wheel-pointer {
+    position: absolute;
+    top: -13px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 11px solid transparent;
+    border-right: 11px solid transparent;
+    border-top: 19px solid var(--gold);
+    filter: drop-shadow(0 0 8px rgba(255,209,92,0.8));
+    z-index: 3;
+}
+
+/* Неподвижная втулка в центре колеса (колесо крутится "под" ней) */
+.randomizer-wheel-hub {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--panel-2), var(--panel-deep));
+    border: 2px solid var(--gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 0 14px rgba(255,209,92,0.55), inset 0 0 6px rgba(0,0,0,0.4);
+    z-index: 2;
+}
+
+/* Радиальное световое свечение, вспыхивающее вокруг колеса при остановке */
+.randomizer-wheel-glow {
+    position: absolute;
+    inset: -22px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,209,92,0.55), rgba(255,46,147,0.25) 45%, transparent 72%);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+.randomizer-wheel-glow.randomizer-wheel-glow-burst {
+    animation: randomizerGlowBurst 1.1s ease-out both;
+}
+@keyframes randomizerGlowBurst {
+    0%   { opacity: 0; transform: scale(0.6); }
+    30%  { opacity: 1; transform: scale(1.15); }
+    100% { opacity: 0; transform: scale(1.6); }
+}
+
+/* Искры, разлетающиеся из центра колеса в момент остановки */
+.randomizer-sparks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+}
+.randomizer-spark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin: -3px 0 0 -3px;
+    animation: randomizerSparkFly 1.1s ease-out forwards;
+}
+@keyframes randomizerSparkFly {
+    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--spark-x), var(--spark-y)) scale(0.2); opacity: 0; }
+}
+
+@media (max-width: 360px) {
+    .randomizer-wheel-stage {
+        width: 200px;
+        height: 200px;
+    }
 }
 .modal-buttons {
     display: flex;
@@ -1076,6 +1213,14 @@ body.batch-add-screen-active .container {
 .btn-remove-row {
     width: 32px;
     height: 32px;
+    /* Общее правило button{} задаёт min-height:60px и margin:12px 0 —
+       без сброса этих двух свойств здесь кнопка остаётся высотой 60px
+       (min-height "продавливает" явный height:32px) и дополнительно
+       смещается вниз своим вертикальным margin. Из-за этого на мобильной
+       версии кнопка превращалась в высокий прямоугольник и наезжала на
+       поле "Название" под ней. */
+    min-height: 0;
+    margin: 0;
     padding: 0;
     border-radius: 8px;
     border: 1.5px solid var(--pink);
@@ -1088,6 +1233,7 @@ body.batch-add-screen-active .container {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     transition: box-shadow 0.2s ease, transform 0.1s ease;
     justify-self: center;
 }
