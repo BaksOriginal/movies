@@ -1268,7 +1268,7 @@ function showStarChoiceModal(title) {
 
     overlay.innerHTML = `
         <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Действие</h3>
+            <h3 style="margin-bottom: 10px;">Действие с тайтлом</h3>
             <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 ${optionsHtml}
@@ -2320,7 +2320,7 @@ function showRandomizerModal() {
                     id="randomizerInput"
                     class="randomizer-textarea"
                     rows="3"
-                    placeholder="Позиции через запятую, например: чипсы, напиток, печенье"
+                    placeholder="Позиции через запятую, например: кола, пепси, фанта"
                 ></textarea>
             </div>
             <div class="randomizer-wheel-area" id="randomizerWheelArea">
@@ -2334,7 +2334,7 @@ function showRandomizerModal() {
             </div>
             <div id="randomizerResult" class="randomizer-result"></div>
             <div class="modal-buttons">
-                <button type="button" class="btn-save" id="randomizerPickBtn">🎡 Крутить колесо</button>
+                <button type="button" class="btn-save" id="randomizerPickBtn">🎡 Рандом</button>
                 <button type="button" class="btn-cancel" id="randomizerCloseBtn">Закрыть</button>
             </div>
         </div>
