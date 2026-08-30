@@ -2415,7 +2415,7 @@ function showRandomizerModal() {
             pickBtn.disabled = false;
             pickBtn.style.opacity = "1";
             pickBtn.style.cursor = "pointer";
-            pickBtn.textContent = "🎡 Крутить ещё раз";
+            pickBtn.textContent = "🎡 Ещё раз";
 
             const pick = items[winnerIndex];
             resultEl.textContent = "🎯 " + pick;
