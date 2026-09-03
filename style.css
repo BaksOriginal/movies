@@ -3147,3 +3147,99 @@ body.batch-add-screen-active .container {
     filter: drop-shadow(0 0 14px rgba(255,209,92,0.65));
 }
 
+
+/* ========================================== */
+/* Стили, ранее внедрявшиеся через JS в конце script.js */
+/* (перенесены сюда при разделении сайта на отдельные страницы) */
+/* ========================================== */
+    .round-btn {
+        overflow: hidden;
+        width: 40px !important;
+        height: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        cursor: pointer !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        background: #1a1128 !important;
+        color: #f2e9ff !important;
+        font-size: 18px !important;
+        box-sizing: border-box !important;
+        line-height: 1 !important;
+    }
+    /* --- ЗАДНИЙ ФОН С ПЛАВАЮЩИМИ ДЕМОНАМИ И СЕРДЕЧКАМИ --- */
+    .hearts-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none; /* Клики проходят сквозь них */
+        z-index: -1;          /* Строго на заднем фоне */
+        overflow: hidden;
+    }
+
+    .floating-heart {
+        position: absolute;
+        bottom: -50px;        /* Появляются чуть ниже экрана */
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+        /* Было два слоя анимированного filter:drop-shadow — на каждый
+           кадр анимации браузер пересчитывает блюр заново (а не просто
+           двигает готовый слой), что на слабом Android заметно грузит
+           GPU даже при всего 10 сердечках одновременно. text-shadow даёт
+           похожее свечение почти без этой цены. */
+        text-shadow: 0 0 6px rgba(255,46,147,0.55), 0 0 10px rgba(139,59,255,0.35);
+        animation: floatUp linear forwards;
+    }
+
+    @keyframes floatUp {
+        0% {
+            transform: translateY(0) translateX(0) rotate(0deg);
+            opacity: 0;
+        }
+        10% {
+            opacity: 0.22;    /* Порог максимальной прозрачности (очень нежные) */
+        }
+        90% {
+            opacity: 0.22;
+        }
+        100% {
+            /* Улетают вверх на всю высоту экрана с небольшим покачиванием и вращением */
+            transform: translateY(-115vh) translateX(var(--sway-x)) rotate(var(--rotate-deg));
+            opacity: 0;       /* Полностью растворяются вверху */
+        }
+    }
+
+    /* --- ЭТАЛОННЫЙ РОЗОВЫЙ СТИЛЬ (Как "Трейлер на YouTube") --- */
+    .btn-pink-style {
+        background: transparent !important;
+        color: var(--pink) !important;
+        text-shadow: 0 0 10px rgba(255,46,147,0.5);
+        border: 1.5px solid var(--pink) !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 14px rgba(255,46,147,0.22) !important;
+        transition: box-shadow 0.2s ease, transform 0.1s ease, border-color 0.2s ease;
+    }
+    .btn-pink-style:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 22px rgba(255,46,147,0.5) !important;
+        border-color: var(--purple) !important;
+    }
+
+    /* --- ЭТАЛОННЫЙ СЕРЫЙ СТИЛЬ ДЛЯ КНОПОК ОТМЕНЫ --- */
+    .btn-cancel-gray {
+        background: #1a1128 !important;
+        color: #d8cede !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+        font-weight: 600 !important;
+        transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+    .btn-cancel-gray:hover {
+        background: #241733 !important;
+        border-color: rgba(255,255,255,0.2) !important;
+    }
+

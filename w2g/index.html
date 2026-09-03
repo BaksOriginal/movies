@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<link rel="icon" type="image/png" href="../icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0613">
+<title>🎬 Совместный просмотр — 愛してる</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jura:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css">
+</head>
+
+<body>
+
+<div class="container">
+    <div id="app"></div>
+</div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="../core.js"></script>
+<script src="w2g.js"></script>
+<script>
+    // Общий "app"-контейнер и auth-гейт: страница сама себя не рисует,
+    // пока не придёт событие авторизации (см. initAuth() в core.js).
+    initAuth({
+        isRendered: () => app && app.innerHTML.trim(),
+        onLogin: () => showWatchPartyScreen(),
+        onLogout: () => { location.href = "../"; }
+    });
+</script>
+<audio id="bgMusic" loop>
+    <source src="../background-music.ogg" type="audio/ogg">
+</audio>
+
+</body>
+</html>
