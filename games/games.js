@@ -35,6 +35,7 @@ const GITHUB_RHYTHM_BRANCH = "main";
 
 let gameScoresCache = { snake: [], flappy: [], doodle: [], runner: [], ninja: [] };
 let activeGameCleanup = null; // остановка текущей запущенной игры (интервалы/rAF/слушатели), если она есть
+let gameLaunchedFromPautinka = false; // true, если сюда пришли по диплинку games/?play=...&from=pautinka
 
 // ==========================================
 // 8-БИТНЫЕ ЗВУКИ ДЛЯ ИГР
@@ -189,8 +190,13 @@ function setGamesNav(showBackToMenu) {
 
     if (showBackToMenu) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅ Игры";
-        backBtn.onclick = () => showGamesScreen();
+        if (gameLaunchedFromPautinka) {
+            backBtn.textContent = "⬅ Паутинка";
+            backBtn.onclick = () => { location.href = "../?openPautinka=1"; };
+        } else {
+            backBtn.textContent = "⬅ Игры";
+            backBtn.onclick = () => showGamesScreen();
+        }
         nav.appendChild(backBtn);
     }
 
@@ -361,11 +367,14 @@ async function showGamesScreen() {
     container.querySelector("#playNinjaBtn").onclick = () => startNinjaGame();
     container.querySelector("#playRhythmBtn").onclick = () => showRhythmMenu();
 
-    // Диплинк из "Паутинки" на конкретную игру: games/?play=snake и т.п.
+    // Диплинк из "Паутинки" на конкретную игру: games/?play=snake&from=pautinka
     // (раньше Паутинка запускала игру прямо inline, без перехода на страницу —
     // теперь игры на отдельной странице, поэтому переход + автозапуск по параметру).
     const params = new URLSearchParams(location.search);
     const play = params.get("play");
+    if (params.get("from") === "pautinka") {
+        gameLaunchedFromPautinka = true;
+    }
     if (play) {
         history.replaceState(null, "", location.pathname);
         const launchers = {

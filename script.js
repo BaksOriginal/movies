@@ -336,7 +336,15 @@ initAuth({
         subscribeToChanges();
 
         if (!wasAlreadyInitialized) {
-            showHome();
+            // Диплинк "назад в Паутинку" из игр (games/?play=...&from=pautinka
+            // ведёт сюда через games.js -> ../?openPautinka=1 при возврате)
+            const params = new URLSearchParams(location.search);
+            if (params.get("openPautinka") === "1") {
+                window.history.replaceState(null, "", location.pathname);
+                showPautinka();
+            } else {
+                showHome();
+            }
         } else {
             refreshCurrentScreen();
         }
@@ -3113,12 +3121,12 @@ function addNavigation() {
 // музыка (если играла) погаснет ТОЛЬКО в момент реального захода в игру,
 // а не при просто открытии Паутинки.
 const PAUTINKA_GAMES = [
-    { key: "snake",  label: "Змейка",                     emoji: "🐍", launch: () => { location.href = "games/?play=snake"; } },
-    { key: "flappy", label: "Эчпочмоня vs. Шоколадки",     emoji: "🍫", launch: () => { location.href = "games/?play=flappy"; } },
-    { key: "doodle", label: "Doodle Jump",                emoji: "👾", launch: () => { location.href = "games/?play=doodle"; } },
-    { key: "runner", label: "Бега Брокколи",               emoji: "🥦", launch: () => { location.href = "games/?play=runner"; } },
-    { key: "ninja",  label: "Эмодзи Ниндзя",               emoji: "⚔", launch: () => { location.href = "games/?play=ninja"; } },
-    { key: "rhythm", label: "Ритм-Аркада",                 emoji: "🎵", launch: () => { location.href = "games/?play=rhythm"; } },
+    { key: "snake",  label: "Змейка",                     emoji: "🐍", launch: () => { location.href = "games/?play=snake&from=pautinka"; } },
+    { key: "flappy", label: "Эчпочмоня vs. Шоколадки",     emoji: "🍫", launch: () => { location.href = "games/?play=flappy&from=pautinka"; } },
+    { key: "doodle", label: "Doodle Jump",                emoji: "👾", launch: () => { location.href = "games/?play=doodle&from=pautinka"; } },
+    { key: "runner", label: "Бега Брокколи",               emoji: "🥦", launch: () => { location.href = "games/?play=runner&from=pautinka"; } },
+    { key: "ninja",  label: "Эмодзи Ниндзя",               emoji: "⚔", launch: () => { location.href = "games/?play=ninja&from=pautinka"; } },
+    { key: "rhythm", label: "Ритм-Аркада",                 emoji: "🎵", launch: () => { location.href = "games/?play=rhythm&from=pautinka"; } },
 ];
 const PAUTINKA_GAMES_HUE = 152; // единый цвет для всех 6 игр (изумрудно-бирюзовый)
 
