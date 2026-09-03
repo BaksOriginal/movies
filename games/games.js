@@ -191,7 +191,7 @@ function setGamesNav(showBackToMenu) {
     if (showBackToMenu) {
         let backBtn = document.createElement("button");
         if (gameLaunchedFromPautinka) {
-            backBtn.textContent = "⬅ Паутинка";
+            backBtn.textContent = "⬅ Назад";
             backBtn.onclick = () => { location.href = "../?openPautinka=1"; };
         } else {
             backBtn.textContent = "⬅ Игры";
