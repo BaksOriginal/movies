@@ -200,6 +200,44 @@ function vibrate(pattern) {
 }
 
 // ==========================================
+// ЧАТ: время сообщений, редактирование, превью цитаты
+// ==========================================
+// Общие для обычного чата (script.js) и чата совместного просмотра (w2g.js)
+function formatChatTime(isoString) {
+    const d = new Date(isoString);
+    const datePart = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
+    const timePart = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    return `${datePart}, ${timePart}`;
+}
+
+// Сообщение можно редактировать/удалять только в течение 24 часов после отправки
+const CHAT_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+function canModifyChatMessage(msg) {
+    const createdTime = new Date(msg.created_at).getTime();
+    if (isNaN(createdTime)) return false;
+    return (Date.now() - createdTime) < CHAT_EDIT_WINDOW_MS;
+}
+
+// Обрезает текст цитаты ответа для превью
+function buildReplyPreviewText(msg) {
+    if (isStickerMessage(msg.message)) return "🖼️ Стикер";
+    const text = msg.message || "";
+    return text.length > 60 ? text.slice(0, 60) + "…" : text;
+}
+
+// ==========================================
+// ХЕШ СТРОКИ В СИД (используется Паутинкой для оттенков и ритм-игрой для карты нот)
+// ==========================================
+function hashStringToSeed(str) {
+    let h = 2166136261; // FNV-1a
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+}
+
+// ==========================================
 // ФОНОВАЯ МУЗЫКА (общая для всех страниц)
 // ==========================================
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
@@ -376,55 +414,6 @@ function initAuth(handlers) {
             if (onLogout) onLogout();
         }
     });
-}
-
-// ==========================================
-// МИНИ-ШАПКА ДЛЯ ПОДСТРАНИЦ (games/w2g)
-// ==========================================
-// Небольшой аналог шапки showHome() из script.js — email, музыка, выход —
-// но без завязки на каталог, чтобы games.js/w2g.js не тянули весь script.js.
-function renderMiniHeader(container) {
-    if (!currentUser) return;
-
-    const header = document.createElement("div");
-    header.className = "user-header";
-    header.innerHTML = `<span id="userEmailSpan">${getUsernameFromEmail(currentUser.email)}</span>`;
-
-    const controls = document.createElement("div");
-    controls.className = "hero-controls";
-
-    const iconBtnStyle = `
-        width: 40px !important; height: 40px !important;
-        min-width: 40px !important; min-height: 40px !important;
-        padding: 0 !important; margin: 0 !important;
-        border-radius: 50% !important; display: flex !important;
-        justify-content: center !important; align-items: center !important;
-        cursor: pointer !important; font-size: 16px !important;
-        box-sizing: border-box !important; overflow: visible !important;
-        line-height: 1 !important; flex-shrink: 0 !important;
-    `;
-
-    const musicBtn = document.createElement("button");
-    musicBtn.className = "icon-btn";
-    musicBtn.style.cssText = iconBtnStyle;
-    musicBtn.textContent = isMusicPlaying ? "🔊" : "🔇";
-    musicBtn.onclick = () => {
-        const audio = document.getElementById("bgMusic");
-        if (!audio) return;
-        if (audio.paused) { audio.play(); isMusicPlaying = true; localStorage.setItem("musicEnabled", "true"); musicBtn.textContent = "🔊"; }
-        else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
-    };
-
-    const logoutBtn = document.createElement("button");
-    logoutBtn.className = "icon-btn";
-    logoutBtn.style.cssText = iconBtnStyle;
-    logoutBtn.textContent = "❌";
-    logoutBtn.onclick = performLogout;
-
-    controls.appendChild(musicBtn);
-    controls.appendChild(logoutBtn);
-    header.appendChild(controls);
-    container.appendChild(header);
 }
 
 // Запускаем декоративные эффекты, общие для всех страниц

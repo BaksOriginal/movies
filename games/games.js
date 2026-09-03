@@ -2,8 +2,7 @@
 // games.js — РАЗДЕЛ «ИГРЫ» (/movies/games/)
 // ==========================================
 // Подключается на games/index.html ПОСЛЕ core.js.
-// Всё, что нужно из core.js: db, currentUser, app, vibrate, setEmojiTitle,
-// renderMiniHeader, isMusicPlaying.
+// Всё, что нужно из core.js: db, currentUser, app, vibrate, setEmojiTitle, hashStringToSeed.
 
 // Общий GitHub-репозиторий для списка треков ритм-игры (см. core.js: getGithubBranchSha)
 const GITHUB_RHYTHM_OWNER = "BaksOriginal";
@@ -308,7 +307,6 @@ async function showGamesScreen() {
     }
 
     app.innerHTML = "";
-    renderMiniHeader(app);
 
     let title = document.createElement("h1");
     setEmojiTitle(title, "🕹 Игры");
@@ -2447,14 +2445,7 @@ function buildRhythmLeaderboardHtml(trackKey) {
 // ----------------- Детерминированный "случайный" сид по имени файла -----------------
 // Один и тот же трек всегда даёт одну и ту же карту нот — иначе рекорды
 // между заходами было бы невозможно сравнивать.
-function hashStringToSeed(str) {
-    let h = 2166136261; // FNV-1a
-    for (let i = 0; i < str.length; i++) {
-        h ^= str.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-    }
-    return h >>> 0;
-}
+// (hashStringToSeed теперь в core.js — используется также Паутинкой в script.js)
 function mulberry32(seed) {
     let a = seed >>> 0;
     return function () {
