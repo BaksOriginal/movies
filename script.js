@@ -1626,9 +1626,6 @@ async function showHome() {
         activeGameCleanup();
         activeGameCleanup = null;
     }
-    if (document.body.classList.contains("games-screen-active")) {
-        resumeMusicAfterGames();
-    }
     document.body.classList.remove("games-screen-active");
     history = [];
     categoryHistory = [];
@@ -3561,28 +3558,8 @@ function renderChatReplyBar() {
     box.querySelector("#chatReplyCancelBtn").onclick = () => clearChatReplyTarget();
 }
 
-// Форматирует дату и время сообщения
-function formatChatTime(isoString) {
-    const d = new Date(isoString);
-    const datePart = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
-    const timePart = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-    return `${datePart}, ${timePart}`;
-}
-
-// Сообщение можно редактировать/удалять только в течение 24 часов после отправки
-const CHAT_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
-function canModifyChatMessage(msg) {
-    const createdTime = new Date(msg.created_at).getTime();
-    if (isNaN(createdTime)) return false;
-    return (Date.now() - createdTime) < CHAT_EDIT_WINDOW_MS;
-}
-
-// Обрезает текст цитаты ответа для превью
-function buildReplyPreviewText(msg) {
-    if (isStickerMessage(msg.message)) return "🖼️ Стикер";
-    const text = msg.message || "";
-    return text.length > 60 ? text.slice(0, 60) + "…" : text;
-}
+// (formatChatTime / canModifyChatMessage / buildReplyPreviewText теперь в core.js —
+// общие с чатом совместного просмотра в w2g.js)
 
 // Создаёт один DOM-элемент сообщения (используется рендером ниже)
 function createChatBubble(msg) {

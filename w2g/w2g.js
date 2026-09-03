@@ -3,8 +3,8 @@
 // ==========================================
 // Подключается на w2g/index.html ПОСЛЕ core.js.
 // Всё, что нужно из core.js: db, currentUser, app, vibrate, setEmojiTitle,
-// getUsernameFromEmail, renderMiniHeader, стикеры (isStickerMessage,
-// getStickerUrl, showStickerPicker).
+// getUsernameFromEmail, стикеры (isStickerMessage, getStickerUrl, showStickerPicker),
+// formatChatTime, canModifyChatMessage, buildReplyPreviewText.
 // ==========================================
 // СОСТОЯНИЕ (перенесено из общего блока script.js — используется только здесь)
 // ==========================================
@@ -1823,7 +1823,6 @@ async function showWatchPartyScreen() {
     if (oldNav) oldNav.remove();
 
     app.innerHTML = "";
-    renderMiniHeader(app);
     isWatchPartyScreenOpen = true;
 
     let title = document.createElement("h1");
