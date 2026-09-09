@@ -3243,3 +3243,321 @@ body.batch-add-screen-active .container {
         border-color: rgba(255,255,255,0.2) !important;
     }
 
+
+/* ==========================================
+   ОНЛАЙН-ПОИСК (TMDB) — кнопка на главной, полноэкранный поиск, карточки
+   ========================================== */
+/* Кнопка "🔍 Онлайн Поиск" на главной использует класс .btn-add-new (тот же,
+   что у "➕ Добавить тайтл") — намеренно тот же голубой акцент, отдельный
+   класс под неё не заводим. */
+
+/* Экран результатов поиска — первый "галерейный" (грид с картинками) экран
+   на сайте, поэтому ему, как и массовому добавлению, нужно больше места,
+   чем даёт стандартный .container (max-width:500px). */
+body.online-search-screen-active .container {
+    max-width: 1000px;
+}
+
+.online-search-screen {
+    background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
+    border: 1px solid rgba(255,209,92,0.25);
+    border-radius: 20px;
+    padding: 22px;
+    margin: 0 0 20px;
+    text-align: left;
+    box-shadow:
+        0 20px 50px rgba(0,0,0,0.5),
+        0 0 0 1px rgba(255,255,255,0.03),
+        0 0 40px rgba(139,59,255,0.22);
+}
+
+.online-search-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.online-search-row-main {
+    display: flex;
+    gap: 8px;
+}
+.online-search-row-main .search-input-field {
+    flex-grow: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    font-family: var(--font-body);
+    box-sizing: border-box;
+}
+.online-search-row-main .btn-search-icon {
+    width: 42px !important;
+    height: 42px !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.online-search-filters {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+.os-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.os-filter-field label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.os-filter-field input,
+.os-filter-field select {
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel-deep);
+    color: var(--text);
+    font-family: var(--font-body);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.os-filter-field input:focus,
+.os-filter-field select:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
+}
+
+@media (max-width: 640px) {
+    .online-search-filters {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.online-search-hint {
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 14px;
+    margin: 16px 0;
+}
+
+/* Сетка карточек результата — специально небольшие блоки (маленький постер) */
+.online-search-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+}
+
+.online-search-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    animation: fadeUp 0.3s ease both;
+}
+.online-search-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255,209,92,0.4);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.45), 0 0 18px rgba(255,209,92,0.18);
+}
+
+.osc-poster-wrap {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    background: var(--panel-deep);
+    overflow: hidden;
+}
+.osc-poster {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.osc-poster-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    opacity: 0.5;
+}
+
+.osc-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-grow: 1;
+}
+.osc-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.25;
+    /* Не даём длинному названию растягивать карточку по высоте бесконечно */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.osc-genres {
+    margin: 0;
+    font-size: 11px;
+    color: var(--cyan);
+    opacity: 0.85;
+}
+.osc-desc {
+    margin: 2px 0 0;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex-grow: 1;
+}
+.osc-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 4px;
+}
+.osc-rating {
+    color: var(--gold);
+    font-weight: 700;
+}
+
+.osc-add-btn {
+    margin: 8px 0 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    padding: 8px !important;
+    border-radius: 8px !important;
+    border: 1.5px solid var(--cyan) !important;
+    background: transparent !important;
+    color: var(--cyan) !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, opacity 0.2s ease;
+}
+.osc-add-btn:hover:not(:disabled) {
+    box-shadow: 0 0 14px rgba(46,232,255,0.4);
+}
+.osc-add-btn:disabled {
+    border-color: var(--line) !important;
+    color: var(--text-faint) !important;
+    cursor: default;
+    opacity: 0.7;
+}
+
+/* Пагинация под результатами — компактные кнопки-цифры, не infinite scroll */
+.online-search-pager {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-top: 20px;
+    /* Подстраховка на совсем узких экранах/крупных системных шрифтах —
+       если ряд всё же не влезает, скроллится горизонтально, а не переносится
+       вертикально. При обычных размерах (максимум ~7 цифр + 2 многоточия +
+       2 стрелки) скролл не появляется вовсе. */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+}
+.os-page-btn {
+    /* Общее правило button{} задаёт width:100% — из-за него кнопки
+       пагинации растягивались на всю ширину контейнера и переносились
+       одна под одну, отсюда и "вертикальный" вид. Явно сбрасываем ширину
+       на "по содержимому", как и min-height/margin ниже. */
+    width: auto !important;
+    flex: 0 0 auto;
+    min-width: 32px;
+    min-height: 32px !important;
+    height: 32px;
+    padding: 0 8px !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--line) !important;
+    background: var(--panel-deep) !important;
+    color: var(--text-dim) !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    cursor: pointer;
+}
+.os-page-ellipsis {
+    flex: 0 0 auto;
+    min-width: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+    font-size: 13px;
+    font-weight: 700;
+    user-select: none;
+}
+.os-page-btn:hover:not(:disabled) {
+    border-color: var(--cyan) !important;
+    color: var(--cyan) !important;
+}
+.os-page-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+.os-page-current {
+    border-color: var(--gold) !important;
+    color: var(--gold) !important;
+    box-shadow: 0 0 10px rgba(255,209,92,0.35);
+}
+
+/* На очень узких телефонах чуть уменьшаем кнопки — так весь ряд надёжнее
+   помещается без горизонтального скролла */
+@media (max-width: 420px) {
+    .os-page-btn {
+        min-width: 28px;
+        height: 28px;
+        font-size: 12px !important;
+        padding: 0 6px !important;
+    }
+    .online-search-pager {
+        gap: 3px;
+    }
+}
+
+/* Статус-строка "ищем точный рейтинг на Кинопоиске…" в модалке добавления */
+.online-add-kp-status {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255,209,92,0.08);
+    border: 1px solid rgba(255,209,92,0.25);
+    color: var(--text-dim);
+    font-size: 12.5px;
+    text-align: center;
+}
