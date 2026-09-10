@@ -3561,3 +3561,87 @@ body.online-search-screen-active .container {
     font-size: 12.5px;
     text-align: center;
 }
+
+/* ==========================================
+   ГЛИТЧ-ВСПЫШКА ПРИ ВХОДЕ (playLoginGlitchAnimation)
+   ========================================== */
+.login-glitch-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    pointer-events: none;
+    overflow: hidden;
+    animation: lgoDissolve 0.8s ease forwards;
+}
+.lgo-slice {
+    position: absolute;
+    inset: 0;
+    mix-blend-mode: screen;
+    opacity: 0;
+    animation-duration: 0.65s;
+    animation-timing-function: ease-out;
+    animation-fill-mode: forwards;
+}
+.lgo-slice-cyan { background: var(--cyan); animation-name: lgoJitterCyan; }
+.lgo-slice-pink { background: var(--pink); animation-name: lgoJitterPink; }
+
+.lgo-noise {
+    position: absolute;
+    inset: -20%;
+    background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, transparent 1px, transparent 3px);
+    mix-blend-mode: overlay;
+    opacity: 0;
+    animation: lgoNoiseFlicker 0.65s steps(1, end) forwards;
+}
+.lgo-scanline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -5%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, var(--cyan), var(--pink), transparent);
+    box-shadow: 0 0 14px var(--cyan);
+    opacity: 0;
+    animation: lgoScan 0.7s ease-out forwards;
+}
+
+@keyframes lgoDissolve {
+    0%   { opacity: 1; }
+    65%  { opacity: 1; }
+    100% { opacity: 0; }
+}
+@keyframes lgoJitterCyan {
+    0%   { opacity: 0;    transform: translate(0,0);      clip-path: inset(0% 0 100% 0); }
+    8%   { opacity: 0.4;  transform: translate(-6px,0);    clip-path: inset(8% 0 55% 0); }
+    16%  { opacity: 0.2;  transform: translate(4px,-2px);  clip-path: inset(48% 0 18% 0); }
+    24%  { opacity: 0.35; transform: translate(-3px,1px);  clip-path: inset(18% 0 42% 0); }
+    32%  { opacity: 0.15; transform: translate(5px,0);     clip-path: inset(70% 0 6% 0); }
+    45%  { opacity: 0.25; transform: translate(-4px,0);    clip-path: inset(30% 0 30% 0); }
+    60%  { opacity: 0.1;  transform: translate(2px,0);     clip-path: inset(60% 0 15% 0); }
+    100% { opacity: 0;    transform: translate(0,0); }
+}
+@keyframes lgoJitterPink {
+    0%   { opacity: 0;    transform: translate(0,0);      clip-path: inset(100% 0 0% 0); }
+    8%   { opacity: 0.35; transform: translate(6px,0);     clip-path: inset(60% 0 12% 0); }
+    16%  { opacity: 0.2;  transform: translate(-4px,2px);  clip-path: inset(6% 0 62% 0); }
+    24%  { opacity: 0.3;  transform: translate(3px,-1px);  clip-path: inset(35% 0 28% 0); }
+    32%  { opacity: 0.12; transform: translate(-5px,0);    clip-path: inset(12% 0 68% 0); }
+    45%  { opacity: 0.22; transform: translate(4px,0);     clip-path: inset(45% 0 20% 0); }
+    60%  { opacity: 0.08; transform: translate(-2px,0);    clip-path: inset(20% 0 55% 0); }
+    100% { opacity: 0;    transform: translate(0,0); }
+}
+@keyframes lgoNoiseFlicker {
+    0%, 100% { opacity: 0; }
+    10% { opacity: 0.45; }
+    20% { opacity: 0.1; }
+    30% { opacity: 0.4; }
+    40% { opacity: 0.08; }
+    55% { opacity: 0.3; }
+    65% { opacity: 0.05; }
+}
+@keyframes lgoScan {
+    0%   { top: -5%;  opacity: 0; }
+    10%  { opacity: 1; }
+    70%  { opacity: 1; }
+    100% { top: 105%; opacity: 0; }
+}
