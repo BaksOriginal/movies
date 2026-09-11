@@ -303,7 +303,23 @@ function setupResponsiveCanvas(canvas, logicalW, logicalH, desktopScale) {
     return ctx;
 }
 
-// Экран выбора игры со сводными таблицами лидеров
+// Список игр для шестиугольного меню: порядок здесь = порядок отрисовки
+// значков и порядок точек на пунктирной линии между ними. Название,
+// короткое описание "что за игра" и таблица лидеров теперь показываются
+// не сразу на экране, а в модалке по тапу на значок (см. showGameInfoModal).
+const GAMES_META = [
+    { id: "snake",  emoji: "🐍", title: "Змейка",                  desc: "Классика: собирай еду, расти — и не влетай в стену или в свой же хвост.",  leaderboard: true,  start: () => startSnakeGame() },
+    { id: "flappy", emoji: "🍫", title: "Эчпочмоня vs. Шоколадки", desc: "Лети между шоколадками, не задевая их — чем дальше, тем плотнее строй.",     leaderboard: true,  start: () => startFlappyGame() },
+    { id: "doodle", emoji: "👾", title: "Doodle Jump",             desc: "Прыгай с платформы на платформу и забирайся как можно выше.",               leaderboard: true,  start: () => startDoodleGame() },
+    { id: "runner", emoji: "🥦", title: "Бега Брокколи",           desc: "Беги без остановки и перепрыгивай препятствия на пути.",                    leaderboard: true,  start: () => startRunnerGame() },
+    { id: "ninja",  emoji: "🐱‍👤",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
+    { id: "rhythm", emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() }
+];
+
+// Экран выбора игры: шестиугольные значки в шахматном порядке, соединённые
+// пунктирной линией. Названия и рекорды больше не висят на экране сразу —
+// тап по значку открывает модалку с описанием игры и кнопкой "Играть"
+// (см. showGameInfoModal).
 async function showGamesScreen() {
     if (!currentUser) { location.href = "../"; return; }
 
@@ -329,43 +345,24 @@ async function showGamesScreen() {
     if (!container.isConnected) return;
 
     container.innerHTML = `
-        <div class="game-card">
-            <div class="game-card-header">🐍 Змейка</div>
-            ${buildLeaderboardHtml('snake')}
-            <button id="playSnakeBtn" class="btn-games-green">▶️ Играть</button>
-        </div>
-        <div class="game-card">
-            <div class="game-card-header">🍫 Эчпочмоня vs. Шоколадки</div>
-            ${buildLeaderboardHtml('flappy')}
-            <button id="playFlappyBtn" class="btn-games-green">▶️ Играть</button>
-        </div>
-        <div class="game-card">
-            <div class="game-card-header">👾 Doodle Jump</div>
-            ${buildLeaderboardHtml('doodle')}
-            <button id="playDoodleBtn" class="btn-games-green">▶️ Играть</button>
-        </div>
-        <div class="game-card">
-            <div class="game-card-header">🥦 Бега Брокколи</div>
-            ${buildLeaderboardHtml('runner')}
-            <button id="playRunnerBtn" class="btn-games-green">▶️ Играть</button>
-        </div>
-        <div class="game-card">
-            <div class="game-card-header">⚔ Эмодзи Ниндзя</div>
-            ${buildLeaderboardHtml('ninja')}
-            <button id="playNinjaBtn" class="btn-games-green">▶️ Играть</button>
-        </div>
-        <div class="game-card rhythm-game-card">
-            <div class="game-card-header">🎵 Ритм-Аркада</div>
-            <button id="playRhythmBtn" class="btn-games-green">▶️ Играть</button>
+        <div class="games-hexmap" id="gamesHexMap">
+            <svg class="games-hexmap-line"></svg>
+            ${GAMES_META.map(g => `
+                <div class="hex-item" data-game="${g.id}" role="button" tabindex="0" aria-label="${g.title}">
+                    <span class="hex-shape"><span class="hex-shape-inner"><span class="hex-emoji">${g.emoji}</span></span></span>
+                </div>
+            `).join("")}
         </div>
     `;
 
-    container.querySelector("#playSnakeBtn").onclick = () => startSnakeGame();
-    container.querySelector("#playFlappyBtn").onclick = () => startFlappyGame();
-    container.querySelector("#playDoodleBtn").onclick = () => startDoodleGame();
-    container.querySelector("#playRunnerBtn").onclick = () => startRunnerGame();
-    container.querySelector("#playNinjaBtn").onclick = () => startNinjaGame();
-    container.querySelector("#playRhythmBtn").onclick = () => showRhythmMenu();
+    const hexMap = container.querySelector("#gamesHexMap");
+    hexMap.querySelectorAll(".hex-item").forEach(el => {
+        el.addEventListener("click", () => showGameInfoModal(el.dataset.game));
+        el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showGameInfoModal(el.dataset.game); }
+        });
+    });
+    initGamesHexMap(hexMap);
 
     // Диплинк из "Паутинки" на конкретную игру: games/?play=snake&from=pautinka
     // (раньше Паутинка запускала игру прямо inline, без перехода на страницу —
@@ -377,16 +374,75 @@ async function showGamesScreen() {
     }
     if (play) {
         history.replaceState(null, "", location.pathname);
-        const launchers = {
-            snake: startSnakeGame,
-            flappy: startFlappyGame,
-            doodle: startDoodleGame,
-            runner: startRunnerGame,
-            ninja: startNinjaGame,
-            rhythm: showRhythmMenu
-        };
-        if (launchers[play]) launchers[play]();
+        const g = GAMES_META.find(x => x.id === play);
+        if (g) g.start();
     }
+}
+
+// Модалка "что за игра": название, короткое описание, таблица лидеров (если
+// у игры есть общий рекорд — у Ритм-Аркады свои рекорды по трекам внутри
+// её собственного меню) и кнопка "Играть".
+function showGameInfoModal(gameId) {
+    const g = GAMES_META.find(x => x.id === gameId);
+    if (!g) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "gameInfoModal";
+    overlay.innerHTML = `
+        <div class="modal-content" style="text-align: center;">
+            <button type="button" class="modal-close-btn" aria-label="Закрыть">✕</button>
+            <h3>${g.emoji} ${g.title}</h3>
+            <p class="game-info-desc">${g.desc}</p>
+            ${g.leaderboard ? buildLeaderboardHtml(g.id) : ""}
+            <button type="button" id="gameInfoPlayBtn" class="btn-games-green">▶️ Играть</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector(".modal-close-btn").onclick = () => overlay.remove();
+    overlay.querySelector("#gameInfoPlayBtn").onclick = () => { overlay.remove(); g.start(); };
+}
+
+// Считает центры значков ПОСЛЕ применения их "шахматных" transform:translateX
+// (через getBoundingClientRect, а не offsetLeft/Top, которые transform не
+// учитывают) и рисует пунктирную SVG-линию через все точки по порядку.
+function layoutGamesHexMap(map) {
+    const svg = map.querySelector(".games-hexmap-line");
+    const items = [...map.querySelectorAll(".hex-item")];
+    if (!svg || items.length === 0) return;
+
+    const mapRect = map.getBoundingClientRect();
+    const points = items.map(el => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2 - mapRect.left, y: r.top + r.height / 2 - mapRect.top };
+    });
+
+    svg.setAttribute("viewBox", `0 0 ${mapRect.width} ${mapRect.height}`);
+
+    let path = svg.querySelector(".games-hexmap-path");
+    if (!path) {
+        path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("class", "games-hexmap-path");
+        svg.appendChild(path);
+    }
+    path.setAttribute("d", points.map((p, i) => (i === 0 ? "M" : "L") + p.x + "," + p.y).join(" "));
+}
+
+// Пересчитывает линию сразу и при ресайзе/повороте экрана, пока карта игр
+// существует на странице — слушатель сам себя снимает, когда карта исчезла.
+let gamesHexMapResizeHandler = null;
+function initGamesHexMap(map) {
+    layoutGamesHexMap(map);
+    requestAnimationFrame(() => { if (map.isConnected) layoutGamesHexMap(map); }); // на случай если на первом кадре эмодзи ещё не легли по месту
+
+    if (gamesHexMapResizeHandler) window.removeEventListener("resize", gamesHexMapResizeHandler);
+    gamesHexMapResizeHandler = () => {
+        if (map.isConnected) layoutGamesHexMap(map);
+        else window.removeEventListener("resize", gamesHexMapResizeHandler);
+    };
+    window.addEventListener("resize", gamesHexMapResizeHandler);
 }
 
 // ------------------------- ЗМЕЙКА -------------------------
@@ -2042,7 +2098,7 @@ function startNinjaGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    setEmojiTitle(title, "⚔ Эмодзи Ниндзя");
+    setEmojiTitle(title, "🐱‍👤 Эмодзи Ниндзя");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
