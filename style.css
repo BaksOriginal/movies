@@ -853,6 +853,7 @@ button:nth-child(6){
     to { opacity: 1; }
 }
 .modal-content {
+    position: relative;
     background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
     border: 1px solid rgba(255,46,147,0.25);
     padding: 25px;
@@ -1962,6 +1963,139 @@ body.batch-add-screen-active .container {
 
 .leaderboard-name { color: var(--text); }
 .leaderboard-score { font-weight: 700; color: var(--pink-soft); }
+
+/* ===== Экран "Игры": шестиугольная карта значков в шахматном порядке =====
+   Названия игр и рекорды здесь больше не показываются — они уехали в
+   модалку (см. .game-info-desc и .modal-close-btn ниже), которая
+   открывается тапом по значку. Сама карта — вертикальная колонка значков,
+   через один сдвинутых влево/вправо, а между их центрами протянута
+   пунктирная SVG-линия (пересчитывается в JS через layoutGamesHexMap). */
+.games-hexmap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 30px;
+    padding: 14px 0 26px;
+}
+
+.games-hexmap-line {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.games-hexmap-path {
+    fill: none;
+    stroke: var(--purple);
+    stroke-width: 2.5;
+    stroke-dasharray: 7 9;
+    stroke-linecap: round;
+    opacity: 0.6;
+    filter: drop-shadow(0 0 4px rgba(139,59,255,0.45));
+}
+
+.hex-item {
+    position: relative;
+    z-index: 1;
+    width: 82px;
+    height: 74px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.15s ease;
+}
+
+/* Шахматный порядок: нечётные значки — влево, чётные — вправо от центра */
+.hex-item:nth-of-type(odd)  { transform: translateX(-52px); }
+.hex-item:nth-of-type(even) { transform: translateX(52px); }
+.hex-item:nth-of-type(odd):active  { transform: translateX(-52px) scale(0.92); }
+.hex-item:nth-of-type(even):active { transform: translateX(52px) scale(0.92); }
+
+.hex-shape {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    padding: 3px;
+    background: linear-gradient(135deg, rgba(255,46,147,0.95), rgba(139,59,255,0.95));
+    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,0.4)) drop-shadow(0 0 14px rgba(255,46,147,0.25));
+    transition: filter 0.2s ease;
+}
+
+.hex-item:hover .hex-shape,
+.hex-item:focus-visible .hex-shape {
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,0.4)) drop-shadow(0 0 20px rgba(255,46,147,0.55));
+}
+
+.hex-shape-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(150deg, var(--panel-2), var(--panel));
+    clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+.hex-emoji {
+    font-size: 32px;
+    line-height: 1;
+    filter: drop-shadow(0 0 4px rgba(0,0,0,0.35));
+}
+
+@media (min-width: 700px) {
+    .hex-item { width: 100px; height: 90px; }
+    .hex-item:nth-of-type(odd)  { transform: translateX(-86px); }
+    .hex-item:nth-of-type(even) { transform: translateX(86px); }
+    .hex-item:nth-of-type(odd):active  { transform: translateX(-86px) scale(0.92); }
+    .hex-item:nth-of-type(even):active { transform: translateX(86px) scale(0.92); }
+    .hex-emoji { font-size: 40px; }
+}
+
+/* Короткое описание "что за игра" внутри модалки showGameInfoModal */
+.game-info-desc {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.45;
+    margin: 0 0 16px;
+}
+
+/* Крестик закрытия модалки в углу — компактная кнопка поверх общих
+   правил button{} (width:100%, min-height:60px и т.п. из style.css), поэтому
+   почти всё переопределяется через !important, как и у других вариантов
+   кнопок в проекте (.btn-games-green и т.д.). */
+.modal-close-btn {
+    position: absolute !important;
+    top: 12px !important;
+    right: 14px !important;
+    width: 30px !important;
+    min-height: 30px !important;
+    height: 30px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    color: var(--text-faint) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    font-size: 18px !important;
+    animation: none !important;
+}
+.modal-close-btn:hover {
+    transform: none !important;
+    color: var(--text) !important;
+    box-shadow: none !important;
+    border-color: transparent !important;
+}
+.modal-close-btn:active {
+    transform: scale(0.9) !important;
+}
 
 /* ===== Игровой экран (canvas + управление) ===== */
 .game-wrap {
