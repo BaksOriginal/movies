@@ -3562,86 +3562,91 @@ body.online-search-screen-active .container {
     text-align: center;
 }
 
+
 /* ==========================================
    ГЛИТЧ-ВСПЫШКА ПРИ ВХОДЕ (playLoginGlitchAnimation)
    ========================================== */
+
+/* Слой 1 — сама реальная геометрия .container на секунду "ломается":
+   рывками (steps, без плавного тайминга) дёргается transform'ом и цветовым
+   filter'ом. Это НЕ имитация поверх контента, а искажение настоящего
+   интерфейса — то самое "поломки геометрии", а не полоса поверх экрана. */
+.container.glitch-active {
+    animation: glitchGeometry 0.6s steps(1, end) both;
+    will-change: transform, filter;
+}
+@keyframes glitchGeometry {
+    0%   { transform: translate(0,0) skewX(0deg); filter: none; }
+    4%   { transform: translate(-10px, 3px) skewX(-3deg); filter: hue-rotate(25deg) saturate(2.4) contrast(1.3); }
+    8%   { transform: translate(8px, -4px) skewX(2deg); filter: hue-rotate(-20deg) saturate(1.8) contrast(1.2); }
+    13%  { transform: translate(-6px, 2px) skewX(-1deg); filter: hue-rotate(10deg) saturate(2); }
+    18%  { transform: translate(0,0) skewX(0deg); filter: none; }
+    24%  { transform: translate(5px, -3px) skewX(1.5deg); filter: hue-rotate(-15deg) saturate(2.2); }
+    30%  { transform: translate(-4px, 2px) skewX(-2deg); filter: hue-rotate(20deg) saturate(1.6); }
+    36%  { transform: translate(0,0) skewX(0deg); filter: none; }
+    50%  { transform: translate(3px, -2px) skewX(1deg); filter: hue-rotate(12deg) saturate(1.8); }
+    56%  { transform: translate(0,0) skewX(0deg); filter: none; }
+    100% { transform: translate(0,0) skewX(0deg); filter: none; }
+}
+
+/* Слой 2 — оверлей с разрозненными блоками цветного пиксельного шума
+   (не сплошные полосы, а именно "битые" пиксельные пятна в случайных
+   местах экрана — самый узнаваемый вид глитча). */
 .login-glitch-overlay {
     position: fixed;
     inset: 0;
     z-index: 99999;
     pointer-events: none;
     overflow: hidden;
-    animation: lgoDissolve 0.8s ease forwards;
+    animation: lgoDissolve 0.65s ease forwards;
 }
-.lgo-slice {
-    position: absolute;
-    inset: 0;
-    mix-blend-mode: screen;
-    opacity: 0;
-    animation-duration: 0.65s;
-    animation-timing-function: ease-out;
-    animation-fill-mode: forwards;
-}
-.lgo-slice-cyan { background: var(--cyan); animation-name: lgoJitterCyan; }
-.lgo-slice-pink { background: var(--pink); animation-name: lgoJitterPink; }
-
-.lgo-noise {
-    position: absolute;
-    inset: -20%;
-    background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, transparent 1px, transparent 3px);
-    mix-blend-mode: overlay;
-    opacity: 0;
-    animation: lgoNoiseFlicker 0.65s steps(1, end) forwards;
-}
-.lgo-scanline {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: -5%;
-    height: 3px;
-    background: linear-gradient(90deg, transparent, var(--cyan), var(--pink), transparent);
-    box-shadow: 0 0 14px var(--cyan);
-    opacity: 0;
-    animation: lgoScan 0.7s ease-out forwards;
-}
-
 @keyframes lgoDissolve {
     0%   { opacity: 1; }
-    65%  { opacity: 1; }
+    75%  { opacity: 1; }
     100% { opacity: 0; }
 }
-@keyframes lgoJitterCyan {
-    0%   { opacity: 0;    transform: translate(0,0);      clip-path: inset(0% 0 100% 0); }
-    8%   { opacity: 0.4;  transform: translate(-6px,0);    clip-path: inset(8% 0 55% 0); }
-    16%  { opacity: 0.2;  transform: translate(4px,-2px);  clip-path: inset(48% 0 18% 0); }
-    24%  { opacity: 0.35; transform: translate(-3px,1px);  clip-path: inset(18% 0 42% 0); }
-    32%  { opacity: 0.15; transform: translate(5px,0);     clip-path: inset(70% 0 6% 0); }
-    45%  { opacity: 0.25; transform: translate(-4px,0);    clip-path: inset(30% 0 30% 0); }
-    60%  { opacity: 0.1;  transform: translate(2px,0);     clip-path: inset(60% 0 15% 0); }
-    100% { opacity: 0;    transform: translate(0,0); }
+
+/* Общая "пиксельная" текстура — блочный чередующийся узор из голубого/
+   розового на прозрачном, увеличенный и без сглаживания (pixelated), чтобы
+   реально читаться как битые цветные пиксели, а не как градиент. */
+.lgo-fullnoise {
+    position: absolute;
+    inset: 0;
+    background-image: conic-gradient(from 90deg, var(--cyan) 90deg, transparent 90deg 180deg, var(--pink) 180deg 270deg, transparent 270deg);
+    background-size: 5px 5px;
+    image-rendering: pixelated;
+    mix-blend-mode: screen;
+    opacity: 0;
+    animation: lgoFullNoiseFlicker 0.6s steps(1, end) forwards;
 }
-@keyframes lgoJitterPink {
-    0%   { opacity: 0;    transform: translate(0,0);      clip-path: inset(100% 0 0% 0); }
-    8%   { opacity: 0.35; transform: translate(6px,0);     clip-path: inset(60% 0 12% 0); }
-    16%  { opacity: 0.2;  transform: translate(-4px,2px);  clip-path: inset(6% 0 62% 0); }
-    24%  { opacity: 0.3;  transform: translate(3px,-1px);  clip-path: inset(35% 0 28% 0); }
-    32%  { opacity: 0.12; transform: translate(-5px,0);    clip-path: inset(12% 0 68% 0); }
-    45%  { opacity: 0.22; transform: translate(4px,0);     clip-path: inset(45% 0 20% 0); }
-    60%  { opacity: 0.08; transform: translate(-2px,0);    clip-path: inset(20% 0 55% 0); }
-    100% { opacity: 0;    transform: translate(0,0); }
-}
-@keyframes lgoNoiseFlicker {
+@keyframes lgoFullNoiseFlicker {
     0%, 100% { opacity: 0; }
-    10% { opacity: 0.45; }
-    20% { opacity: 0.1; }
-    30% { opacity: 0.4; }
-    40% { opacity: 0.08; }
-    55% { opacity: 0.3; }
-    65% { opacity: 0.05; }
+    6%  { opacity: 0.22; }
+    12% { opacity: 0.04; }
+    30% { opacity: 0.18; }
+    38% { opacity: 0.03; }
+    52% { opacity: 0.12; }
+    60% { opacity: 0; }
 }
-@keyframes lgoScan {
-    0%   { top: -5%;  opacity: 0; }
-    10%  { opacity: 1; }
-    70%  { opacity: 1; }
-    100% { top: 105%; opacity: 0; }
+
+.lgo-block {
+    position: absolute;
+    background-image: conic-gradient(from 90deg, var(--block-color-a) 90deg, transparent 90deg 180deg, var(--block-color-b) 180deg 270deg, transparent 270deg);
+    background-size: 6px 6px;
+    image-rendering: pixelated;
+    mix-blend-mode: screen;
+    opacity: 0;
+    animation: lgoBlockFlicker 0.55s steps(1, end) forwards;
+}
+.lgo-block-cyan { --block-color-a: var(--cyan); --block-color-b: var(--pink); }
+.lgo-block-pink { --block-color-a: var(--pink); --block-color-b: var(--cyan); }
+@keyframes lgoBlockFlicker {
+    0%   { opacity: 0;    transform: translate(0,0); }
+    10%  { opacity: 0.8;  transform: translate(-3px, 1px); }
+    18%  { opacity: 0.15; transform: translate(2px, -2px); }
+    26%  { opacity: 0.7;  transform: translate(-4px, 0); }
+    34%  { opacity: 0.1;  transform: translate(0, 3px); }
+    45%  { opacity: 0.5;  transform: translate(3px, -1px); }
+    55%  { opacity: 0;    transform: translate(0,0); }
+    100% { opacity: 0; }
 }
