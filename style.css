@@ -1338,16 +1338,6 @@ body.batch-add-screen-active .container {
     margin: 0;
 }
 
-/* Строка с оценками пользователей под фильмом */
-.item-ratings {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--pink-soft);
-    text-align: left;
-    padding: 4px 18px 0;
-    min-height: 4px;
-}
-
 /* Кнопка удаления оценки внутри модалки */
 .action-buttons .btn-action-delete {
     width: 100%;
@@ -1360,6 +1350,27 @@ body.batch-add-screen-active .container {
     flex-wrap: wrap;
     gap: 4px;
     margin: 5px 0;
+}
+
+/* На узких экранах 30px×10 звёзд + отступы физически не помещаются в
+   модалку (90vw, максимум 400px, минус паддинги) — последняя звезда
+   переносилась на новую строку. Уменьшаем размер и зазор ступенчато под
+   типичные ширины телефонов, чтобы все 10 гарантированно влезали в ряд. */
+@media (max-width: 480px) {
+    .rating-stars {
+        gap: 3px;
+    }
+    .rating-star {
+        font-size: 23px;
+    }
+}
+@media (max-width: 360px) {
+    .rating-stars {
+        gap: 2px;
+    }
+    .rating-star {
+        font-size: 19px;
+    }
 }
 
 .rating-star {
@@ -2219,17 +2230,18 @@ body.batch-add-screen-active .container {
     }
 }
 
-/* Кружок "недавно добавлено" (в течение 2 суток) — неоновая цианoвая пульсация */
-.new-title-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    min-width: 10px;
-    border-radius: 50%;
-    background: var(--cyan);
-    box-shadow: 0 0 0 3px rgba(46,232,255,0.2), 0 0 10px rgba(46,232,255,0.7);
-    flex-shrink: 0;
+/* Бейдж "недавно добавлено" (в течение 2 суток) — четырёхугольная звезда
+   в углу постера карточки каталога, вместо старого мигающего кружка */
+.cc-new-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--cyan);
+    text-shadow: 0 0 6px rgba(46,232,255,0.9), 0 0 12px rgba(46,232,255,0.6);
     animation: newDotPulse 1.6s ease infinite;
+    pointer-events: none;
 }
 
 @keyframes newDotPulse {
@@ -2637,11 +2649,6 @@ body.batch-add-screen-active .container {
     text-align: left;
 }
 
-.comment-title-group h3 {
-    color: var(--pink-soft);
-    font-size: 17px;
-}
-
 .comment-card {
     background: var(--panel-2);
     border: 1px solid var(--line);
@@ -2682,6 +2689,127 @@ body.batch-add-screen-active .container {
     font-size: 12px;
     border-radius: 10px;
     box-shadow: none;
+}
+
+/* ===== Общий экран "Комментарии" (главная): карточка тайтла слева,
+   комментарии по нему справа. Не путать с .comment-card выше — та
+   используется в модалке комментариев ОДНОГО тайтла (там правка/удаление
+   остаются прямо в карточке); .ac-* здесь — только для чтения, вся работа
+   с комментарием происходит в модалке (см. showCommentDetailModal в JS). */
+.ac-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.ac-title-card {
+    flex: 0 0 84px;
+    width: 84px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ac-title-poster-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    background: var(--panel-deep);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.ac-title-poster {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ac-title-poster-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    opacity: 0.5;
+}
+
+.ac-title-name {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--pink-soft);
+    font-weight: 600;
+    text-align: center;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.ac-comments-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ac-comment-card {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 14px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.1s ease;
+}
+.ac-comment-card:hover {
+    border-color: rgba(255,127,196,0.35);
+}
+.ac-comment-card:active {
+    transform: scale(0.98);
+}
+
+.ac-comment-header {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--pink-soft);
+    margin-bottom: 3px;
+}
+
+.ac-comment-text {
+    font-size: 13.5px;
+    color: var(--text);
+    word-wrap: break-word;
+    /* Обрезаем длинный комментарий прямо в списке, чтобы карточка не
+       растягивалась далеко за пределы постера тайтла слева — целиком текст
+       виден в модалке по тапу (showCommentDetailModal). */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Модалка одного комментария целиком (showCommentDetailModal) */
+.comment-detail-subtitle {
+    color: var(--text-faint);
+    font-size: 12.5px;
+    margin: 0 0 14px;
+}
+.comment-detail-text {
+    text-align: left;
+    font-size: 14.5px;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: var(--panel-deep);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 0 0 16px;
+    max-height: 40vh;
+    overflow-y: auto;
 }
 
 /* ===== Чат: цитата ответа внутри пузыря ===== */
@@ -3681,6 +3809,262 @@ body.online-search-screen-active .container {
     }
     .online-search-pager {
         gap: 3px;
+    }
+}
+
+/* ==========================================
+   КАРТОЧКИ КАТАЛОГА (Фильмы/Мультфильмы/Аниме/Сериалы + поиск/фильтр)
+   Тот же визуальный язык, что у .online-search-card/.osc-* выше — только
+   вместо кнопки "Добавить" три кнопки действий (⭐/🔖/✏️).
+   ========================================== */
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 14px;
+    margin: 4px 0 16px;
+}
+
+/* .movie-item остаётся внешней обёрткой (используется другими частями
+   скрипта для поиска карточки по DOM); отступ между карточками теперь
+   даёт gap самой сетки — но только внутри неё. Секретная категория
+   (скретч-карты/плашка) в сетку не попадает и получает отступ по
+   собственному правилу .movie-item{margin:12px 0} чуть выше по файлу. */
+.catalog-grid .movie-item {
+    margin: 0;
+}
+
+.catalog-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    animation: fadeUp 0.3s ease both;
+    height: 100%;
+}
+.catalog-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255,209,92,0.4);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.45), 0 0 18px rgba(255,209,92,0.18);
+}
+
+.cc-poster-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    background: var(--panel-deep);
+    overflow: hidden;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.cc-poster {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.cc-poster-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    opacity: 0.5;
+}
+/* Когда TMDB не нашёл постер вообще — вместо иконки короткий текст, поэтому
+   размер шрифта заметно меньше и есть отступы, чтобы текст не вылезал за
+   рамку постера-заглушки */
+.cc-poster-placeholder.cc-poster-empty {
+    font-size: 12px;
+    line-height: 1.3;
+    text-align: center;
+    padding: 0 12px;
+    opacity: 0.55;
+}
+
+/* Карточка-папка франшизы — тот же .catalog-card, но целиком кликабельная
+   (не только постер) и без экшн-кнопок/описания под названием */
+.catalog-card-franchise {
+    cursor: pointer;
+}
+.cc-poster-franchise {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 10px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--gold);
+    text-shadow: 0 0 10px rgba(255,209,92,0.3);
+    background: linear-gradient(160deg, var(--panel-deep), rgba(255,209,92,0.08));
+}
+
+.cc-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-grow: 1;
+}
+
+/* Переопределяем "тяжёлый" вид .item (рамка/фон/паддинг кнопки-пилюли,
+   см. базовое правило .item выше) — внутри карточки это просто заголовок */
+.catalog-card .item {
+    all: unset;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.25;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.cc-genres {
+    margin: 0;
+    font-size: 11px;
+    color: var(--cyan);
+    opacity: 0.85;
+}
+.cc-desc {
+    margin: 2px 0 0;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.cc-actions {
+    display: flex;
+    gap: 6px;
+    /* margin-top: auto — прибивает кнопки к низу карточки вместо того,
+       чтобы они шли сразу за описанием переменной длины (из-за чего у
+       карточек с коротким описанием кнопки "плавали" выше, чем у соседних
+       карточек в том же ряду сетки, где высота у всех одинаковая) */
+    margin-top: auto;
+    padding-top: 8px;
+}
+.cc-btn {
+    flex: 1 1 0;
+    min-height: 0 !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 7px 0 !important;
+    border-radius: 8px !important;
+    border: 1.5px solid var(--line) !important;
+    background: var(--panel-deep) !important;
+    color: var(--text-dim) !important;
+    font-size: 15px !important;
+    line-height: 1 !important;
+    cursor: pointer;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.cc-btn:hover {
+    border-color: var(--cyan) !important;
+}
+.cc-btn-star.cc-active {
+    border-color: var(--gold) !important;
+    color: var(--gold) !important;
+    box-shadow: 0 0 10px rgba(255,209,92,0.35);
+}
+.cc-btn-bookmark.cc-active {
+    border-color: var(--cyan) !important;
+    color: var(--cyan) !important;
+    box-shadow: 0 0 10px rgba(46,232,255,0.35);
+}
+.cc-btn-bookmark.cc-wishlist {
+    border-color: var(--pink-soft) !important;
+    color: var(--pink-soft) !important;
+}
+
+/* Сводка оценок (моя/партнёра) в модалке тайтла (долгое нажатие на постер) */
+.am-ratings-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0 0 18px;
+}
+.am-rating-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--panel-deep);
+    border: 1px solid var(--line);
+    font-size: 13.5px;
+    color: var(--text);
+}
+.am-rating-row span:last-child {
+    color: var(--gold);
+    font-weight: 700;
+}
+.am-rating-row.am-rating-avg {
+    margin-top: 2px;
+    border-color: rgba(255,209,92,0.35);
+    background: rgba(255,209,92,0.08);
+}
+.am-rating-row.am-rating-avg span:first-child {
+    color: var(--text-dim);
+    font-style: italic;
+}
+.am-ratings-empty {
+    margin: 0 0 18px;
+    font-size: 13px;
+    color: var(--text-faint);
+    text-align: center;
+}
+
+/* Панель "Показывать по: 12/24/48/96/Все" наверху экрана каталога/поиска */
+.catalog-perpage-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 6px 0 14px;
+    text-align: center;
+}
+.catalog-perpage-label {
+    font-size: 12.5px;
+    color: var(--text-faint);
+}
+.catalog-perpage-select {
+    width: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 5px 10px !important;
+    border-radius: 8px !important;
+    border: 1px solid var(--line) !important;
+    background: var(--panel-deep) !important;
+    color: var(--text) !important;
+    font-size: 12.5px !important;
+    cursor: pointer;
+}
+
+/* На очень узких экранах карточкам хватает и одной колонки поменьше —
+   пусть лучше будет 2 колонки покомпактнее, чем один растянутый столбец */
+@media (max-width: 420px) {
+    .catalog-grid {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 10px;
+    }
+    .cc-btn {
+        font-size: 13px !important;
+        padding: 6px 0 !important;
     }
 }
 
