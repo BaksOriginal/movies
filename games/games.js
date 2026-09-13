@@ -312,7 +312,7 @@ const GAMES_META = [
     { id: "flappy", emoji: "🍫", title: "Эчпочмоня vs. Шоколадки", desc: "Лети между шоколадками, не задевая их — чем дальше, тем плотнее строй.",     leaderboard: true,  start: () => startFlappyGame() },
     { id: "doodle", emoji: "👾", title: "Doodle Jump",             desc: "Прыгай с платформы на платформу и забирайся как можно выше.",               leaderboard: true,  start: () => startDoodleGame() },
     { id: "runner", emoji: "🥦", title: "Бега Брокколи",           desc: "Беги без остановки и перепрыгивай препятствия на пути.",                    leaderboard: true,  start: () => startRunnerGame() },
-    { id: "ninja",  emoji: "🐱‍👤",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
+    { id: "ninja",  emoji: "💣",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
     { id: "rhythm", emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() }
 ];
 
@@ -2098,7 +2098,7 @@ function startNinjaGame() {
 
     app.innerHTML = "";
     let title = document.createElement("h1");
-    setEmojiTitle(title, "🐱‍👤 Эмодзи Ниндзя");
+    setEmojiTitle(title, "💣 Эмодзи Ниндзя");
     title.style.marginBottom = "5px";
     app.appendChild(title);
 
