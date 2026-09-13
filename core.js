@@ -242,9 +242,62 @@ function hashStringToSeed(str) {
 // ==========================================
 let isMusicPlaying = localStorage.getItem("musicEnabled") === "true";
 
+// Сохраняет текущую позицию и статус воспроизведения фоновой музыки перед
+// уходом на другую страницу сайта (например, из script.js — при переходе
+// на Игры/Совместный просмотр: это полный переход по location.href, а не
+// переключение экрана внутри SPA, поэтому сам audio-элемент и его
+// состояние при этом уничтожаются вместе со страницей). Восстанавливается
+// в applyMusicResumeState() ниже при следующей загрузке любой страницы.
+function saveMusicPositionBeforeLeaving() {
+    const audio = document.getElementById("bgMusic");
+    if (!audio) return;
+    try {
+        localStorage.setItem("musicResumeState", JSON.stringify({
+            time: audio.currentTime,
+            playing: !audio.paused
+        }));
+    } catch (e) {
+        // localStorage недоступен (приватный режим и т.п.) — не критично,
+        // просто не будет автовозобновления с того же места.
+    }
+}
+
+// Ставит трек на позицию, сохранённую перед прошлым уходом со страницы
+// (см. saveMusicPositionBeforeLeaving() выше) — один раз за загрузку
+// страницы, сразу стирая сохранённое состояние, чтобы обычная ручная
+// перезагрузка (F5) не перематывала музыку заново при каждом обновлении.
+// Само воспроизведение здесь НЕ запускаем: браузеры блокируют autoplay со
+// звуком без жеста пользователя, поэтому просто выставляем позицию, а
+// реальный play() ниже, в setupMusicAutoplay(), стартует по первому клику
+// (и подхватит уже выставленную позицию, а не начало трека).
+function applyMusicResumeState(audio) {
+    let saved;
+    try {
+        const raw = localStorage.getItem("musicResumeState");
+        if (!raw) return;
+        localStorage.removeItem("musicResumeState");
+        saved = JSON.parse(raw);
+    } catch (e) {
+        return;
+    }
+    if (!saved || !saved.playing || typeof saved.time !== "number" || !isFinite(saved.time)) return;
+
+    const applyTime = () => { audio.currentTime = saved.time; };
+    // currentTime можно безопасно выставлять только после того, как у
+    // audio есть метаданные (иначе браузер значение проигнорирует) —
+    // readyState >= 1 (HAVE_METADATA) значит, что они уже подгружены.
+    if (audio.readyState >= 1) {
+        applyTime();
+    } else {
+        audio.addEventListener("loadedmetadata", applyTime, { once: true });
+    }
+}
+
 function setupMusicAutoplay() {
     const audio = document.getElementById("bgMusic");
     if (!audio) return; // на странице нет <audio id="bgMusic"> — тихо выходим
+
+    applyMusicResumeState(audio);
 
     const playHandler = () => {
         if (isMusicPlaying) {

@@ -123,6 +123,53 @@ body{
 
 }
 
+/* "Живой" фон — вместо (или точнее, поверх) статичного градиента выше два
+   размытых цветных пятна медленно дрейфуют по экрану. Дёшево по ресурсам:
+   blur() считается один раз для каждого пятна как отдельный GPU-слой
+   (will-change), а анимируется только transform — это композитится видеокартой
+   без перерисовки на каждый кадр, в отличие от анимации самого background.
+   При prefers-reduced-motion отключается общим правилом выше по файлу. */
+body::before,
+body::after{
+    content: "";
+    position: fixed;
+    z-index: -2;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(60px);
+    opacity: 0.5;
+    will-change: transform;
+}
+
+body::before{
+    width: min(60vw, 480px);
+    height: min(60vw, 480px);
+    left: -12%;
+    top: -10%;
+    background: radial-gradient(circle, rgba(139,59,255,0.4), transparent 70%);
+    animation: bgBlobDriftA 28s ease-in-out infinite alternate;
+}
+
+body::after{
+    width: min(55vw, 440px);
+    height: min(55vw, 440px);
+    right: -14%;
+    bottom: -8%;
+    background: radial-gradient(circle, rgba(255,46,147,0.32), transparent 70%);
+    animation: bgBlobDriftB 34s ease-in-out infinite alternate;
+}
+
+@keyframes bgBlobDriftA{
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(8vw, 10vh) scale(1.18); }
+    100% { transform: translate(-5vw, 5vh) scale(0.94); }
+}
+@keyframes bgBlobDriftB{
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(-9vw, -7vh) scale(1.12); }
+    100% { transform: translate(5vw, -6vh) scale(0.9); }
+}
+
 
 
 /* Основной контейнер */
@@ -1078,6 +1125,29 @@ button:nth-child(6){
         height: 200px;
     }
 }
+
+/* Искры-отклик на приятное действие (отметка "Просмотрено", оценка) —
+   в отличие от .randomizer-spark выше, позиционируются от viewport
+   (fixed), а не от родителя, потому что кнопка, у которой всплеск, может
+   быть где угодно на экране/внутри модалки (см. spawnSparkBurst в JS). */
+.spark-particle {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 0 6px currentColor;
+    animation: sparkParticleFly 0.6s ease-out forwards;
+}
+@keyframes sparkParticleFly {
+    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--dx), var(--dy)) scale(0.2); opacity: 0; }
+}
+
 .modal-buttons {
     display: flex;
     gap: 10px;
@@ -3405,6 +3475,21 @@ body.batch-add-screen-active .container {
     -webkit-user-select: text;
 }
 
+/* Эмодзи узла Паутинки — обычный HTML-текст внутри foreignObject (см. JS),
+   а не SVG <text>, специально ради нативного цветного рендера эмодзи. */
+.pautinka-node-emoji {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 .pautinka-home-shape {
     filter: drop-shadow(0 0 14px rgba(255,209,92,0.65));
 }
@@ -4166,5 +4251,141 @@ body.online-search-screen-active .container {
     34%  { opacity: 0.1;  transform: translate(0, 3px); }
     45%  { opacity: 0.5;  transform: translate(3px, -1px); }
     55%  { opacity: 0;    transform: translate(0,0); }
+    100% { opacity: 0; }
+}
+
+/* ==========================================
+   ЭФФЕКТ "ОТМОТКИ" VHS-КАССЕТЫ ПРИ КНОПКЕ "⬅️ Назад"
+   (playVhsRewindTransition в script.js)
+   ========================================== */
+
+/* Слой 1 — реальная геометрия .container "дрожит", как плёнка на трекинге:
+   рывками (steps, без плавного тайминга) едет по горизонтали и слегка
+   "сплющивается" по вертикали, с короткими вспышками яркости/контраста —
+   в отличие от глитч-эффекта входа (glitchGeometry), тут нет смены оттенка
+   (hue-rotate), только то, что реально бывает при сбое трекинга плёнки. */
+.container.vhs-active {
+    animation: vhsTracking 0.5s steps(1, end) both;
+    will-change: transform, filter;
+}
+@keyframes vhsTracking {
+    0%   { transform: translateX(0) scaleY(1); filter: none; }
+    6%   { transform: translateX(-6px) scaleY(0.995); filter: brightness(1.15) contrast(1.25) saturate(0.7); }
+    14%  { transform: translateX(5px) scaleY(1.006); filter: brightness(0.85) contrast(1.1) saturate(1.3); }
+    22%  { transform: translateX(-3px) scaleY(0.998); filter: brightness(1.1) saturate(0.8); }
+    30%  { transform: translateX(0) scaleY(1); filter: none; }
+    40%  { transform: translateX(4px) scaleY(1.004); filter: brightness(1.05) saturate(1.2); }
+    50%  { transform: translateX(-2px) scaleY(0.997); filter: contrast(1.15); }
+    62%  { transform: translateX(0) scaleY(1); filter: none; }
+    100% { transform: translateX(0) scaleY(1); filter: none; }
+}
+
+/* Слой 2 — полноэкранный оверлей: сканлайны + бегущие полосы шума +
+   виньетка + OSD-плашка "◀◀ REW", как у старого видеомагнитофона.
+   Сама смена контента экрана (см. playVhsRewindTransition) происходит
+   примерно на 220мс — внутри "полки" удержания непрозрачности ниже,
+   поэтому подмена спрятана за рябью, а не видна напрямую. */
+.vhs-rewind-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    pointer-events: none;
+    overflow: hidden;
+    animation: vhsDissolve 0.62s ease-out forwards;
+}
+@keyframes vhsDissolve {
+    0%   { opacity: 0; }
+    8%   { opacity: 1; }
+    70%  { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* Бегущие горизонтальные сканлайны — быстрый вертикальный "прогон"
+   создаёт ощущение катящейся ТВ-помехи поверх всего экрана. */
+.vhs-scanlines {
+    position: absolute;
+    inset: -4px;
+    background-image: repeating-linear-gradient(
+        to bottom,
+        rgba(242,233,255,0.09) 0px,
+        rgba(242,233,255,0.09) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    mix-blend-mode: overlay;
+    animation: vhsScanScroll 0.12s linear infinite;
+}
+@keyframes vhsScanScroll {
+    0%   { background-position: 0 0; }
+    100% { background-position: 0 9px; }
+}
+
+/* Горизонтальные полосы шума в цветах темы (cyan/pink) — дёргаются влево-
+   вправо короткими рывками (см. --band-shift, задаётся из JS случайным
+   числом на каждую полосу, чтобы они не двигались синхронно). */
+.vhs-noise-band {
+    position: absolute;
+    left: -4vw;
+    width: 108vw;
+    height: 2vh;
+    opacity: 0;
+    mix-blend-mode: screen;
+    animation: vhsBandFlicker 0.5s steps(1, end) forwards;
+}
+.vhs-band-cyan {
+    background: linear-gradient(90deg, transparent, var(--cyan) 20%, var(--cyan) 80%, transparent);
+    box-shadow: var(--glow-cyan);
+}
+.vhs-band-pink {
+    background: linear-gradient(90deg, transparent, var(--pink) 20%, var(--pink) 80%, transparent);
+    box-shadow: var(--glow-pink);
+}
+@keyframes vhsBandFlicker {
+    0%   { opacity: 0;    transform: translateX(0); }
+    12%  { opacity: 0.55; transform: translateX(calc(-1 * var(--band-shift, 10vw))); }
+    24%  { opacity: 0.15; transform: translateX(var(--band-shift, 10vw)); }
+    38%  { opacity: 0.4;  transform: translateX(calc(-0.5 * var(--band-shift, 10vw))); }
+    55%  { opacity: 0.1;  transform: translateX(0); }
+    100% { opacity: 0;    transform: translateX(0); }
+}
+
+/* Мягкая тёмная виньетка, чуть "проседающая" по центру, как экран старого
+   телевизора/видеомагнитофона на паузе перемотки. */
+.vhs-vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(5,2,10,0.55) 100%);
+    animation: vhsVignettePulse 0.62s ease-out forwards;
+}
+@keyframes vhsVignettePulse {
+    0%   { opacity: 0; }
+    15%  { opacity: 1; }
+    75%  { opacity: 0.85; }
+    100% { opacity: 0; }
+}
+
+/* OSD-плашка "◀◀ REW" — тот самый узнаваемый текст в углу экрана у
+   видеомагнитофонов при перемотке назад, мигает рывками. */
+.vhs-osd {
+    position: absolute;
+    left: 18px;
+    bottom: 22px;
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan);
+    text-shadow: var(--glow-cyan), 2px 0 var(--pink);
+    opacity: 0;
+    animation: vhsOsdBlink 0.62s steps(1, end) forwards;
+}
+@keyframes vhsOsdBlink {
+    0%   { opacity: 0; }
+    10%  { opacity: 1; }
+    22%  { opacity: 0.2; }
+    32%  { opacity: 1; }
+    45%  { opacity: 0.3; }
+    55%  { opacity: 1; }
+    80%  { opacity: 1; }
     100% { opacity: 0; }
 }
