@@ -458,7 +458,7 @@ let ratingsData = {}; // Оценки: { "Название (год)": [{ usernam
 let history = [];
 // Параллельный стек: для каждого элемента history хранит значение
 // currentCategoryName, которое было актуально в момент его добавления.
-// Нужен для того, чтобы кнопка "⬅️ Назад" восстанавливала не только сам
+// Нужен для того, чтобы кнопка "⬅ Назад" восстанавливала не только сам
 // контент экрана, но и правильную "категорию", к которой он относится —
 // иначе, например, после захода в Паутинку и открытия там жанра из ОБЫЧНОЙ
 // категории, "Назад" возвращал верный контент секретной подкатегории, но
@@ -1317,7 +1317,7 @@ function playLoginGlitchAnimation() {
 }
 
 // ============================================================
-// ЭФФЕКТ "ОТМОТКИ" VHS-КАССЕТЫ ПРИ КНОПКАХ "⬅️ Назад"/"🏠 Домой"
+// ЭФФЕКТ "ОТМОТКИ" VHS-КАССЕТЫ ПРИ КНОПКАХ "⬅ Назад"/"🏠 Домой"
 // ============================================================
 // Играет короткую вспышку в стиле перемотки видеокассеты назад и только
 // затем выполняет сам переход (navigateFn) — висит на любой кнопке
@@ -3932,7 +3932,7 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
 }
 
 // Откат на один шаг назад по истории экранов. Общая логика для обычной
-// кнопки "⬅️ Назад" в навигации и для кнопки возврата внутри самой Паутинки.
+// кнопки "⬅ Назад" в навигации и для кнопки возврата внутри самой Паутинки.
 // Если на вершине истории после отката лежит "отметка" Паутинки
 // (PAUTINKA_HISTORY_MARKER) — заново открывает Паутинку вместо обычного
 // экрана с данными, чтобы выход из экрана, открытого через Паутинку, вёл
@@ -3962,7 +3962,7 @@ function goBack() {
     }
 }
 
-// Показала бы кнопка "⬅️ Назад" (goBack()) в итоге главную страницу?
+// Показала бы кнопка "⬅ Назад" (goBack()) в итоге главную страницу?
 // Экран текущего шага всегда лежит на вершине history в момент вызова
 // (см. openData()) — если под ним больше ничего нет, goBack() снимет его
 // и попадёт на пустую историю, а значит вызовет showHome(). В этом случае
@@ -3984,7 +3984,7 @@ function addNavigation() {
 
     if (!backWouldGoHome()) {
         let back = document.createElement("button");
-        back.textContent = "⬅️ Назад";
+        back.textContent = "⬅ Назад";
 
         back.onclick = () => playVhsRewindTransition(goBack);
 
@@ -4093,7 +4093,7 @@ function leavePautinka() {
 const PAUTINKA_HISTORY_MARKER = Symbol("pautinka");
 
 // Если true — текущая игра была запущена узлом-игрой прямо из Паутинки
-// (в обход обычного экрана "🕹️ Игры"), и кнопка "⬅️" внутри игры должна
+// (в обход обычного экрана "🕹️ Игры"), и кнопка "⬅" внутри игры должна
 // возвращать в Паутинку, а не в список игр. Сбрасывается при любом обычном
 // заходе в раздел игр (showGamesScreen) и на главном экране (showHome).
 let gameLaunchedFromPautinka = false;
@@ -5201,7 +5201,7 @@ function showAddEditModal(existingItem = null) {
 // Раньше кнопка "➕ Добавить тайтл" открывала showAddEditModal() — вертикальную
 // форму на один тайтл за раз, во всплывающем окне. Теперь вместо модалки —
 // отдельный полноценный экран приложения (как "Совместный просмотр" или
-// раздел "Игры"): свой заголовок, своя навигация "⬅️ Назад"/"🏠 Домой" сверху,
+// раздел "Игры"): свой заголовок, своя навигация "⬅ Назад"/"🏠 Домой" сверху,
 // а сама форма занимает весь #app. Заполнение построчное (горизонтальное):
 // несколько тайтлов одновременно, каждый — своя строка с полями
 // Название/Год/Категория/Жанр/Франшиза. Жанр и франшиза, как и раньше, можно
@@ -5264,7 +5264,7 @@ function showBatchAddTitlesScreen() {
     // в этом случае и так вызовет showHome() (см. её реализацию выше).
     if (history.length > 0) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅️ Назад";
+        backBtn.textContent = "⬅ Назад";
         backBtn.onclick = () => playVhsRewindTransition(closeBatchAddScreen);
         nav.appendChild(backBtn);
     }
@@ -5757,7 +5757,7 @@ function showOnlineSearchScreen() {
     nav.className = "navigation";
     if (history.length > 0) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅️ Назад";
+        backBtn.textContent = "⬅ Назад";
         backBtn.onclick = () => playVhsRewindTransition(closeOnlineSearchScreen);
         nav.appendChild(backBtn);
     }
@@ -6212,7 +6212,7 @@ function renderWatchedNav(backHandler) {
 
     if (backHandler) {
         let back = document.createElement("button");
-        back.textContent = "⬅️ Назад";
+        back.textContent = "⬅ Назад";
         back.onclick = () => playVhsRewindTransition(backHandler);
         nav.appendChild(back);
     }
