@@ -4389,3 +4389,344 @@ body.online-search-screen-active .container {
     80%  { opacity: 1; }
     100% { opacity: 0; }
 }
+
+/* ==========================================
+   ⚙️ МОДАЛКА "НАСТРОЙКИ" — строки-пункты + тумблер
+   ========================================== */
+.settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px;
+    background: var(--panel-deep);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    text-align: left;
+}
+
+.settings-row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.settings-row-title {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+}
+
+.settings-row-desc {
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--text-faint);
+}
+
+/* Тумблер (переключатель) — тот же неоновый язык, что у остального сайта */
+.switch {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    width: 52px;
+    height: 30px;
+}
+.switch input {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+}
+.switch-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--panel);
+    border: 1.5px solid var(--line);
+    border-radius: 30px;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    pointer-events: none;
+}
+.switch-slider::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 21px;
+    height: 21px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease;
+}
+.switch input:checked + .switch-slider {
+    background: linear-gradient(90deg, var(--purple), var(--cyan));
+    border-color: transparent;
+    box-shadow: var(--glow-cyan);
+}
+.switch input:checked + .switch-slider::before {
+    transform: translateX(22px);
+    background: #ffffff;
+}
+.switch input:focus-visible + .switch-slider {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+}
+.switch input:disabled + .switch-slider {
+    opacity: 0.55;
+}
+
+/* ==========================================
+   🗂️ КОМПАКТНЫЙ РЕЖИМ — листаемая колода больших карточек
+   Используется на двух экранах: верхнеуровневый "Каталог" с главной
+   (категории + "Новое на сайте" + "Добавить тайтл"/"Онлайн Поиск") и
+   список жанров внутри открытой категории — см. buildSwipeDeck() в script.js.
+   Свайп на тач-устройствах — нативная горизонтальная прокрутка со
+   scroll-snap; стрелки .swipe-arrow-* и точки .swipe-dot достроены поверх
+   неё через scrollBy()/слушатель scroll в скрипте.
+   ========================================== */
+.swipe-deck-wrap {
+    position: relative;
+    margin: 6px 0 18px;
+    animation: fadeIn 0.35s ease both;
+}
+
+.swipe-deck {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 8% 16px;
+    scrollbar-width: none;
+}
+.swipe-deck::-webkit-scrollbar {
+    display: none;
+    height: 0;
+}
+
+.swipe-card {
+    scroll-snap-align: center;
+    scroll-snap-stop: always;
+    flex: 0 0 84%;
+    min-height: min(58vh, 400px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 30px 18px;
+    border-radius: 26px;
+    background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
+    border: 1.5px solid var(--line);
+    box-shadow: 0 14px 34px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.02);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    animation: fadeUp 0.3s ease both;
+}
+.swipe-card:hover,
+.swipe-card:focus-visible {
+    outline: none;
+    transform: translateY(-4px);
+    border-color: rgba(46,232,255,0.45);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.5), 0 0 30px rgba(46,232,255,0.22);
+}
+.swipe-card:active {
+    transform: translateY(-1px) scale(0.99);
+}
+
+.swipe-card-emoji {
+    font-size: clamp(46px, 14vw, 70px);
+    line-height: 1;
+    filter: drop-shadow(0 0 18px rgba(139,59,255,0.35));
+}
+.swipe-card-label {
+    font-family: var(--font-display);
+    font-size: clamp(19px, 5.5vw, 27px);
+    font-weight: 700;
+    text-align: center;
+    color: var(--text);
+    letter-spacing: 0.3px;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.4);
+}
+.swipe-card-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--pink-soft);
+    opacity: 0.85;
+}
+
+/* Стрелки пролистывания по бокам — листают ровно на 1 карточку за раз */
+.swipe-arrow {
+    all: unset;
+    box-sizing: border-box;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--panel);
+    border: 1px solid rgba(46,232,255,0.3);
+    color: var(--text);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 0 12px rgba(46,232,255,0.25);
+    z-index: 2;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+.swipe-arrow:hover {
+    border-color: rgba(46,232,255,0.6);
+    box-shadow: var(--glow-cyan);
+}
+.swipe-arrow:active {
+    transform: translateY(-50%) scale(0.92);
+}
+.swipe-arrow-prev { left: 2px; }
+.swipe-arrow-next { right: 2px; }
+
+.swipe-dots {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+    padding: 0 10px;
+}
+.swipe-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--line);
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+.swipe-dot-active {
+    background: linear-gradient(90deg, var(--purple), var(--cyan));
+    transform: scale(1.35);
+}
+
+@media (min-width: 700px) {
+    .swipe-card { flex: 0 0 62%; min-height: 380px; }
+}
+@media (min-width: 1100px) {
+    .swipe-card { flex: 0 0 46%; }
+}
+
+/* ==========================================
+   🗂️ КОМПАКТНЫЙ РЕЖИМ — плашки главного меню (2 в ряд, без HR)
+   Заменяют собой все полноразмерные кнопки на главной странице (Каталог,
+   Совместный просмотр, Чат, Комментарии, Игры, Календарь, Будем смотреть,
+   Просмотрено, Секрет, Рандомайзер) — см. buildCompactTile()/compactGrid
+   в showHome(). Тот же визуальный язык, что у карточек .swipe-card, только
+   меньше и в статичной сетке, а не в свайпе.
+   ========================================== */
+.compact-tile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 4px 0 18px;
+}
+
+.compact-tile {
+    all: unset;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 22px 10px;
+    min-height: 116px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
+    border: 1.5px solid var(--line);
+    cursor: pointer;
+    text-align: center;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    animation: fadeUp 0.3s ease both;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.compact-tile:hover,
+.compact-tile:focus-visible {
+    outline: none;
+    transform: translateY(-3px);
+}
+.compact-tile:active {
+    transform: translateY(-1px) scale(0.98);
+}
+
+.compact-tile-emoji {
+    font-size: 30px;
+    line-height: 1;
+    filter: drop-shadow(0 0 10px rgba(139,59,255,0.3));
+}
+.compact-tile-label {
+    font-family: var(--font-display);
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.25;
+    letter-spacing: 0.2px;
+}
+
+.compact-tile-cyan {
+    border-color: var(--cyan);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), var(--glow-cyan);
+}
+.compact-tile-cyan:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 24px rgba(46,232,255,0.5);
+}
+.compact-tile-gold {
+    border-color: var(--gold);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), var(--glow-gold);
+}
+.compact-tile-gold:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 24px rgba(255,209,92,0.5);
+}
+.compact-tile-purple {
+    border-color: var(--purple);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), var(--glow-purple);
+}
+.compact-tile-purple:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 24px rgba(139,59,255,0.5);
+}
+.compact-tile-green {
+    border-color: #1fe8a8;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 14px rgba(31,232,168,0.3);
+}
+.compact-tile-green:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 24px rgba(31,232,168,0.5);
+}
+.compact-tile-pink {
+    border-color: var(--pink);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 14px rgba(255,46,147,0.25);
+}
+.compact-tile-pink:hover {
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35), 0 0 24px rgba(255,46,147,0.5);
+}
+
+@media (min-width: 700px) {
+    .compact-tile-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1100px) {
+    .compact-tile-grid { grid-template-columns: repeat(4, 1fr); }
+}

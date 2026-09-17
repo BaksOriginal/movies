@@ -1,6 +1,11 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
 let titleCreatedAt = {}; // "Название (год)" -> дата добавления в базу (для значка "новинка")
 
+// Текущее состояние тумблера "Компактный режим" (Настройки на главной) —
+// подгружается из аккаунта при каждом showHome(), см. loadUserSettingsFromDB()
+// ниже. По умолчанию выключен, пока не загружено иное.
+let compactModeEnabled = false;
+
 // ==========================================
 // ПАГИНАЦИЯ КАТАЛОГА (карточки, как в "Онлайн Поиске")
 // ==========================================
@@ -458,7 +463,7 @@ let ratingsData = {}; // Оценки: { "Название (год)": [{ usernam
 let history = [];
 // Параллельный стек: для каждого элемента history хранит значение
 // currentCategoryName, которое было актуально в момент его добавления.
-// Нужен для того, чтобы кнопка "⬅ Назад" восстанавливала не только сам
+// Нужен для того, чтобы кнопка "⬅️ Назад" восстанавливала не только сам
 // контент экрана, но и правильную "категорию", к которой он относится —
 // иначе, например, после захода в Паутинку и открытия там жанра из ОБЫЧНОЙ
 // категории, "Назад" возвращал верный контент секретной подкатегории, но
@@ -509,6 +514,16 @@ let scheduledByTitle = {}; // "Название (год)" -> "YYYY-MM-DD" (да�
 let scheduledByDate = {};  // "YYYY-MM-DD" -> ["Название (год)", ...] — производное от scheduledByTitle
 let calendarViewYear = null;  // Год открытого сейчас месяца в календаре (null = ещё не открывался)
 let calendarViewMonth = null; // Месяц открытого сейчас месяца, 0-индексация (январь = 0)
+
+// Открыт ли Календарь/"Просмотрено" из плашки "🔖 Закладки" (компактный
+// режим) — от этого зависит, куда ведёт их собственная "⬅️ Назад" (см.
+// showCompactBookmarksScreen()/renderWatchedNav() ниже). Отдельные флаги, а
+// не параметр функции: renderCalendarScreen()/renderWatchedBucket()
+// перерисовывают свой экран заново (месяц вперёд/назад, переход к
+// подкатегории) без повторной передачи контекста, поэтому он должен жить
+// между вызовами.
+let calendarCameFromBookmarks = false;
+let watchedTopCameFromBookmarks = false;
 
 
 // ==========================================
@@ -806,6 +821,58 @@ function isSecretCategory(catKey) {
     return catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️");
 }
 
+// ==========================================
+// ⚙️ НАСТРОЙКИ АККАУНТА (пока один пункт — "Компактный режим")
+// ==========================================
+// Требуется таблица public.user_settings в Supabase. Выполните один раз
+// в SQL Editor вашего проекта:
+//
+//   create table if not exists public.user_settings (
+//     user_id uuid primary key references auth.users(id) on delete cascade,
+//     compact_mode boolean not null default false,
+//     updated_at timestamptz not null default now()
+//   );
+//
+//   alter table public.user_settings enable row level security;
+//
+//   create policy "user_settings_select" on public.user_settings
+//     for select using (true);
+//   create policy "user_settings_insert" on public.user_settings
+//     for insert with check (true);
+//   create policy "user_settings_update" on public.user_settings
+//     for update using (true);
+//
+// user_id — PRIMARY KEY: у каждого пользователя ровно одна строка настроек,
+// пишем всегда через UPSERT (onConflict: 'user_id'), см. setCompactMode().
+// Загружается заново при каждом showHome() (тот же приём, что и у
+// loadCatalogFromDB() чуть выше по этой функции) — поэтому переключение
+// работает мгновенно и одинаково видно после повторного входа в аккаунт,
+// в т.ч. с другого устройства/браузера.
+async function loadUserSettingsFromDB() {
+    if (!currentUser) { compactModeEnabled = false; return; }
+    const { data, error } = await db.from('user_settings')
+        .select('compact_mode')
+        .eq('user_id', currentUser.id);
+    if (error) {
+        console.error("Ошибка при загрузке настроек аккаунта:", error);
+        return;
+    }
+    compactModeEnabled = !!(data && data[0] && data[0].compact_mode);
+}
+
+async function setCompactMode(enabled) {
+    compactModeEnabled = enabled;
+    if (!currentUser) return;
+    const { error } = await db.from('user_settings')
+        .upsert(
+            { user_id: currentUser.id, compact_mode: enabled, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id' }
+        );
+    if (error) {
+        console.error("Ошибка при сохранении настроек аккаунта:", error);
+    }
+}
+
 // Загрузка оценок (видны обе оценки — и Asmoday, и Myakish)
 async function loadRatingsFromDB() {
     const { data, error } = await db.from('ratings').select('title, username, score, user_id');
@@ -955,11 +1022,28 @@ function refreshUIFromState() {
     const watchedMainBtn = document.getElementById("watchedMainBtn");
     if (watchedMainBtn) {
         const totalWatched = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
-        watchedMainBtn.textContent = "🎬 Просмотрено (" + totalWatched + ")";
+        const newText = "🎬 Просмотрено (" + totalWatched + ")";
+        // В компактном режиме это плашка с вложенными <span> (эмодзи сверху,
+        // подпись снизу, см. buildCompactTile()) — перезаписывать весь
+        // textContent элемента нельзя, иначе разметка плашки слетит. Если
+        // внутри есть .compact-tile-label — обновляем только его, иначе (в
+        // обычном режиме, где это просто <button>) — как и раньше, целиком.
+        const watchedLabel = watchedMainBtn.querySelector(".compact-tile-label");
+        if (watchedLabel) {
+            watchedLabel.textContent = stripLeadingEmoji(newText) || newText;
+        } else {
+            watchedMainBtn.textContent = newText;
+        }
     }
     const wishlistMainBtn = document.getElementById("wishlistMainBtn");
     if (wishlistMainBtn) {
-        wishlistMainBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
+        const newText = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
+        const wishlistLabel = wishlistMainBtn.querySelector(".compact-tile-label");
+        if (wishlistLabel) {
+            wishlistLabel.textContent = stripLeadingEmoji(newText) || newText;
+        } else {
+            wishlistMainBtn.textContent = newText;
+        }
     }
 
     // 2. Обновляем состояние кнопок ⭐/🔖 на карточках (секретная категория
@@ -1317,7 +1401,7 @@ function playLoginGlitchAnimation() {
 }
 
 // ============================================================
-// ЭФФЕКТ "ОТМОТКИ" VHS-КАССЕТЫ ПРИ КНОПКАХ "⬅ Назад"/"🏠 Домой"
+// ЭФФЕКТ "ОТМОТКИ" VHS-КАССЕТЫ ПРИ КНОПКАХ "⬅️ Назад"/"🏠 Домой"
 // ============================================================
 // Играет короткую вспышку в стиле перемотки видеокассеты назад и только
 // затем выполняет сам переход (navigateFn) — висит на любой кнопке
@@ -1851,6 +1935,51 @@ function showFilterModal(onFiltersChanged) {
     };
 }
 
+// ==========================================
+// ⚙️ МОДАЛКА "НАСТРОЙКИ" (кнопка на главной, слева от 🔊/🔇)
+// ==========================================
+function showSettingsModal() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "settingsModal";
+
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <h3>⚙️ Настройки</h3>
+            <div class="settings-list">
+                <div class="settings-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-title">🗂️ Компактный режим</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="compactModeToggle" ${compactModeEnabled ? "checked" : ""}>
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="action-buttons" style="margin-top: 18px;">
+                <button type="button" class="btn-action-cancel" id="settingsCloseBtn">Закрыть</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector("#settingsCloseBtn").onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    const toggle = overlay.querySelector("#compactModeToggle");
+    toggle.onchange = async () => {
+        toggle.disabled = true;
+        await setCompactMode(toggle.checked);
+        toggle.disabled = false;
+        // Мгновенно перерисовываем главный экран под новый режим — к моменту
+        // закрытия модалки за ней уже актуальная версия страницы.
+        if (currentUser) showHome();
+    };
+}
+
 // Главная страница
 // ==========================================
 // АНИМИРОВАННАЯ ПЛАШКА ГЛАВНОГО ЭКРАНА ("Время Кино" и т.д.)
@@ -1964,6 +2093,27 @@ function startHeroTypewriter(textEl) {
 // в script.js, только вызовы этой функции перед переходом на Игры/
 // Совместный просмотр (ищи по тексту "saveMusicPositionBeforeLeaving(); location.href").
 
+// Плашка меню главной страницы в компактном режиме — эмодзи сверху, подпись
+// снизу, той же природы, что и карточки buildSwipeDeck(), только меньше и
+// без счётчика тайтлов: используется в общей 2-колоночной сетке
+// .compact-tile-grid вместо кнопки на всю ширину. accentClass — один из
+// compact-tile-{cyan|gold|purple|green|pink} (см. style.css), под цветовую
+// кодировку разделов, что была у прежних полноразмерных кнопок.
+function buildCompactTile(label, onClick, accentClass, elId = null) {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = `compact-tile ${accentClass}`;
+    if (elId) tile.id = elId;
+    const emoji = extractLeadingEmoji(label) || "▫️";
+    const text = stripLeadingEmoji(label) || label;
+    tile.innerHTML = `
+        <span class="compact-tile-emoji">${emoji}</span>
+        <span class="compact-tile-label">${escapeHtml(text)}</span>
+    `;
+    tile.onclick = onClick;
+    return tile;
+}
+
 async function showHome() {
     startTransitionLock();
     isChatScreenOpen = false;
@@ -1991,7 +2141,8 @@ async function showHome() {
     currentCategoryName = null;
     gameLaunchedFromPautinka = false;
     await loadCatalogFromDB();
-    
+    await loadUserSettingsFromDB();
+
     let nav = document.querySelector(".navigation");
     if (nav) nav.remove();
 
@@ -2027,6 +2178,9 @@ async function showHome() {
         let controls = document.createElement("div");
         controls.className = "hero-controls";
 
+        // Кнопка "⚙️ Настройки" — слева от кнопки музыки (см. showSettingsModal()).
+        let settingsBtn = createIconButton("⚙️", () => showSettingsModal());
+
         let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
             const audio = document.getElementById("bgMusic");
             if (audio.paused) { audio.play(); isMusicPlaying = true; localStorage.setItem("musicEnabled", "true"); musicBtn.textContent = "🔊"; }
@@ -2035,6 +2189,7 @@ async function showHome() {
 
         let logoutBtn = createIconButton("❌", performLogout);
 
+        controls.appendChild(settingsBtn);
         controls.appendChild(musicBtn);
         controls.appendChild(logoutBtn);
         header.appendChild(controls);
@@ -2058,10 +2213,26 @@ async function showHome() {
         // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
         app.appendChild(buildSearchBar());
 
-        // Сплиттер (после Поиска)
-        let hrAfterSearch = document.createElement("hr");
-        hrAfterSearch.className = "neon-divider";
-        app.appendChild(hrAfterSearch);
+        // Сплиттер (после Поиска) — только в обычном режиме; в компактном
+        // все HR-разделители убраны, всё меню идёт единой сеткой плашек
+        // (см. compactGrid ниже).
+        if (!compactModeEnabled) {
+            let hrAfterSearch = document.createElement("hr");
+            hrAfterSearch.className = "neon-divider";
+            app.appendChild(hrAfterSearch);
+        }
+    }
+
+    // Общий контейнер для ВСЕХ плашек главного меню в компактном режиме —
+    // 2 в ряд, без разделителей (см. .compact-tile-grid в style.css).
+    // Создаётся и сразу вставляется в #app пустым; дальше по ходу функции
+    // в него по мере рендера добавляются плашки — это сохраняет порядок
+    // разделов (Каталог -> Совместный просмотр/Чат/... -> Календарь/
+    // Будем смотреть/Просмотрено -> Секрет -> Рандомайзер) без изменений.
+    const compactGrid = compactModeEnabled ? document.createElement("div") : null;
+    if (compactGrid) {
+        compactGrid.className = "compact-tile-grid";
+        app.appendChild(compactGrid);
     }
 
     // Рендерим кнопки категорий в фиксированном порядке:
@@ -2086,51 +2257,75 @@ async function showHome() {
     );
     const normalKeys = orderedCategoryKeys.filter(key => !secretKeys.includes(key));
 
-    // Обычные категории (Фильмы, Мультфильмы, Сериалы, Аниме и т.д.)
-    normalKeys.forEach(key => {
-        let button = document.createElement("button");
-        button.textContent = key;
-        button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
-        app.appendChild(button);
-    });
+    if (compactModeEnabled) {
+        // ⚙️ КОМПАКТНЫЙ РЕЖИМ — вместо кнопок категорий/"Новое на сайте"/
+        // "Добавить тайтл"/"Онлайн Поиск" одна плашка "Каталог" в общей
+        // сетке (открывает листаемую колоду карточек — см.
+        // showCompactCatalogScreen() и buildSwipeDeck() ниже).
+        if (normalKeys.length > 0) {
+            compactGrid.appendChild(buildCompactTile("🗂️ Каталог", () => showCompactCatalogScreen(), "compact-tile-cyan"));
+        }
+    } else {
+        // Обычные категории (Фильмы, Мультфильмы, Сериалы, Аниме и т.д.)
+        normalKeys.forEach(key => {
+            let button = document.createElement("button");
+            button.textContent = key;
+            button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
+            app.appendChild(button);
+        });
 
-    // Кнопка "⭐ Новое на сайте" — плоский список тайтлов, добавленных за
-    // последние 2 суток, вне зависимости от категории/жанра (см.
-    // getRecentlyAddedTitles() выше). Показываем только когда там реально
-    // есть что показать — иначе кнопка обещала бы то, чего нет.
-    if (normalKeys.length > 0) {
-        const recentlyAdded = getRecentlyAddedTitles();
-        if (recentlyAdded.length > 0) {
-            let newTitlesBtn = document.createElement("button");
-            newTitlesBtn.textContent = "⭐ Новое на сайте";
-            newTitlesBtn.onclick = () => {
-                currentCategoryName = null;
-                openData(recentlyAdded, true, "⭐ Новое на сайте");
-            };
-            app.appendChild(newTitlesBtn);
+        // Кнопка "⭐ Новое на сайте" — плоский список тайтлов, добавленных за
+        // последние 2 суток, вне зависимости от категории/жанра (см.
+        // getRecentlyAddedTitles() выше). Показываем только когда там реально
+        // есть что показать — иначе кнопка обещала бы то, чего нет.
+        if (normalKeys.length > 0) {
+            const recentlyAdded = getRecentlyAddedTitles();
+            if (recentlyAdded.length > 0) {
+                let newTitlesBtn = document.createElement("button");
+                newTitlesBtn.textContent = "⭐ Новое на сайте";
+                newTitlesBtn.onclick = () => {
+                    currentCategoryName = null;
+                    openData(recentlyAdded, true, "⭐ Новое на сайте");
+                };
+                app.appendChild(newTitlesBtn);
+            }
+        }
+
+        // Кнопка "Добавить тайтл" — сразу под обычными категориями
+        if (currentUser && normalKeys.length > 0) {
+            let addBtn = document.createElement("button");
+            addBtn.className = "btn-add-new";
+            addBtn.textContent = "➕ Добавить тайтл";
+            addBtn.onclick = () => showBatchAddTitlesScreen();
+            app.appendChild(addBtn);
+
+            // Кнопка "🔍 Онлайн Поиск" — поиск тайтлов на TMDB (название, жанр,
+            // год, рейтинг, тип) с быстрым добавлением найденного в каталог.
+            // Тот же класс, что у "Добавить тайтл" — тот же голубой акцент,
+            // чтобы визуально обе кнопки читались как одна смысловая пара.
+            let onlineSearchBtn = document.createElement("button");
+            onlineSearchBtn.className = "btn-add-new";
+            onlineSearchBtn.textContent = "🔍 Онлайн Поиск";
+            onlineSearchBtn.onclick = () => showOnlineSearchScreen();
+            app.appendChild(onlineSearchBtn);
         }
     }
 
-    // Кнопка "Добавить тайтл" — сразу под обычными категориями
-    if (currentUser && normalKeys.length > 0) {
-        let addBtn = document.createElement("button");
-        addBtn.className = "btn-add-new";
-        addBtn.textContent = "➕ Добавить тайтл";
-        addBtn.onclick = () => showBatchAddTitlesScreen();
-        app.appendChild(addBtn);
-
-        // Кнопка "🔍 Онлайн Поиск" — поиск тайтлов на TMDB (название, жанр,
-        // год, рейтинг, тип) с быстрым добавлением найденного в каталог.
-        // Тот же класс, что у "Добавить тайтл" — тот же голубой акцент,
-        // чтобы визуально обе кнопки читались как одна смысловая пара.
-        let onlineSearchBtn = document.createElement("button");
-        onlineSearchBtn.className = "btn-add-new";
-        onlineSearchBtn.textContent = "🔍 Онлайн Поиск";
-        onlineSearchBtn.onclick = () => showOnlineSearchScreen();
-        app.appendChild(onlineSearchBtn);
-    }
+    // Рандомайзер теперь всегда идёт сразу после "Игр" (см. ниже) — если
+    // currentUser нет (значит, и "Игр" нет), он всё равно должен где-то
+    // появиться, поэтому запоминаем, отрисовали ли мы его здесь, и в конце
+    // функции подстраховываемся, если нет.
+    let randomizerRendered = false;
 
     if (currentUser) {
+        if (compactModeEnabled) {
+            compactGrid.appendChild(buildCompactTile("🎬 Совместный просмотр", () => { saveMusicPositionBeforeLeaving(); location.href = "w2g/"; }, "compact-tile-gold"));
+            compactGrid.appendChild(buildCompactTile("💬 Чат", () => showChatScreen(), "compact-tile-purple"));
+            compactGrid.appendChild(buildCompactTile("🗨️ Комментарии", () => showAllCommentsScreen(), "compact-tile-purple"));
+            compactGrid.appendChild(buildCompactTile("🕹️ Игры", () => { saveMusicPositionBeforeLeaving(); location.href = "games/"; }, "compact-tile-green"));
+            compactGrid.appendChild(buildCompactTile("🎲 Рандомайзер", () => showRandomizerModal(), "compact-tile-cyan"));
+            randomizerRendered = true;
+        } else {
         // Разделитель после блока категорий/"Добавить тайтл"
         let hrAfterCategories = document.createElement("hr");
         hrAfterCategories.className = "neon-divider";
@@ -2170,64 +2365,319 @@ async function showHome() {
         gamesBtn.onclick = () => { saveMusicPositionBeforeLeaving(); location.href = "games/"; };
         app.appendChild(gamesBtn);
 
+        // Рандомайзер — сразу после "Игр"
+        let randomizerBtn = document.createElement("button");
+        randomizerBtn.className = "btn-randomizer-cyan";
+        randomizerBtn.textContent = "🎲 Рандомайзер";
+        randomizerBtn.onclick = () => showRandomizerModal();
+        app.appendChild(randomizerBtn);
+        randomizerRendered = true;
+
         // Разделитель перед "Будем смотреть"/"Просмотрено"
         let hrBeforeWatchLists = document.createElement("hr");
         hrBeforeWatchLists.className = "neon-divider";
         app.appendChild(hrBeforeWatchLists);
+        }
     }
 
-    // Кнопка "Календарь" — сразу перед "Будем смотреть"
-    let calendarBtn = document.createElement("button");
-    calendarBtn.id = "calendarMainBtn";
-    calendarBtn.className = "btn-pink-style";
-    calendarBtn.textContent = "📅 Календарь";
-    calendarBtn.onclick = () => {
-        showCalendarScreen();
-    };
-    app.appendChild(calendarBtn);
+    if (compactModeEnabled) {
+        // "Календарь" + "Будем смотреть" + "Просмотрено" объединены в одну
+        // плашку "🔖 Закладки" — она открывает свою мини-колоду с этими
+        // тремя разделами (см. showCompactBookmarksScreen()). Без счётчика:
+        // плашка ведёт сразу к трём разным вещам, конкретные числа — уже
+        // внутри, на карточках "Будем смотреть"/"Просмотрено".
+        compactGrid.appendChild(buildCompactTile("🔖 Закладки", () => showCompactBookmarksScreen(), "compact-tile-pink"));
+    } else {
+        // Кнопка "Календарь" — сразу перед "Будем смотреть"
+        let calendarBtn = document.createElement("button");
+        calendarBtn.id = "calendarMainBtn";
+        calendarBtn.className = "btn-pink-style";
+        calendarBtn.textContent = "📅 Календарь";
+        calendarBtn.onclick = () => {
+            showCalendarScreen();
+        };
+        app.appendChild(calendarBtn);
 
-    let wishlistBtn = document.createElement("button");
-    wishlistBtn.id = "wishlistMainBtn";
-    wishlistBtn.className = "btn-pink-style";
-    wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-    wishlistBtn.onclick = () => {
-        renderWishlistFolder();
-    };
-    app.appendChild(wishlistBtn);
+        let wishlistBtn = document.createElement("button");
+        wishlistBtn.id = "wishlistMainBtn";
+        wishlistBtn.className = "btn-pink-style";
+        wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
+        wishlistBtn.onclick = () => {
+            renderWishlistFolder();
+        };
+        app.appendChild(wishlistBtn);
 
-    // Кнопка "Просмотрено" на главной — ведёт в папку с 3 подкатегориями
-    // (мной / партнёром / нами)
-    let watchedBtn = document.createElement("button");
-    watchedBtn.id = "watchedMainBtn";
-    watchedBtn.className = "btn-pink-style";
-    const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
-    watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
-    watchedBtn.onclick = () => {
-        renderWatchedTop();
-    };
-    app.appendChild(watchedBtn);
+        // Кнопка "Просмотрено" на главной — ведёт в папку с 3 подкатегориями
+        // (мной / партнёром / нами)
+        let watchedBtn = document.createElement("button");
+        watchedBtn.id = "watchedMainBtn";
+        watchedBtn.className = "btn-pink-style";
+        const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
+        watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
+        watchedBtn.onclick = () => {
+            renderWatchedTop();
+        };
+        app.appendChild(watchedBtn);
+    }
 
-    // Секретная категория — в самом низу страницы, за разделителем
+    // Секретная категория — в самом низу страницы (за разделителем в
+    // обычном режиме; в компактном — просто следующими плашками в сетке)
     if (secretKeys.length > 0) {
-        let hrBeforeSecret = document.createElement("hr");
-        hrBeforeSecret.className = "neon-divider";
-        app.appendChild(hrBeforeSecret);
+        if (compactModeEnabled) {
+            secretKeys.forEach(key => {
+                compactGrid.appendChild(buildCompactTile(key, () => { currentCategoryName = key; openData(dbData[key], true); }, "compact-tile-gold"));
+            });
+        } else {
+            let hrBeforeSecret = document.createElement("hr");
+            hrBeforeSecret.className = "neon-divider";
+            app.appendChild(hrBeforeSecret);
 
-        secretKeys.forEach(key => {
-            let button = document.createElement("button");
-            button.textContent = key;
-            button.classList.add("btn-secret-gold");
-            button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
-            app.appendChild(button);
-        });
+            secretKeys.forEach(key => {
+                let button = document.createElement("button");
+                button.textContent = key;
+                button.classList.add("btn-secret-gold");
+                button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
+                app.appendChild(button);
+            });
+        }
     }
 
-    // Рандомайзер — прямо под кнопкой(ами) "Секрет"
-    let randomizerBtn = document.createElement("button");
-    randomizerBtn.className = "btn-randomizer-cyan";
-    randomizerBtn.textContent = "🎲 Рандомайзер";
-    randomizerBtn.onclick = () => showRandomizerModal();
-    app.appendChild(randomizerBtn);
+    // Рандомайзер уже отрисован выше, сразу после "Игр" (см.
+    // randomizerRendered) — если пользователь не залогинен (значит, там его
+    // не было, потому что не было и "Игр"), подстраховываемся и всё равно
+    // показываем его здесь, в конце.
+    if (!randomizerRendered) {
+        if (compactModeEnabled) {
+            compactGrid.appendChild(buildCompactTile("🎲 Рандомайзер", () => showRandomizerModal(), "compact-tile-cyan"));
+        } else {
+            let randomizerBtn = document.createElement("button");
+            randomizerBtn.className = "btn-randomizer-cyan";
+            randomizerBtn.textContent = "🎲 Рандомайзер";
+            randomizerBtn.onclick = () => showRandomizerModal();
+            app.appendChild(randomizerBtn);
+        }
+    }
+}
+
+// ==========================================
+// 🗂️ КОМПАКТНЫЙ РЕЖИМ — листаемая колода карточек
+// ==========================================
+// Общий строительный блок для двух экранов: верхнего уровня "Каталог"
+// (категории + "Новое на сайте" + функции "Добавить тайтл"/"Онлайн Поиск",
+// см. showCompactCatalogScreen()) и списка жанров внутри категории (см.
+// ветку compactModeEnabled в openData() ниже). items — массив вида
+// [{ emoji, label, count|null, onClick }]. Свайп на телефоне работает
+// нативной горизонтальной прокруткой со scroll-snap (см. .swipe-deck в
+// style.css) — надёжнее и проще самодельного drag-обработчика; стрелки по
+// бокам и точки-индикаторы достроены поверх той же прокрутки.
+function buildSwipeDeck(items) {
+    const wrap = document.createElement("div");
+    wrap.className = "swipe-deck-wrap";
+
+    const deck = document.createElement("div");
+    deck.className = "swipe-deck";
+
+    items.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "swipe-card";
+        card.setAttribute("role", "button");
+        card.tabIndex = 0;
+        card.innerHTML = `
+            <span class="swipe-card-emoji">${item.emoji}</span>
+            <span class="swipe-card-label">${escapeHtml(item.label)}</span>
+            ${item.count != null ? `<span class="swipe-card-count">${item.count} тайтлов</span>` : ""}
+        `;
+        card.onclick = () => item.onClick();
+        card.onkeydown = (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); item.onClick(); }
+        };
+        deck.appendChild(card);
+    });
+
+    wrap.appendChild(deck);
+
+    // Стрелки пролистывания по бокам — листают ровно на одну карточку вперёд/назад
+    const scrollByCards = (dir) => {
+        const card = deck.querySelector(".swipe-card");
+        if (!card) return;
+        const gap = parseFloat(getComputedStyle(deck).columnGap || getComputedStyle(deck).gap || "0") || 0;
+        const step = card.getBoundingClientRect().width + gap;
+        deck.scrollBy({ left: dir * step, behavior: "smooth" });
+    };
+
+    if (items.length > 1) {
+        let prevBtn = document.createElement("button");
+        prevBtn.type = "button";
+        prevBtn.className = "swipe-arrow swipe-arrow-prev";
+        prevBtn.setAttribute("aria-label", "Предыдущая карточка");
+        prevBtn.textContent = "‹";
+        prevBtn.onclick = () => scrollByCards(-1);
+
+        let nextBtn = document.createElement("button");
+        nextBtn.type = "button";
+        nextBtn.className = "swipe-arrow swipe-arrow-next";
+        nextBtn.setAttribute("aria-label", "Следующая карточка");
+        nextBtn.textContent = "›";
+        nextBtn.onclick = () => scrollByCards(1);
+
+        wrap.appendChild(prevBtn);
+        wrap.appendChild(nextBtn);
+
+        // Точки-индикаторы текущей позиции — подсвечиваются по прокрутке
+        const dots = document.createElement("div");
+        dots.className = "swipe-dots";
+        items.forEach(() => dots.appendChild(document.createElement("span")));
+        Array.from(dots.children).forEach(d => d.classList.add("swipe-dot"));
+        wrap.appendChild(dots);
+
+        const dotEls = Array.from(dots.children);
+        dotEls[0].classList.add("swipe-dot-active");
+        let rafPending = false;
+        deck.addEventListener("scroll", () => {
+            if (rafPending) return;
+            rafPending = true;
+            requestAnimationFrame(() => {
+                rafPending = false;
+                const card = deck.querySelector(".swipe-card");
+                if (!card) return;
+                const gap = parseFloat(getComputedStyle(deck).columnGap || getComputedStyle(deck).gap || "0") || 0;
+                const step = card.getBoundingClientRect().width + gap;
+                const idx = step > 0 ? Math.round(deck.scrollLeft / step) : 0;
+                dotEls.forEach((d, i) => d.classList.toggle("swipe-dot-active", i === idx));
+            });
+        }, { passive: true });
+    }
+
+    return wrap;
+}
+
+// Экран верхнего уровня "Каталог" — то, что открывает кнопка "🗂️ Каталог"
+// на главной в компактном режиме. Использует ту же "отметку" в history, что
+// и Паутинка (см. PAUTINKA_HISTORY_MARKER/showPautinka() и обработку в
+// goBack() ниже) — COMPACT_CATALOG_HISTORY_MARKER, — чтобы "⬅️ Назад" со
+// экрана жанров категории (открытой отсюда) возвращал именно в "Каталог",
+// а не сразу на главную. fromHistory=true — экран перерисован кнопкой
+// "Назад" (отметка уже лежит в history, повторно её добавлять не нужно).
+const COMPACT_CATALOG_HISTORY_MARKER = Symbol("compactCatalog");
+
+function showCompactCatalogScreen(fromHistory = false) {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+
+    if (!fromHistory) {
+        // Тот же приём, что и в openData()/showPautinka(): перед добавлением
+        // нового шага запоминаем страницу пагинации экрана, с которого
+        // уходим (см. объявление pageHistory), затем кладём свою отметку.
+        if (history.length > 0) {
+            pageHistory[history.length - 1] = catalogCurrentPage;
+        }
+        history.push(COMPACT_CATALOG_HISTORY_MARKER);
+        categoryHistory.push(null);
+        pageHistory.push(1);
+    }
+    currentCategoryName = null;
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    setEmojiTitle(title, "🗂️ Каталог");
+    app.appendChild(title);
+
+    const categoryPriorityOrder = ["Фильм", "Мультфильм", "Сериал", "Аниме"];
+    function getCategoryPriority(key) {
+        if (isSecretCategory(key)) return 1000;
+        for (let i = 0; i < categoryPriorityOrder.length; i++) {
+            if (key.includes(categoryPriorityOrder[i])) return i;
+        }
+        return 500;
+    }
+    const normalKeys = Object.keys(dbData)
+        .filter(key => !isSecretCategory(key))
+        .sort((a, b) => getCategoryPriority(a) - getCategoryPriority(b));
+
+    const items = normalKeys.map(key => ({
+        emoji: getCategoryEmoji(key),
+        label: stripLeadingEmoji(key) || key,
+        count: getAllTitlesFromCategory(dbData[key]).length,
+        onClick: () => { currentCategoryName = key; openData(dbData[key], true); }
+    }));
+
+    // "⭐ Новое на сайте" — та же карточка-функция, что и кнопка на главной
+    // в обычном режиме, только листаемая вместе с категориями.
+    if (normalKeys.length > 0) {
+        const recentlyAdded = getRecentlyAddedTitles();
+        if (recentlyAdded.length > 0) {
+            items.push({
+                emoji: "⭐",
+                label: "Новое на сайте",
+                count: recentlyAdded.length,
+                onClick: () => { currentCategoryName = null; openData(recentlyAdded, true, "⭐ Новое на сайте"); }
+            });
+        }
+    }
+
+    // "Функции" (по терминологии из ТЗ) — добавление тайтла и онлайн-поиск,
+    // тоже карточками в той же колоде.
+    if (currentUser && normalKeys.length > 0) {
+        items.push({ emoji: "➕", label: "Добавить тайтл", count: null, onClick: () => showBatchAddTitlesScreen() });
+        items.push({ emoji: "🔍", label: "Онлайн Поиск", count: null, onClick: () => showOnlineSearchScreen() });
+    }
+
+    if (items.length > 0) {
+        app.appendChild(buildSwipeDeck(items));
+    } else {
+        let empty = document.createElement("p");
+        empty.style.textAlign = "center";
+        empty.style.color = "#999";
+        empty.textContent = "Каталог пока пуст.";
+        app.appendChild(empty);
+    }
+
+    addNavigation();
+}
+
+// Экран "🔖 Закладки" (компактный режим) — объединяет "Календарь",
+// "Будем смотреть" и "Просмотрено" в одну листаемую колоду карточек, той же
+// природы, что и "Каталог" выше. В отличие от "Каталога" (который ведёт в
+// openData()/историю), все три раздела здесь и так живут вне общей history
+// — у них своя навигация (см. комментарий над WATCHED_BUCKETS) — поэтому
+// собственной history-отметки не требуется: достаточно передать им
+// cameFromBookmarks=true, и их "⬅️ Назад" сама укажет сюда же
+// (renderWishlistFolder()/showCalendarScreen()/renderWatchedTop() выше).
+function showCompactBookmarksScreen() {
+    startTransitionLock();
+    isChatScreenOpen = false;
+    currentWatchedBucket = null;
+    isWishlistScreenOpen = false;
+    isCalendarScreenOpen = false;
+    if (chatPollInterval) {
+        clearInterval(chatPollInterval);
+        chatPollInterval = null;
+    }
+    currentCategoryName = null;
+
+    app.innerHTML = "";
+
+    let title = document.createElement("h1");
+    setEmojiTitle(title, "🔖 Закладки");
+    app.appendChild(title);
+
+    const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
+    const items = [
+        { emoji: "📅", label: "Календарь", count: null, onClick: () => showCalendarScreen(true) },
+        { emoji: "🍿", label: "Будем смотреть", count: wishlistTitles.size, onClick: () => renderWishlistFolder(true) },
+        { emoji: "🎬", label: "Просмотрено", count: totalWatchedCount, onClick: () => renderWatchedTop(true) }
+    ];
+    app.appendChild(buildSwipeDeck(items));
+
+    renderWatchedNav(null);
 }
 
 // ==========================================
@@ -3879,12 +4329,30 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
         if (gridContainer.childElementCount > 0) listFragment.appendChild(gridContainer);
     }
     else if (typeof content === "object" && content !== null) {
-        for (let key in content) {
-            let value = content[key];
-            let button = document.createElement("button");
-            button.textContent = key;
-            button.onclick = () => openData(value, true);
-            listFragment.appendChild(button);
+        // Эта ветка отвечает ровно за список ЖАНРОВ внутри категории (dbData
+        // не вложен глубже: категория -> объект жанров -> массив тайтлов,
+        // см. комментарий у titleSortKey() выше) — поэтому в компактном
+        // режиме здесь тот же "листаемый" визуальный язык, что и у самого
+        // "Каталога" на главной (см. buildSwipeDeck()/showCompactCatalogScreen()).
+        // Жанр без собственного ведущего эмодзи получает ❔ — в отличие от
+        // категорий, у которых есть детерминированный фолбэк по типу
+        // (getCategoryEmoji()), для произвольных жанров такого нет.
+        if (compactModeEnabled) {
+            const genreItems = Object.keys(content).map(key => ({
+                emoji: extractLeadingEmoji(key) || "❔",
+                label: stripLeadingEmoji(key) || key,
+                count: getAllTitlesFromCategory(content[key]).length,
+                onClick: () => openData(content[key], true)
+            }));
+            listFragment.appendChild(buildSwipeDeck(genreItems));
+        } else {
+            for (let key in content) {
+                let value = content[key];
+                let button = document.createElement("button");
+                button.textContent = key;
+                button.onclick = () => openData(value, true);
+                listFragment.appendChild(button);
+            }
         }
     }
 
@@ -3932,7 +4400,7 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
 }
 
 // Откат на один шаг назад по истории экранов. Общая логика для обычной
-// кнопки "⬅ Назад" в навигации и для кнопки возврата внутри самой Паутинки.
+// кнопки "⬅️ Назад" в навигации и для кнопки возврата внутри самой Паутинки.
 // Если на вершине истории после отката лежит "отметка" Паутинки
 // (PAUTINKA_HISTORY_MARKER) — заново открывает Паутинку вместо обычного
 // экрана с данными, чтобы выход из экрана, открытого через Паутинку, вёл
@@ -3945,6 +4413,12 @@ function goBack() {
 
     if (previous === PAUTINKA_HISTORY_MARKER) {
         showPautinka(true);
+    } else if (previous === COMPACT_CATALOG_HISTORY_MARKER) {
+        // Отметка экрана "Каталог" (компактный режим) — см. её объявление
+        // и showCompactCatalogScreen(). Без этой ветки previous — сам Symbol,
+        // а не данные категории, и его случайно уносило дальше в openData()
+        // как обычный content, рисуя пустой экран.
+        showCompactCatalogScreen(true);
     } else if (previous) {
         // Восстанавливаем ту "категорию", которая была актуальна именно
         // для этого экрана — иначе, например, возврат в подкатегорию
@@ -3962,7 +4436,7 @@ function goBack() {
     }
 }
 
-// Показала бы кнопка "⬅ Назад" (goBack()) в итоге главную страницу?
+// Показала бы кнопка "⬅️ Назад" (goBack()) в итоге главную страницу?
 // Экран текущего шага всегда лежит на вершине history в момент вызова
 // (см. openData()) — если под ним больше ничего нет, goBack() снимет его
 // и попадёт на пустую историю, а значит вызовет showHome(). В этом случае
@@ -3984,7 +4458,7 @@ function addNavigation() {
 
     if (!backWouldGoHome()) {
         let back = document.createElement("button");
-        back.textContent = "⬅ Назад";
+        back.textContent = "⬅️ Назад";
 
         back.onclick = () => playVhsRewindTransition(goBack);
 
@@ -4093,7 +4567,7 @@ function leavePautinka() {
 const PAUTINKA_HISTORY_MARKER = Symbol("pautinka");
 
 // Если true — текущая игра была запущена узлом-игрой прямо из Паутинки
-// (в обход обычного экрана "🕹️ Игры"), и кнопка "⬅" внутри игры должна
+// (в обход обычного экрана "🕹️ Игры"), и кнопка "⬅️" внутри игры должна
 // возвращать в Паутинку, а не в список игр. Сбрасывается при любом обычном
 // заходе в раздел игр (showGamesScreen) и на главном экране (showHome).
 let gameLaunchedFromPautinka = false;
@@ -5201,7 +5675,7 @@ function showAddEditModal(existingItem = null) {
 // Раньше кнопка "➕ Добавить тайтл" открывала showAddEditModal() — вертикальную
 // форму на один тайтл за раз, во всплывающем окне. Теперь вместо модалки —
 // отдельный полноценный экран приложения (как "Совместный просмотр" или
-// раздел "Игры"): свой заголовок, своя навигация "⬅ Назад"/"🏠 Домой" сверху,
+// раздел "Игры"): свой заголовок, своя навигация "⬅️ Назад"/"🏠 Домой" сверху,
 // а сама форма занимает весь #app. Заполнение построчное (горизонтальное):
 // несколько тайтлов одновременно, каждый — своя строка с полями
 // Название/Год/Категория/Жанр/Франшиза. Жанр и франшиза, как и раньше, можно
@@ -5264,7 +5738,7 @@ function showBatchAddTitlesScreen() {
     // в этом случае и так вызовет showHome() (см. её реализацию выше).
     if (history.length > 0) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅ Назад";
+        backBtn.textContent = "⬅️ Назад";
         backBtn.onclick = () => playVhsRewindTransition(closeBatchAddScreen);
         nav.appendChild(backBtn);
     }
@@ -5757,7 +6231,7 @@ function showOnlineSearchScreen() {
     nav.className = "navigation";
     if (history.length > 0) {
         let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅ Назад";
+        backBtn.textContent = "⬅️ Назад";
         backBtn.onclick = () => playVhsRewindTransition(closeOnlineSearchScreen);
         nav.appendChild(backBtn);
     }
@@ -6212,7 +6686,7 @@ function renderWatchedNav(backHandler) {
 
     if (backHandler) {
         let back = document.createElement("button");
-        back.textContent = "⬅ Назад";
+        back.textContent = "⬅️ Назад";
         back.onclick = () => playVhsRewindTransition(backHandler);
         nav.appendChild(back);
     }
@@ -6230,8 +6704,10 @@ function renderWatchedNav(backHandler) {
     }
 }
 
-// Верхний экран "Просмотрено" — 3 кнопки-подкатегории со счётчиками
-function renderWatchedTop() {
+// Верхний экран "Просмотрено" — 3 кнопки-подкатегории со счётчиками.
+// cameFromBookmarks=true — открыт из плашки "🔖 Закладки" (компактный режим),
+// тогда "⬅️ Назад" ведёт туда, а не сразу на главную (см. showCompactBookmarksScreen()).
+function renderWatchedTop(cameFromBookmarks = false) {
     startTransitionLock();
     isChatScreenOpen = false;
     if (chatPollInterval) {
@@ -6242,6 +6718,7 @@ function renderWatchedTop() {
     currentWatchedBucket = 'top';
     isWishlistScreenOpen = false;
     isCalendarScreenOpen = false;
+    watchedTopCameFromBookmarks = cameFromBookmarks;
 
     app.innerHTML = "";
 
@@ -6249,17 +6726,32 @@ function renderWatchedTop() {
     setEmojiTitle(title, "🎬 Просмотрено");
     app.appendChild(title);
 
-    for (let key in WATCHED_BUCKETS) {
-        const bucket = WATCHED_BUCKETS[key];
-        let btn = document.createElement("button");
-        btn.textContent = `${bucket.label} (${bucket.set().size})`;
-        btn.onclick = () => renderWatchedBucket(key);
-        app.appendChild(btn);
+    if (compactModeEnabled) {
+        // Компактный режим: те же большие листаемые плашки, что и в
+        // "Каталоге"/списке жанров — см. buildSwipeDeck().
+        const items = Object.keys(WATCHED_BUCKETS).map(key => {
+            const bucket = WATCHED_BUCKETS[key];
+            return {
+                emoji: extractLeadingEmoji(bucket.label) || "❔",
+                label: stripLeadingEmoji(bucket.label) || bucket.label,
+                count: bucket.set().size,
+                onClick: () => renderWatchedBucket(key)
+            };
+        });
+        app.appendChild(buildSwipeDeck(items));
+    } else {
+        for (let key in WATCHED_BUCKETS) {
+            const bucket = WATCHED_BUCKETS[key];
+            let btn = document.createElement("button");
+            btn.textContent = `${bucket.label} (${bucket.set().size})`;
+            btn.onclick = () => renderWatchedBucket(key);
+            app.appendChild(btn);
+        }
     }
 
-    // Это верхний экран раздела — "Назад" отсюда вёл бы ровно туда же, куда
-    // и "Домой", так что оставляем только её.
-    renderWatchedNav(null);
+    // Верхний экран раздела — "Назад" отсюда либо в "Закладки" (если оттуда
+    // и пришли), либо дублировал бы "Домой".
+    renderWatchedNav(cameFromBookmarks ? () => showCompactBookmarksScreen() : null);
 }
 
 // Экран одной подкатегории (мной / партнёром / нами) со списком тайтлов
@@ -6315,11 +6807,12 @@ function renderWatchedBucket(bucketKey) {
     countFooter.textContent = `Всего тайтлов: ${list.length}`;
     app.appendChild(countFooter);
 
-    renderWatchedNav(() => renderWatchedTop());
+    renderWatchedNav(() => renderWatchedTop(watchedTopCameFromBookmarks));
 }
 
-// Экран "Будем смотреть" — плоский список вишлиста
-function renderWishlistFolder() {
+// Экран "Будем смотреть" — плоский список вишлиста. cameFromBookmarks=true —
+// открыт из плашки "🔖 Закладки" (компактный режим), см. renderWatchedTop().
+function renderWishlistFolder(cameFromBookmarks = false) {
     startTransitionLock();
     isChatScreenOpen = false;
     if (chatPollInterval) {
@@ -6356,8 +6849,9 @@ function renderWishlistFolder() {
     countFooter.textContent = `Всего тайтлов: ${list.length}`;
     app.appendChild(countFooter);
 
-    // Тоже верхний экран раздела — "Назад" здесь дублировал бы "Домой".
-    renderWatchedNav(null);
+    // Тоже верхний экран раздела — "Назад" либо в "Закладки" (если оттуда
+    // и пришли), либо дублировал бы "Домой".
+    renderWatchedNav(cameFromBookmarks ? () => showCompactBookmarksScreen() : null);
 }
 
 // =======================================================
@@ -6365,8 +6859,10 @@ function renderWishlistFolder() {
 // =======================================================
 // Открывается кнопкой с главной, живёт вне обычной history/openData —
 // поэтому "Назад" здесь не нужен, только "Домой" (см. renderWatchedNav(null)
-// ниже, тот же приём, что и у других верхнеуровневых разделов).
-function showCalendarScreen() {
+// ниже, тот же приём, что и у других верхнеуровневых разделов) — если
+// экран не открыт из "🔖 Закладки" (компактный режим), тогда "Назад" ведёт
+// туда (см. calendarCameFromBookmarks/renderCalendarScreen() ниже).
+function showCalendarScreen(cameFromBookmarks = false) {
     startTransitionLock();
     isChatScreenOpen = false;
     currentWatchedBucket = null;
@@ -6377,6 +6873,7 @@ function showCalendarScreen() {
         chatPollInterval = null;
     }
     currentCategoryName = "📅 Календарь просмотров";
+    calendarCameFromBookmarks = cameFromBookmarks;
 
     // Открываем на текущем месяце, если до этого календарь ещё не открывался
     // за эту сессию — а если пользователь уже листал месяцы вперёд/назад,
@@ -6496,8 +6993,9 @@ function renderCalendarScreen() {
     hint.textContent = "Нажмите на выделенный день, чтобы посмотреть, увидеть и изменить план.";
     app.appendChild(hint);
 
-    // Верхний экран раздела — "Назад" отсюда вёл бы туда же, куда "Домой".
-    renderWatchedNav(null);
+    // Верхний экран раздела — "Назад" либо в "Закладки" (если оттуда и
+    // пришли), либо вёл бы туда же, куда "Домой".
+    renderWatchedNav(calendarCameFromBookmarks ? () => showCompactBookmarksScreen() : null);
 }
 
 // Модальное окно одного дня календаря: список запланированных тайтлов и
