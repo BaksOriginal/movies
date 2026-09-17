@@ -224,7 +224,7 @@ function showGameOverModal(score, isRecord, onRestart) {
             <p style="font-size: 22px; font-weight: bold; color: var(--pink-soft); margin: 10px 0 20px;">Счёт: ${score}</p>
             <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
                 <button id="gameOverRestart" class="btn-pink-style">🔁 Заново</button>
-                <button id="gameOverMenu" class="btn-action-cancel">🕹 К играм</button>
+                <button id="gameOverMenu" class="btn-action-cancel">🕹️ К играм</button>
             </div>
         </div>
     `;
@@ -331,7 +331,7 @@ async function showGamesScreen() {
     app.innerHTML = "";
 
     let title = document.createElement("h1");
-    setEmojiTitle(title, "🕹 Игры");
+    setEmojiTitle(title, "🕹️ Игры");
     app.appendChild(title);
 
     let container = document.createElement("div");
