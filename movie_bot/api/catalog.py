@@ -1,5 +1,6 @@
 """
-api/catalog.py — серверный шлюз между мини-аппом (index.html) и Supabase.
+api/catalog.py — серверный шлюз между мини-аппом (webapp/index.html),
+Supabase и TMDB.
 
 Зачем это нужно: любой ключ, который лежит в исходниках index.html,
 виден всем — это и есть anon/publishable key. Раньше мини-апп ходил в
@@ -17,11 +18,16 @@ bot_authorized_users приходилось делать публично чит
   3. Только после этого читаем/пишем в Supabase через SERVICE_ROLE_KEY —
      он обходит RLS и никогда не попадает в браузер.
 
-Требуется новая переменная окружения на Vercel: SUPABASE_SERVICE_ROLE_KEY
-(взять в Supabase Dashboard → Project Settings → API → service_role
-secret). Это НЕ тот ключ, что в script.js/index.html — тот трогать не
-нужно, а этот нигде, кроме серверных переменных окружения, светиться не
-должен: он равнозначен полному доступу к базе в обход всех политик.
+Что умеет:
+  GET  ?initData=...                       — весь каталог (title, year, category, genre, franchise)
+  GET  ?initData=...&tmdb=/search/movie&…  — запрос к TMDB для онлайн-поиска
+                                             (через ту же edge-функцию tmdb-proxy, что и сайт)
+  POST {initData, rows: [...]}             — добавить тайтлы в каталог
+
+Переменные окружения на Vercel: BOT_TOKEN, SUPABASE_SERVICE_ROLE_KEY
+(Supabase Dashboard → Project Settings → API → service_role secret).
+SERVICE_ROLE_KEY нигде, кроме серверных переменных окружения, светиться
+не должен: он равнозначен полному доступу к базе в обход всех политик.
 """
 
 import hashlib
@@ -37,6 +43,9 @@ import requests
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 SUPABASE_URL = "https://nwkgofmgluduldgsmwfa.supabase.co"
 SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+# Публичный (publishable) ключ — тот же, что лежит в core.js сайта. Нужен
+# только для вызова edge-функции tmdb-proxy, к базе он доступа не даёт.
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "sb_publishable_Igpb__d5aHp3DBbQH1NgOA_W8_Ku6aE")
 
 REST_HEADERS = {
     "apikey": SERVICE_ROLE_KEY,
@@ -45,6 +54,19 @@ REST_HEADERS = {
 }
 
 MAX_INIT_DATA_AGE = 24 * 60 * 60  # секунд; можно сделать строже
+
+# Какие запросы к TMDB мини-аппу разрешено проксировать через нас
+TMDB_ALLOWED_PATHS = {
+    "/search/movie", "/search/tv",
+    "/discover/movie", "/discover/tv",
+    "/genre/movie/list", "/genre/tv/list",
+}
+TMDB_ALLOWED_PARAMS = {
+    "query", "page", "sort_by", "with_genres", "without_genres", "with_origin_country",
+}
+
+TITLE_FIELDS = ("title", "year", "category", "genre", "franchise")
+SECRET_MARKERS = ("Секрет", "🔒", "❤️")
 
 
 def verify_init_data(init_data: str) -> dict | None:
@@ -97,6 +119,23 @@ def get_catalog() -> list:
     return resp.json()
 
 
+def clean_rows(rows: list) -> list | None:
+    """Оставляет только поля таблицы titles и проверяет обязательные.
+    Секретную категорию через бота пополнять нельзя (она живёт в коде сайта)."""
+    cleaned = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        item = {key: row.get(key) for key in TITLE_FIELDS}
+        if not item["title"] or not item["year"] or not item["category"] or not item["genre"]:
+            return None
+        if any(marker in str(item["category"]) for marker in SECRET_MARKERS):
+            return None
+        item["franchise"] = item["franchise"] or None
+        cleaned.append(item)
+    return cleaned
+
+
 def insert_titles(rows: list) -> None:
     resp = requests.post(
         f"{SUPABASE_URL}/rest/v1/titles",
@@ -105,6 +144,19 @@ def insert_titles(rows: list) -> None:
         timeout=10,
     )
     resp.raise_for_status()
+
+
+def tmdb_request(path: str, qs: dict) -> dict:
+    params = {key: values[0] for key, values in qs.items() if key in TMDB_ALLOWED_PARAMS}
+    params["language"] = "ru-RU"
+    resp = requests.get(
+        f"{SUPABASE_URL}/functions/v1/tmdb-proxy{path}",
+        headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {SUPABASE_ANON_KEY}"},
+        params=params,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 class handler(BaseHTTPRequestHandler):
@@ -138,8 +190,15 @@ class handler(BaseHTTPRequestHandler):
             self._json(403, {"error": "unauthorized"})
             return
 
+        tmdb_path = qs.get("tmdb", [""])[0]
         try:
-            self._json(200, get_catalog())
+            if tmdb_path:
+                if tmdb_path not in TMDB_ALLOWED_PATHS:
+                    self._json(400, {"error": "tmdb path not allowed"})
+                    return
+                self._json(200, tmdb_request(tmdb_path, qs))
+            else:
+                self._json(200, get_catalog())
         except Exception as e:
             self._json(500, {"error": str(e)})
 
@@ -159,6 +218,10 @@ class handler(BaseHTTPRequestHandler):
         rows = payload.get("rows")
         if not isinstance(rows, list) or not rows:
             self._json(400, {"error": "no rows"})
+            return
+        rows = clean_rows(rows)
+        if rows is None:
+            self._json(400, {"error": "bad rows"})
             return
 
         try:

@@ -21,8 +21,7 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ==========================================
 // АКТУАЛЬНЫЙ SHA ВЕТКИ (обход кэша jsDelivr по "@branch")
 // ==========================================
-// Общая утилита — ей пользуются и стикеры чата (ниже), и список треков
-// ритм-игры (в games.js). jsDelivr кэширует ответы по "@main" с заметной
+// Нужна стикерам чата (ниже). jsDelivr кэширует ответы по "@main" с заметной
 // задержкой, а по конкретному commit SHA — нет, поэтому вместо имени ветки
 // в URL к data.jsdelivr.com/cdn.jsdelivr.net подставляем SHA текущего HEAD.
 const GITHUB_FALLBACK_SHA = "cba3258795994c35cea06a41c6269421788c3bc5";

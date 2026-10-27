@@ -2,436 +2,918 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Добавить фильмы</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Добавить в каталог</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Jura:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jura:wght@600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
+    /* Тот же визуальный язык, что у сайта (ui.css): тёмная тема, розово-
+       фиолетовый акцент, Manrope для текста, Jura для заголовков. */
     :root{
         --void: #0a0613;
-        --void-2: #170a26;
-        --panel: #1a1128;
-        --panel-2: #241733;
         --panel-deep: #120b1d;
-        --line: rgba(255,255,255,0.08);
-
         --pink: #ff2e93;
         --pink-soft: #ff7fc4;
         --purple: #8b3bff;
-        --purple-deep: #5a1fb0;
         --cyan: #2ee8ff;
         --gold: #ffd15c;
-
+        --green: #34e07a;
         --text: #f2e9ff;
         --text-dim: #b9a8da;
         --text-faint: #9686b8;
-
-        --font-body: 'Jura', 'Segoe UI', Arial, sans-serif;
+        --surface: rgba(255,255,255,0.035);
+        --surface-2: rgba(255,255,255,0.06);
+        --surface-3: rgba(255,255,255,0.09);
+        --border: rgba(255,255,255,0.08);
+        --border-strong: rgba(255,255,255,0.14);
+        --font-ui: 'Manrope', 'Segoe UI', Arial, sans-serif;
+        --font-display: 'Jura', 'Segoe UI', Arial, sans-serif;
     }
-    *{box-sizing:border-box;}
+    *{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html{ background: var(--void); }
     body{
-        margin:0;
-        padding:16px;
-        font-family: var(--font-body);
-        background: radial-gradient(1200px 800px at 50% -10%, var(--void-2), var(--void) 60%);
+        margin: 0;
+        min-height: 100vh;
+        padding: 16px 16px calc(96px + env(safe-area-inset-bottom));
+        font-family: var(--font-ui);
         color: var(--text);
-        min-height:100vh;
+        background:
+            radial-gradient(ellipse 70% 40% at 10% -5%, rgba(139,59,255,0.28), transparent 60%),
+            radial-gradient(ellipse 60% 35% at 95% 5%, rgba(255,46,147,0.18), transparent 60%),
+            var(--void);
+        background-attachment: fixed;
     }
+    button{
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+    }
+    [hidden]{ display: none !important; }
+
     h1{
-        font-size:20px;
-        text-align:center;
-        margin: 4px 0 18px;
+        margin: 2px 0 14px;
+        font-family: var(--font-display);
+        font-size: 24px;
         background: linear-gradient(90deg, var(--pink-soft), var(--purple) 55%, var(--cyan));
-        -webkit-background-clip:text;
-        background-clip:text;
-        color:transparent;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
     }
-    .card{
-        background: linear-gradient(160deg, var(--panel-2), var(--panel-deep));
-        border: 1px solid rgba(255,46,147,0.25);
-        border-radius: 18px;
-        padding: 16px;
-        margin-bottom: 14px;
-        box-shadow: 0 14px 40px rgba(0,0,0,0.5), 0 0 30px rgba(139,59,255,0.18);
-        position: relative;
+
+    /* ---------- Вкладки ---------- */
+    .segmented{
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        margin-bottom: 18px;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--border);
     }
-    .card .mobile-label{
-        display:block;
-        font-size:11px;
-        font-weight:700;
+    .segmented button{
+        flex: 1;
+        height: 40px;
+        border-radius: 999px;
+        font-size: 14.5px;
+        font-weight: 700;
         color: var(--text-dim);
-        text-transform:uppercase;
-        letter-spacing:0.3px;
-        margin: 8px 0 4px;
     }
-    .card .mobile-label:first-child{margin-top:0;}
-    .card input, .card select{
-        width:100%;
-        padding:10px;
-        border:1px solid var(--line);
-        border-radius:8px;
-        font-size:16px;
-        background: var(--panel-deep);
+    .segmented button.active{
+        background: linear-gradient(135deg, var(--pink), var(--purple));
+        color: #fff;
+    }
+
+    /* ---------- Поля и чипы ---------- */
+    .field{ display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+    .field > span{ font-size: 12px; font-weight: 700; color: var(--text-dim); }
+    .field em{ font-style: normal; font-weight: 600; color: var(--text-faint); }
+    .field input{
+        width: 100%;
+        height: 44px;
+        padding: 0 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: rgba(0,0,0,0.25);
         color: var(--text);
-        font-family: var(--font-body);
+        font: 600 16px var(--font-ui);
+        outline: none;
+        -webkit-appearance: none;
     }
-    .card input:focus, .card select:focus{
-        outline:none;
-        border-color: var(--cyan);
-        box-shadow: 0 0 0 3px rgba(46,232,255,0.15);
+    .field input::placeholder{ color: var(--text-faint); font-weight: 500; }
+    .field input:focus{ border-color: rgba(255,127,196,0.55); }
+    .row{ display: flex; gap: 10px; }
+    .grow{ flex: 1; }
+    .year{ width: 86px; flex-shrink: 0; }
+    .stack{ display: flex; flex-direction: column; gap: 10px; }
+
+    .chips{
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        margin: 0 -16px;
+        padding: 2px 16px;
     }
-    .btn-remove-row{
-        position:absolute;
-        top:12px; right:12px;
-        width:30px; height:30px;
-        border-radius:8px;
-        border: 1.5px solid var(--pink);
-        background: transparent;
-        color: var(--pink);
-        font-weight:700;
-        cursor:pointer;
-    }
-    .controls{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        margin: 4px 0 18px;
-    }
-    .btn-add-row{
-        background: transparent;
-        border: 1.5px solid var(--cyan);
-        color: var(--cyan);
-        border-radius: 10px;
-        padding: 9px 16px;
-        font-weight:700;
-        font-size:14px;
-        font-family: var(--font-body);
-        cursor:pointer;
-    }
-    .btn-add-row:disabled{opacity:0.4; cursor:not-allowed;}
-    .row-count{font-size:13px; color: var(--text-dim); font-weight:600;}
-    .btn-save{
-        width:100%;
-        background: transparent;
-        border: 1.5px solid #34e07a;
-        color: #34e07a;
-        padding:13px;
-        border-radius:10px;
-        font-weight:700;
-        font-size:16px;
-        font-family: var(--font-body);
-        cursor:pointer;
-    }
-    .btn-save:disabled{opacity:0.5;}
-    #status{
-        margin-top:14px;
-        font-size:14px;
-        line-height:1.5;
-        white-space:pre-wrap;
-    }
-    .status-ok{color:#34e07a;}
-    .status-warn{color: var(--gold);}
-    .status-err{color: var(--pink);}
-    #gate{
-        text-align:center;
-        padding: 40px 16px;
+    .chips::-webkit-scrollbar{ display: none; }
+    .chips.wrap{ flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; }
+    .chip{
+        flex-shrink: 0;
+        height: 34px;
+        padding: 0 13px;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--border);
         color: var(--text-dim);
+        font-size: 13.5px;
+        font-weight: 700;
+        white-space: nowrap;
     }
+    .chip.active{ background: var(--text); border-color: var(--text); color: var(--void); }
+
+    /* ---------- Ручное добавление ---------- */
+    .cards{ display: flex; flex-direction: column; gap: 12px; }
+    .card{
+        padding: 14px 16px 16px;
+        border-radius: 20px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .card:focus-within{ border-color: rgba(255,127,196,0.35); }
+    .card.error{ border-color: rgba(255,90,120,0.75); }
+    .card-head{ display: flex; align-items: center; justify-content: space-between; }
+    .card-num{
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+    }
+    .card-remove{
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        color: var(--text-faint);
+    }
+    .add-more{
+        width: 100%;
+        height: 50px;
+        margin-top: 12px;
+        border-radius: 20px;
+        border: 1.5px dashed var(--border-strong);
+        color: var(--text-dim);
+        font-size: 15px;
+        font-weight: 700;
+    }
+
+    /* Плавающая капсула "Сохранить" */
+    .bar{
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 8px 8px 20px;
+        border-radius: 999px;
+        background: rgba(12,7,22,0.88);
+        border: 1px solid var(--border-strong);
+        box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+    .bar-text{ flex: 1; font-size: 13px; font-weight: 600; color: var(--text-dim); }
+    .pill{
+        height: 46px;
+        padding: 0 24px;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 800;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+    }
+    .pill.accent{
+        background: linear-gradient(135deg, var(--pink), var(--purple));
+        border-color: transparent;
+        color: #fff;
+    }
+    .pill:disabled{ opacity: .45; }
+
+    /* ---------- Онлайн-поиск ---------- */
+    .search{
+        display: flex;
+        gap: 8px;
+        margin: 12px 0 16px;
+    }
+    .search input{
+        flex: 1;
+        min-width: 0;
+        height: 48px;
+        padding: 0 18px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        color: var(--text);
+        font: 600 16px var(--font-ui);
+        outline: none;
+        -webkit-appearance: none;
+    }
+    .search input:focus{ border-color: rgba(255,127,196,0.55); }
+    .search button{
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--pink), var(--purple));
+        color: #fff;
+        font-size: 18px;
+        font-weight: 800;
+    }
+    .results{ display: flex; flex-direction: column; gap: 10px; }
+    .result{
+        display: flex;
+        gap: 12px;
+        padding: 10px;
+        border-radius: 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+    }
+    .result-poster{
+        width: 64px;
+        aspect-ratio: 2 / 3;
+        flex-shrink: 0;
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--surface-2);
+        display: grid;
+        place-items: center;
+        font-size: 22px;
+    }
+    .result-poster img{ width: 100%; height: 100%; object-fit: cover; }
+    .result-body{ flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .result-title{ font-weight: 800; font-size: 15px; line-height: 1.25; }
+    .result-meta{ font-size: 12.5px; color: var(--text-faint); }
+    .result-meta b{ color: var(--gold); font-weight: 800; }
+    .result-genres{ font-size: 12px; color: var(--cyan); }
+    .result-add{
+        align-self: flex-start;
+        margin-top: auto;
+        height: 34px;
+        padding: 0 14px;
+        border-radius: 10px;
+        background: var(--surface-2);
+        border: 1px solid var(--border-strong);
+        font-size: 13px;
+        font-weight: 800;
+    }
+    .result-add.added{ color: var(--green); border-color: rgba(52,224,122,0.4); background: rgba(52,224,122,0.08); }
+    .hint{ padding: 40px 12px; text-align: center; color: var(--text-faint); font-size: 14px; line-height: 1.5; }
+
+    /* ---------- Шторка "Добавить из поиска" ---------- */
+    .sheet-overlay{
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: flex-end;
+        background: rgba(5,2,12,0.62);
+    }
+    .sheet{
+        width: 100%;
+        max-height: 88vh;
+        overflow-y: auto;
+        padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
+        border-radius: 24px 24px 0 0;
+        background: #150c24;
+        border-top: 1px solid var(--border-strong);
+        animation: sheetUp .28s cubic-bezier(.2,.8,.2,1) both;
+    }
+    @keyframes sheetUp{ from{ transform: translateY(100%); } to{ transform: none; } }
+    .sheet-handle{ width: 40px; height: 5px; margin: 0 auto 14px; border-radius: 3px; background: var(--border-strong); }
+    .sheet-head{ display: flex; gap: 14px; align-items: center; margin-bottom: 16px; }
+    .sheet-head .result-poster{ width: 56px; }
+    .sheet-title{ font-family: var(--font-display); font-size: 19px; font-weight: 700; line-height: 1.2; }
+    .sheet-buttons{ display: flex; gap: 8px; margin-top: 18px; }
+    .sheet-buttons .pill{ flex: 1; }
+
+    /* ---------- Уведомление ---------- */
+    .toast{
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        top: calc(12px + env(safe-area-inset-top));
+        z-index: 30;
+        padding: 12px 16px;
+        border-radius: 14px;
+        background: rgba(20,12,34,0.95);
+        border: 1px solid var(--border-strong);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.4;
+        white-space: pre-line;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+        animation: toastIn .25s ease both;
+    }
+    .toast.ok{ border-color: rgba(52,224,122,0.5); }
+    .toast.warn{ border-color: rgba(255,209,92,0.5); }
+    .toast.err{ border-color: rgba(255,90,120,0.6); }
+    @keyframes toastIn{ from{ opacity: 0; transform: translateY(-10px); } to{ opacity: 1; transform: none; } }
+
+    #gate{ padding: 60px 16px; text-align: center; color: var(--text-dim); line-height: 1.5; }
 </style>
 </head>
 <body>
 
-<div id="gate" style="display:none;">
+<div id="gate" hidden>
     <h1>Доступ закрыт</h1>
-    <p>Похоже, ты не проходил проверку пароля в боте. Открой бота и напиши /start.</p>
+    <p>Открой мини-апп из бота: напиши ему что-нибудь и нажми кнопку под ответом.</p>
 </div>
 
-<div id="appRoot" style="display:none;">
-    <h1>🎬 Добавить фильмы</h1>
-    <div id="rows"></div>
-    <div class="controls">
-        <button type="button" class="btn-add-row" id="addRowBtn">➕ Ещё строка</button>
-        <span class="row-count" id="rowCount"></span>
+<div id="appRoot" hidden>
+    <h1>Добавить в каталог</h1>
+    <div class="segmented">
+        <button type="button" data-mode="manual">➕ Вручную</button>
+        <button type="button" data-mode="search">🔍 Онлайн-поиск</button>
     </div>
-    <button type="button" class="btn-save" id="saveBtn">Сохранить все</button>
-    <div id="status"></div>
+
+    <!-- Ручное добавление: несколько тайтлов за раз -->
+    <section id="manualView" hidden>
+        <div class="cards" id="rows"></div>
+        <button type="button" class="add-more" id="addRowBtn">＋ Ещё тайтл</button>
+        <div class="bar">
+            <span class="bar-text" id="rowCount"></span>
+            <button type="button" class="pill accent" id="saveBtn">Сохранить</button>
+        </div>
+    </section>
+
+    <!-- Онлайн-поиск по TMDB с добавлением в один тап -->
+    <section id="searchView" hidden>
+        <div class="chips" id="typeChips"></div>
+        <form class="search" id="searchForm">
+            <input type="search" id="q" placeholder="Название" enterkeyhint="search" autocomplete="off">
+            <button type="submit" aria-label="Искать">→</button>
+        </form>
+        <div class="results" id="results"></div>
+        <button type="button" class="add-more" id="moreBtn" hidden>Показать ещё</button>
+    </section>
 </div>
 
 <script>
 // ==========================================
-// API — мини-апп больше НЕ ходит в Supabase напрямую (без ключей в
-// браузере). Всё идёт через свой же серверлесс-эндпоинт api/catalog.py,
-// который проверяет подпись initData и сам обращается к Supabase
-// service_role-ключом. Если index.html лежит не на том же домене, что
-// и Vercel-функции — замените на полный https-адрес.
+// API — мини-апп не ходит ни в Supabase, ни в TMDB напрямую. Всё идёт через
+// свой серверлесс-эндпоинт api/catalog.py: он проверяет подпись initData,
+// права пользователя и уже сам обращается к базе и к TMDB-прокси.
 // ==========================================
 const CATALOG_API_URL = "https://movies-bot-gamma.vercel.app/api/catalog";
-
-async function apiGetCatalog(initData) {
-    const res = await fetch(`${CATALOG_API_URL}?initData=${encodeURIComponent(initData)}`);
-    if (res.status === 403) return { unauthorized: true };
-    if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`API ${res.status}: ${text}`);
-    }
-    return { rows: await res.json() };
-}
-
-async function apiInsertTitles(initData, rows) {
-    const res = await fetch(CATALOG_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, rows })
-    });
-    if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`API ${res.status}: ${text}`);
-    }
-}
+const TMDB_IMG = "https://image.tmdb.org/t/p/w185";
+const TMDB_ANIMATION_GENRE_ID = 16;
 
 const MAX_ROWS = 10;
 const INITIAL_ROWS = 3;
-const tg = window.Telegram && window.Telegram.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
+const TYPES = ["Фильм", "Мультфильм", "Сериал", "Аниме"];
 
-let existingTitles = [];   // все строки таблицы "titles" — для проверки дублей и даталистов
-let categories = [];
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) {
+    tg.ready();
+    tg.expand();
+    if (tg.setHeaderColor) tg.setHeaderColor("#0a0613");
+    if (tg.setBackgroundColor) tg.setBackgroundColor("#0a0613");
+}
+
+let existingTitles = [];   // строки таблицы titles — для дублей и подсказок
+let categories = [];       // обычные категории каталога (без секретной)
 let rowSeq = 0;
+
+const $ = (sel) => document.querySelector(sel);
+
+function haptic(type) {
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(type);
+}
+
+function esc(str) {
+    return String(str == null ? "" : str).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
 
 function norm(s) {
     return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function isDuplicate(row) {
-    return existingTitles.some(t =>
-        norm(t.title) === norm(row.title) &&
-        Number(t.year) === Number(row.year) &&
-        norm(t.category) === norm(row.category) &&
-        norm(t.genre) === norm(row.genre) &&
-        norm(t.franchise || "") === norm(row.franchise || "")
-    );
+// Тайтл считается уже добавленным, если совпадают название и год
+// (так же определяет "уже в каталоге" и онлайн-поиск на сайте)
+function titleKey(title, year) {
+    return norm(title) + "|" + Number(year);
+}
+function isInCatalog(title, year) {
+    return existingTitles.some(t => titleKey(t.title, t.year) === titleKey(title, year));
 }
 
-// Возвращает "unauthorized" вместо бросания исключения — вызывающий
-// код (init) сам решает, показать ли экран "доступ закрыт" или ошибку.
-async function loadCatalog(initData) {
-    const result = await apiGetCatalog(initData);
-    if (result.unauthorized) return "unauthorized";
+let toastTimer = null;
+function toast(text, kind = "ok") {
+    const old = $(".toast");
+    if (old) old.remove();
+    const el = document.createElement("div");
+    el.className = `toast ${kind}`;
+    el.textContent = text;
+    document.body.appendChild(el);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.remove(), 4000);
+}
 
-    existingTitles = result.rows;
-    console.log(`[loadCatalog] получено строк: ${existingTitles.length}`, existingTitles.slice(0, 3));
-    categories = [...new Set(existingTitles.map(t => t.category))]
-        .filter(c => c && !c.includes("Секрет") && !c.includes("🔒") && !c.includes("❤️"))
-        .sort();
-    console.log(`[loadCatalog] категорий после фильтра: ${categories.length}`, categories);
-    return "ok";
+// ---------- Запросы к своему API ----------
+async function apiGetCatalog() {
+    const res = await fetch(`${CATALOG_API_URL}?initData=${encodeURIComponent(tg.initData)}`);
+    if (res.status === 403) return null;
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text().catch(() => "")}`);
+    return res.json();
+}
+
+async function apiInsertTitles(rows) {
+    const res = await fetch(CATALOG_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData: tg.initData, rows })
+    });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text().catch(() => "")}`);
+}
+
+async function apiTmdb(path, params = {}) {
+    const qs = new URLSearchParams({ initData: tg.initData, tmdb: path, ...params });
+    const res = await fetch(`${CATALOG_API_URL}?${qs}`);
+    if (!res.ok) throw new Error(`TMDB ${res.status}`);
+    return res.json();
+}
+
+function isSecretCategory(cat) {
+    return cat.includes("Секрет") || cat.includes("🔒") || cat.includes("❤️");
+}
+
+async function loadCatalog() {
+    const rows = await apiGetCatalog();
+    if (rows === null) return false;
+    existingTitles = rows;
+    // Тот же порядок, что на сайте: Фильмы -> Мультфильмы -> Сериалы -> Аниме -> прочие
+    const priority = (cat) => {
+        const i = TYPES.findIndex(type => cat.includes(type));
+        return i === -1 ? 500 : i;
+    };
+    categories = [...new Set(rows.map(t => t.category))]
+        .filter(c => c && !isSecretCategory(c))
+        .sort((a, b) => priority(a) - priority(b));
+    return true;
 }
 
 function genresFor(category) {
     return [...new Set(existingTitles.filter(t => t.category === category).map(t => t.genre))].sort();
 }
 function franchisesFor(category, genre) {
-    return [...new Set(
-        existingTitles.filter(t => t.category === category && norm(t.genre) === norm(genre) && t.franchise)
-            .map(t => t.franchise)
-    )].sort();
+    return [...new Set(existingTitles
+        .filter(t => t.category === category && norm(t.genre) === norm(genre) && t.franchise)
+        .map(t => t.franchise))].sort();
 }
 
-function rowsContainer() { return document.getElementById("rows"); }
-function currentRows() { return Array.from(rowsContainer().querySelectorAll(".card")); }
+// Общий блок "категория чипами + жанр + франшиза" — для карточки ручного
+// добавления и для шторки онлайн-поиска
+function buildCategoryFields(container, idPrefix, initialCategory, initialGenre = "") {
+    container.insertAdjacentHTML("beforeend", `
+        <div class="chips wrap cat-chips"></div>
+        <div class="row">
+            <label class="field grow">
+                <span>Жанр</span>
+                <input type="text" class="rGenre" list="${idPrefix}-genres" placeholder="Начните вводить" autocomplete="off">
+                <datalist id="${idPrefix}-genres"></datalist>
+            </label>
+        </div>
+        <label class="field">
+            <span>Франшиза <em>необязательно</em></span>
+            <input type="text" class="rFranchise" list="${idPrefix}-franchises" placeholder="—" autocomplete="off">
+            <datalist id="${idPrefix}-franchises"></datalist>
+        </label>
+    `);
+    const chipsEl = container.querySelector(".cat-chips");
+    const genreInput = container.querySelector(".rGenre");
+    const genreList = container.querySelector(`#${idPrefix}-genres`);
+    const franList = container.querySelector(`#${idPrefix}-franchises`);
+    container.dataset.category = initialCategory || categories[0] || "";
+    genreInput.value = initialGenre;
 
-function updateChrome() {
-    const rows = currentRows();
-    rows.forEach(r => {
-        r.querySelector(".btn-remove-row").style.visibility = rows.length > 1 ? "visible" : "hidden";
+    const refresh = () => {
+        genreList.innerHTML = genresFor(container.dataset.category).map(g => `<option value="${esc(g)}">`).join("");
+        franList.innerHTML = franchisesFor(container.dataset.category, genreInput.value).map(f => `<option value="${esc(f)}">`).join("");
+    };
+    categories.forEach(cat => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip" + (cat === container.dataset.category ? " active" : "");
+        chip.textContent = cat;
+        chip.onclick = () => {
+            if (container.dataset.category === cat) return;
+            container.dataset.category = cat;
+            chipsEl.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === chip));
+            genreInput.value = "";
+            refresh();
+        };
+        chipsEl.appendChild(chip);
     });
-    document.getElementById("rowCount").textContent = `${rows.length} / ${MAX_ROWS}`;
-    document.getElementById("addRowBtn").disabled = rows.length >= MAX_ROWS;
+    genreInput.addEventListener("input", refresh);
+    refresh();
 }
 
-function addRow(prefill = {}) {
-    if (currentRows().length >= MAX_ROWS) return;
-    rowSeq++;
-    const id = `row${rowSeq}`;
-    const defaultYear = new Date().getFullYear();
-
-    const card = document.createElement("div");
-    card.className = "card";
-    card.dataset.rowId = id;
-    card.innerHTML = `
-        <button type="button" class="btn-remove-row" title="Удалить">✕</button>
-        <label class="mobile-label">Название</label>
-        <input type="text" class="rTitle" placeholder="Например: Крик 7" value="${prefill.title || ""}">
-
-        <label class="mobile-label">Год</label>
-        <input type="number" class="rYear" value="${prefill.year || defaultYear}">
-
-        <label class="mobile-label">Категория</label>
-        <select class="rCategory">
-            ${categories.map(c => `<option value="${c}" ${c === prefill.category ? "selected" : ""}>${c}</option>`).join("")}
-        </select>
-
-        <label class="mobile-label">Жанр</label>
-        <input type="text" class="rGenre" list="${id}-genres" placeholder="Например: Ужасы" value="${prefill.genre || ""}">
-        <datalist id="${id}-genres"></datalist>
-
-        <label class="mobile-label">Франшиза (необязательно)</label>
-        <input type="text" class="rFranchise" list="${id}-franchises" placeholder="Необязательно">
-        <datalist id="${id}-franchises"></datalist>
-    `;
-    rowsContainer().appendChild(card);
-
-    const catSel = card.querySelector(".rCategory");
-    const genreInput = card.querySelector(".rGenre");
-    const genreList = card.querySelector(`#${id}-genres`);
-    const franList = card.querySelector(`#${id}-franchises`);
-
-    function refreshGenres() {
-        genreList.innerHTML = genresFor(catSel.value).map(g => `<option value="${g}">`).join("");
-    }
-    function refreshFranchises() {
-        franList.innerHTML = franchisesFor(catSel.value, genreInput.value).map(f => `<option value="${f}">`).join("");
-    }
-    catSel.addEventListener("change", () => { refreshGenres(); genreInput.value = ""; refreshFranchises(); });
-    genreInput.addEventListener("input", refreshFranchises);
-    card.querySelector(".btn-remove-row").addEventListener("click", () => { card.remove(); updateChrome(); });
-
-    refreshGenres();
-    refreshFranchises();
-    updateChrome();
-}
-
-function readRow(card) {
-    let franchise = card.querySelector(".rFranchise").value.trim();
+function readCategoryFields(container) {
     return {
-        title: card.querySelector(".rTitle").value.trim(),
-        year: parseInt(card.querySelector(".rYear").value, 10),
-        category: card.querySelector(".rCategory").value,
-        genre: card.querySelector(".rGenre").value.trim(),
-        franchise: franchise === "" ? null : franchise
+        category: container.dataset.category,
+        genre: container.querySelector(".rGenre").value.trim(),
+        franchise: container.querySelector(".rFranchise").value.trim() || null
     };
 }
 
-function setStatus(text, cls) {
-    const el = document.getElementById("status");
-    el.textContent = text;
-    el.className = cls || "";
+// ==========================================
+// ВКЛАДКА "ВРУЧНУЮ"
+// ==========================================
+function currentCards() {
+    return Array.from(document.querySelectorAll("#rows .card"));
 }
 
-async function handleSave() {
-    const saveBtn = document.getElementById("saveBtn");
-    const rows = currentRows().map(readRow).filter(r => r.title !== "");
+function updateManualChrome() {
+    const cards = currentCards();
+    cards.forEach((card, i) => {
+        card.querySelector(".card-num").textContent = `Тайтл ${i + 1}`;
+        card.querySelector(".card-remove").hidden = cards.length < 2;
+    });
+    const filled = cards.filter(c => c.querySelector(".rTitle").value.trim()).length;
+    $("#rowCount").textContent = filled ? `Готово к сохранению: ${filled}` : "Заполните хотя бы название";
+    $("#saveBtn").disabled = filled === 0;
+    $("#saveBtn").textContent = filled > 1 ? `Сохранить ${filled}` : "Сохранить";
+    $("#addRowBtn").hidden = cards.length >= MAX_ROWS;
+}
 
-    if (rows.length === 0) {
-        setStatus("Заполни хотя бы одно название.", "status-err");
-        return;
-    }
-    for (const r of rows) {
-        if (!r.year || !r.category || !r.genre) {
-            setStatus(`Проверь строку "${r.title}" — не хватает года, категории или жанра.`, "status-err");
-            return;
-        }
-    }
+function addRow(prefill = {}) {
+    if (currentCards().length >= MAX_ROWS) return null;
+    rowSeq++;
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+        <div class="card-head">
+            <span class="card-num"></span>
+            <button type="button" class="card-remove" title="Убрать">✕</button>
+        </div>
+        <div class="row">
+            <label class="field grow">
+                <span>Название</span>
+                <input type="text" class="rTitle" placeholder="Например: Крик 7" autocomplete="off">
+            </label>
+            <label class="field year">
+                <span>Год</span>
+                <input type="number" class="rYear" inputmode="numeric">
+            </label>
+        </div>
+    `;
+    card.querySelector(".rYear").value = prefill.year || new Date().getFullYear();
+    buildCategoryFields(card, `row${rowSeq}`, prefill.category);
+    $("#rows").appendChild(card);
 
-    // Отсеиваем дубли — как между собой в пределах формы, так и с тем,
-    // что уже лежит в базе (тайтл считается тем же, если совпадают
-    // название+год+категория+жанр+франшиза; id может быть любым).
+    card.querySelector(".rTitle").addEventListener("input", updateManualChrome);
+    card.querySelector(".card-remove").onclick = () => { card.remove(); updateManualChrome(); };
+    updateManualChrome();
+    return card;
+}
+
+function resetManualRows() {
+    $("#rows").innerHTML = "";
+    for (let i = 0; i < INITIAL_ROWS; i++) addRow();
+}
+
+async function handleManualSave() {
     const toInsert = [];
     const duplicates = [];
-    const seenInForm = [];
+    let firstError = null;
 
-    for (const r of rows) {
-        const dupInDb = isDuplicate(r);
-        const dupInForm = seenInForm.some(s =>
-            norm(s.title) === norm(r.title) && s.year === r.year &&
-            norm(s.category) === norm(r.category) && norm(s.genre) === norm(r.genre) &&
-            norm(s.franchise || "") === norm(r.franchise || "")
-        );
-        if (dupInDb || dupInForm) {
-            duplicates.push(r.title);
-        } else {
-            toInsert.push(r);
-            seenInForm.push(r);
+    currentCards().forEach(card => {
+        card.classList.remove("error");
+        const title = card.querySelector(".rTitle").value.trim();
+        if (!title) return;
+        const row = { title, year: parseInt(card.querySelector(".rYear").value, 10), ...readCategoryFields(card) };
+        if (!row.year || !row.category || !row.genre) {
+            card.classList.add("error");
+            if (!firstError) firstError = card;
+            return;
         }
-    }
+        // Дубли — и с базой, и между карточками формы
+        if (isInCatalog(row.title, row.year) || toInsert.some(r => titleKey(r.title, r.year) === titleKey(row.title, row.year))) {
+            duplicates.push(row.title);
+        } else {
+            toInsert.push(row);
+        }
+    });
 
+    if (firstError) {
+        firstError.scrollIntoView({ behavior: "smooth", block: "center" });
+        toast("Укажите год и жанр в отмеченной карточке", "err");
+        haptic("error");
+        return;
+    }
     if (toInsert.length === 0) {
-        setStatus(`Все строки уже есть в базе (дубли): ${duplicates.join(", ")}`, "status-warn");
+        toast(`Уже есть в каталоге: ${duplicates.join(", ")}`, "warn");
+        haptic("warning");
         return;
     }
 
+    const saveBtn = $("#saveBtn");
     saveBtn.disabled = true;
     saveBtn.textContent = "Сохраняем…";
+    try {
+        await apiInsertTitles(toInsert);
+        await loadCatalog();
+        let msg = `Добавлено: ${toInsert.map(r => r.title).join(", ")}`;
+        if (duplicates.length) msg += `\nУже были в каталоге: ${duplicates.join(", ")}`;
+        toast(msg, "ok");
+        haptic("success");
+        resetManualRows();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+        toast("Ошибка сохранения: " + e.message, "err");
+        haptic("error");
+        updateManualChrome();
+    }
+}
+
+// ==========================================
+// ВКЛАДКА "ОНЛАЙН-ПОИСК"
+// ==========================================
+const search = { type: TYPES[0], query: "", page: 1, totalPages: 1, token: 0 };
+const tmdbGenres = { movie: null, tv: null };
+
+function tmdbKind(type) {
+    return type === "Сериал" || type === "Аниме" ? "tv" : "movie";
+}
+
+async function genreMap(kind) {
+    if (!tmdbGenres[kind]) {
+        try {
+            const json = await apiTmdb(`/genre/${kind}/list`);
+            tmdbGenres[kind] = Object.fromEntries((json.genres || []).map(g => [g.id, g.name]));
+        } catch (e) {
+            tmdbGenres[kind] = {};
+        }
+    }
+    return tmdbGenres[kind];
+}
+
+// /search у TMDB не фильтрует по типу — дочищаем на клиенте, как сайт
+function matchesType(item, type) {
+    const animated = (item.genre_ids || []).includes(TMDB_ANIMATION_GENRE_ID);
+    if (type === "Фильм" || type === "Сериал") return !animated;
+    if (type === "Мультфильм") return animated;
+    return animated && (item.origin_country || []).includes("JP");
+}
+
+function discoverParams(type, page) {
+    const params = { page: String(page), sort_by: "popularity.desc" };
+    if (type === "Мультфильм") params.with_genres = String(TMDB_ANIMATION_GENRE_ID);
+    else if (type === "Аниме") { params.with_genres = String(TMDB_ANIMATION_GENRE_ID); params.with_origin_country = "JP"; }
+    else params.without_genres = String(TMDB_ANIMATION_GENRE_ID);
+    return params;
+}
+
+function renderTypeChips() {
+    const box = $("#typeChips");
+    box.innerHTML = "";
+    TYPES.forEach(type => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip" + (type === search.type ? " active" : "");
+        chip.textContent = type;
+        chip.onclick = () => {
+            if (search.type === type) return;
+            search.type = type;
+            renderTypeChips();
+            runSearch(1);
+        };
+        box.appendChild(chip);
+    });
+}
+
+async function runSearch(page) {
+    const token = ++search.token;
+    const kind = tmdbKind(search.type);
+    const results = $("#results");
+    if (page === 1) results.innerHTML = `<div class="hint">Ищем…</div>`;
+    $("#moreBtn").hidden = true;
 
     try {
-        await apiInsertTitles(tg.initData, toInsert);
-        await loadCatalog(tg.initData);
+        const [json, genres] = await Promise.all([
+            search.query
+                ? apiTmdb(`/search/${kind}`, { query: search.query, page: String(page) })
+                : apiTmdb(`/discover/${kind}`, discoverParams(search.type, page)),
+            genreMap(kind)
+        ]);
+        if (token !== search.token) return; // уже ищем что-то другое
 
-        let msg = `Добавлено: ${toInsert.length} — ${toInsert.map(r => r.title).join(", ")}`;
-        if (duplicates.length) msg += `\n\nПропущено как дубли: ${duplicates.join(", ")}`;
-        setStatus(msg, "status-ok");
+        let items = json.results || [];
+        if (search.query) items = items.filter(item => matchesType(item, search.type));
+        search.page = page;
+        search.totalPages = json.total_pages || 1;
 
-        rowsContainer().innerHTML = "";
-        for (let i = 0; i < INITIAL_ROWS; i++) addRow();
-
-        if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+        if (page === 1) results.innerHTML = "";
+        items.forEach(raw => results.appendChild(buildResult(raw, kind, genres)));
+        if (page === 1 && items.length === 0) {
+            results.innerHTML = `<div class="hint">Ничего не нашлось. Попробуйте другое название или тип.</div>`;
+        }
+        $("#moreBtn").hidden = search.page >= search.totalPages;
     } catch (e) {
-        setStatus("Ошибка сохранения: " + e.message, "status-err");
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = "Сохранить все";
+        if (token !== search.token) return;
+        results.innerHTML = `<div class="hint">Не получилось связаться с TMDB: ${esc(e.message)}</div>`;
+    }
+}
+
+function buildResult(raw, kind, genres) {
+    const isTv = kind === "tv";
+    const title = isTv ? (raw.name || raw.original_name) : (raw.title || raw.original_title);
+    const date = isTv ? raw.first_air_date : raw.release_date;
+    const year = date ? parseInt(date.slice(0, 4), 10) : null;
+    const genreNames = (raw.genre_ids || []).map(id => genres[id]).filter(Boolean);
+    const item = { title, year, genreNames, posterPath: raw.poster_path, type: search.type };
+
+    const el = document.createElement("div");
+    el.className = "result";
+    el.innerHTML = `
+        <div class="result-poster">${raw.poster_path ? `<img src="${TMDB_IMG + raw.poster_path}" alt="" loading="lazy">` : "🎬"}</div>
+        <div class="result-body">
+            <div class="result-title">${esc(title)}</div>
+            <div class="result-meta">${year || "год неизвестен"}${raw.vote_average ? ` · <b>★ ${raw.vote_average.toFixed(1)}</b>` : ""}</div>
+            ${genreNames.length ? `<div class="result-genres">${esc(genreNames.slice(0, 3).join(", "))}</div>` : ""}
+            <button type="button" class="result-add"></button>
+        </div>
+    `;
+    const addBtn = el.querySelector(".result-add");
+    const markAdded = () => {
+        addBtn.textContent = "✓ В каталоге";
+        addBtn.classList.add("added");
+        addBtn.disabled = true;
+    };
+    if (year && isInCatalog(title, year)) {
+        markAdded();
+    } else {
+        addBtn.textContent = "＋ Добавить";
+        addBtn.onclick = () => openAddSheet(item, markAdded);
+    }
+    return el;
+}
+
+// Жанр каталога, на который больше всего похож один из жанров TMDB
+// (у сайта жанры с эмодзи, например "😂 Комедия", у TMDB — "комедия")
+function suggestGenre(category, tmdbGenreNames) {
+    const ours = genresFor(category);
+    const plain = (g) => norm(g.replace(/^\P{L}+/u, ""));
+    for (const name of tmdbGenreNames) {
+        const found = ours.find(g => plain(g) === norm(name) || plain(g).includes(norm(name)) || norm(name).includes(plain(g)));
+        if (found) return found;
+    }
+    return "";
+}
+
+function openAddSheet(item, onAdded) {
+    const category = categories.find(c => c.includes(item.type)) || categories[0] || "";
+    const overlay = document.createElement("div");
+    overlay.className = "sheet-overlay";
+    overlay.innerHTML = `
+        <div class="sheet">
+            <div class="sheet-handle"></div>
+            <div class="sheet-head">
+                <div class="result-poster">${item.posterPath ? `<img src="${TMDB_IMG + item.posterPath}" alt="">` : "🎬"}</div>
+                <div class="sheet-title"></div>
+            </div>
+            <div class="stack" id="sheetFields">
+                <div class="row">
+                    <label class="field grow">
+                        <span>Название</span>
+                        <input type="text" class="rTitle" autocomplete="off">
+                    </label>
+                    <label class="field year">
+                        <span>Год</span>
+                        <input type="number" class="rYear" inputmode="numeric">
+                    </label>
+                </div>
+            </div>
+            <div class="sheet-buttons">
+                <button type="button" class="pill" id="sheetCancel">Отмена</button>
+                <button type="button" class="pill accent" id="sheetSave">Добавить</button>
+            </div>
+        </div>
+    `;
+    overlay.querySelector(".sheet-title").textContent = item.title;
+    overlay.querySelector(".rTitle").value = item.title;
+    overlay.querySelector(".rYear").value = item.year || "";
+    const fields = overlay.querySelector("#sheetFields");
+    buildCategoryFields(fields, "sheet", category, suggestGenre(category, item.genreNames));
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    overlay.querySelector("#sheetCancel").onclick = close;
+    overlay.querySelector("#sheetSave").onclick = async () => {
+        const row = {
+            title: overlay.querySelector(".rTitle").value.trim(),
+            year: parseInt(overlay.querySelector(".rYear").value, 10),
+            ...readCategoryFields(fields)
+        };
+        if (!row.title || !row.year || !row.genre) {
+            toast("Заполните название, год и жанр", "err");
+            haptic("error");
+            return;
+        }
+        if (isInCatalog(row.title, row.year)) {
+            toast("Этот тайтл уже есть в каталоге", "warn");
+            onAdded();
+            close();
+            return;
+        }
+        const btn = overlay.querySelector("#sheetSave");
+        btn.disabled = true;
+        btn.textContent = "Сохраняем…";
+        try {
+            await apiInsertTitles([row]);
+            existingTitles.push(row);
+            onAdded();
+            close();
+            toast(`Добавлено: ${row.title}`, "ok");
+            haptic("success");
+        } catch (e) {
+            toast("Ошибка сохранения: " + e.message, "err");
+            haptic("error");
+            btn.disabled = false;
+            btn.textContent = "Добавить";
+        }
+    };
+}
+
+// ==========================================
+// ЗАПУСК
+// ==========================================
+let searchStarted = false;
+
+function setMode(mode) {
+    document.querySelectorAll(".segmented button").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
+    $("#manualView").hidden = mode !== "manual";
+    $("#searchView").hidden = mode !== "search";
+    if (mode === "search" && !searchStarted) {
+        searchStarted = true;
+        renderTypeChips();
+        runSearch(1);
     }
 }
 
 async function init() {
-    // initData (подписанная строка) — не initDataUnsafe! Сервер сам
-    // проверит подпись и достанет из неё настоящий user_id; то, что
-    // лежит в initDataUnsafe в браузере, можно подделать в devtools,
-    // поэтому клиент им для решений об авторизации больше не пользуется.
+    // initData (подписанная строка) — не initDataUnsafe! Сервер сам проверит
+    // подпись и достанет из неё настоящий user_id.
     if (!tg || !tg.initData) {
-        document.getElementById("gate").style.display = "block";
+        $("#gate").hidden = false;
         return;
     }
 
-    let outcome;
     try {
-        outcome = await loadCatalog(tg.initData);
+        if (!(await loadCatalog())) {
+            $("#gate").hidden = false;
+            return;
+        }
     } catch (e) {
-        console.error("[loadCatalog] ошибка:", e);
-        document.getElementById("appRoot").style.display = "block";
-        setStatus("Не удалось загрузить каталог: " + e.message, "status-err");
-        for (let i = 0; i < INITIAL_ROWS; i++) addRow();
-        wireControls();
-        return;
+        $("#appRoot").hidden = false;
+        toast("Не удалось загрузить каталог: " + e.message, "err");
     }
 
-    if (outcome === "unauthorized") {
-        document.getElementById("gate").style.display = "block";
-        return;
-    }
+    $("#appRoot").hidden = false;
+    resetManualRows();
 
-    document.getElementById("appRoot").style.display = "block";
-    if (existingTitles.length === 0) {
-        // Запрос прошёл успешно, но вернул 0 тайтлов — либо таблица titles
-        // правда пуста, либо что-то не так на сервере (проверьте логи
-        // функции api/catalog в Vercel).
-        setStatus("Каталог загрузился, но база вернула 0 тайтлов — категории/жанры/франшизы пусты.", "status-warn");
-    }
+    document.querySelectorAll(".segmented button").forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
+    $("#addRowBtn").onclick = () => {
+        const cards = currentCards();
+        const last = cards[cards.length - 1];
+        const card = addRow(last ? { category: last.dataset.category, year: last.querySelector(".rYear").value } : {});
+        if (card) {
+            card.scrollIntoView({ behavior: "smooth", block: "center" });
+            card.querySelector(".rTitle").focus({ preventScroll: true });
+        }
+    };
+    $("#saveBtn").onclick = handleManualSave;
+    $("#searchForm").onsubmit = (e) => {
+        e.preventDefault();
+        $("#q").blur();
+        search.query = $("#q").value.trim();
+        runSearch(1);
+    };
+    $("#moreBtn").onclick = () => runSearch(search.page + 1);
 
-    for (let i = 0; i < INITIAL_ROWS; i++) addRow();
-    wireControls();
-}
-
-function wireControls() {
-
-    document.getElementById("addRowBtn").addEventListener("click", () => {
-        const rows = currentRows();
-        const last = rows[rows.length - 1];
-        const prefill = last ? { category: last.querySelector(".rCategory").value, year: last.querySelector(".rYear").value } : {};
-        addRow(prefill);
-    });
-    document.getElementById("saveBtn").addEventListener("click", handleSave);
+    // Вкладка, с которой открыли мини-апп (кнопка в боте передаёт ?mode=...)
+    const mode = new URLSearchParams(location.search).get("mode");
+    setMode(mode === "search" ? "search" : "manual");
 }
 
 init();

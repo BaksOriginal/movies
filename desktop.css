@@ -1,0 +1,315 @@
+/* ============================================================
+   desktop.css — РАСКЛАДКА ПК (>= 1024px)
+   Подключается с media="(min-width: 1024px)": боковое меню слева,
+   верхняя панель с поиском и действиями, контент на всю ширину.
+   ============================================================ */
+
+.only-mobile{ display: none !important; }
+
+.shell{
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    min-height: 100vh;
+}
+body:not(.shell-on) .shell{ display: block; }
+
+.shell-tabbar{ display: none; }
+
+/* ---------- Боковое меню ---------- */
+.shell-sidebar{
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 12px 14px;
+    background: rgba(12,7,22,0.72);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.shell-brand{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 10px 18px;
+    text-decoration: none;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 21px;
+    color: var(--text);
+}
+.shell-brand img{ border-radius: 10px; }
+
+.shell-nav{ display: flex; flex-direction: column; gap: 14px; }
+.shell-nav-group{ display: flex; flex-direction: column; gap: 2px; }
+.shell-nav-title{
+    padding: 0 12px 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.shell-nav-item{
+    justify-content: flex-start;
+    gap: 12px;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 10px;
+    color: var(--text-dim);
+    font-size: 14.5px;
+    font-weight: 600;
+    transition: background .12s ease, color .12s ease;
+}
+.shell-nav-item .shell-icon{ width: 20px; height: 20px; }
+.shell-nav-item:hover{ background: var(--surface-2); color: var(--text); }
+.shell-nav-item.active{
+    background: linear-gradient(90deg, rgba(255,46,147,0.18), rgba(139,59,255,0.10));
+    color: var(--text);
+}
+.shell-nav-item.active .shell-icon{ color: var(--pink); }
+.shell-nav-item.active-parent{ color: var(--text); }
+.shell-nav-label{
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+.shell-nav-count{
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-faint);
+}
+.shell-nav-sub{
+    height: 34px;
+    padding-left: 22px;
+    font-size: 13.5px;
+}
+.shell-nav-emoji{
+    width: 20px;
+    text-align: center;
+    font-size: 15px;
+}
+.shell-nav-group-secret{
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+.shell-nav-secret{ color: var(--gold); }
+.shell-nav-secret .shell-icon{ color: var(--gold); }
+.shell-nav-secret.active{ background: rgba(255,209,92,0.12); }
+.shell-nav-secret.active .shell-icon{ color: var(--gold); }
+
+.shell-user{
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 6px 0;
+    border-top: 1px solid var(--border);
+}
+.shell-user-name{ flex: 1; }
+.shell-user-buttons{ display: flex; gap: 2px; }
+
+/* ---------- Верхняя панель ---------- */
+.shell-topbar{
+    height: 68px;
+    padding: 0 40px;
+    background: rgba(10,6,19,0.7);
+}
+.shell-back{
+    height: 40px;
+    padding: 0 14px 0 8px;
+    gap: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.shell-back:hover{ background: var(--surface-3); }
+.shell-back .shell-icon{ width: 18px; height: 18px; }
+.shell-title{ display: none; }
+.shell-search{
+    flex: 1;
+    max-width: 560px;
+}
+.shell-search .search-bar{ margin: 0; height: 42px; }
+
+/* ---------- Контент ---------- */
+.shell-main .container{
+    max-width: 1480px;
+    margin: 0 auto;
+    padding: 28px 40px 72px;
+}
+
+/* Экраны, которым широкая колонка только вредит (длинные строки чата,
+   календарь, формы) — остаются в комфортной ширине по центру */
+body[data-section="chat"] .shell-main .container,
+body[data-section="comments"] .shell-main .container,
+body[data-section="calendar"] .shell-main .container,
+body[data-section="games"] .shell-main .container{
+    max-width: 920px;
+}
+
+/* Чат на всю высоту окна: страница не скроллится, только лента */
+body[data-section="chat"] .shell-main .container{
+    height: calc(100vh - 68px);
+    padding-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+}
+body[data-section="chat"] #app{
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+body[data-section="chat"] .chat-box{
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overscroll-behavior: contain;
+}
+
+.shell-main .catalog-grid{
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 18px;
+}
+
+/* Сегменты "Будем смотреть / Просмотрено / Календарь" дублируют боковое
+   меню — на ПК они не нужны */
+.lists-tabs{ display: none; }
+
+/* ---------- Главная ---------- */
+.home-top{
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+    gap: 18px;
+    align-items: stretch;
+}
+.home-hero{
+    padding: 30px 32px;
+    align-content: space-between;
+    min-height: 220px;
+}
+.home-side{ display: grid; }
+/* На ПК счётчики — колонкой справа от hero, во всю его высоту */
+.home-stats{
+    margin-top: 0;
+    grid-template-columns: 1fr;
+    grid-auto-rows: 1fr;
+}
+.home-stat{
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 0 22px;
+}
+.home-stat-value{ font-size: 32px; min-width: 2ch; }
+.home-stat-label{ font-size: 15px; }
+.home-next{ padding: 16px; }
+.home-next-actions{ grid-column: 2; }
+.home-next-actions .ui-pill{ flex: 0 0 auto; height: 36px; padding: 0 18px; }
+.home-hero-title-wrap{ height: 44px; }
+.home-next-poster{ width: 84px; }
+.home-next-title{ font-size: 18px; }
+
+.cat-tiles{ grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.cat-tile{ min-height: 132px; padding: 18px; }
+.cat-tile-emoji{ font-size: 38px; top: 14px; right: 16px; }
+.cat-tile-name{ font-size: 18px; }
+
+.ui-section{ margin-top: 36px; }
+.ui-section-title{ font-size: 22px; }
+
+.rail-track{ --rail-card-w: 160px; gap: 16px; scroll-behavior: smooth; }
+.rail-arrow{ display: inline-flex; }
+.rail:not(:hover) .rail-arrow{ opacity: 0; }
+.rail-arrow{ transition: opacity .15s ease; }
+
+/* ---------- Всплывающие окна — аккуратные диалоги по центру ---------- */
+.modal-content{
+    max-width: 460px;
+    padding: 28px;
+    border-radius: 22px;
+    animation: dialogIn .22s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes dialogIn{
+    from{ opacity: 0; transform: translateY(12px) scale(.97); }
+    to{ opacity: 1; transform: none; }
+}
+
+/* "Добавить тайтлы": карточки в две колонки */
+body[data-section="add"] .shell-main .container{ max-width: 1100px; }
+.add-cards{ grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.randomizer-modal-content{ max-width: 440px; }
+.randomizer-wheel-stage{ width: 280px; height: 280px; }
+
+/* Календарь: сетка месяца слева, ближайшие планы справа */
+.cal-layout{
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr);
+    gap: 32px;
+    align-items: start;
+}
+.cal-agenda{ margin-top: 0; }
+body[data-section="calendar"] .shell-main .container{ max-width: 1180px; }
+
+/* Совместный просмотр: плеер слева, чат/звонок справа, и всё влезает в
+   окно целиком — страница не прокручивается. Плеер занимает всю свободную
+   высоту левой колонки (видео внутри вписывается с полями), чат — всю
+   высоту правой. */
+body[data-section="w2g"]{ overflow: hidden; }
+body[data-section="w2g"] .shell-main .container{
+    max-width: 1560px;
+    height: calc(100vh - 68px);
+    padding-top: 20px;
+    padding-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+}
+body[data-section="w2g"] #app{
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+    column-gap: 28px;
+    animation: none;
+}
+body[data-section="w2g"] #app > *{ grid-column: 1; }
+body[data-section="w2g"] #app > h1{ margin: 0 0 12px; }
+/* Ряды заданы явно: баннер "присоединиться" чаще всего скрыт (display:none)
+   и без этого все блоки под ним съезжали на ряд выше */
+body[data-section="w2g"] #watchPartyStatusBar{ grid-row: 2; }
+body[data-section="w2g"] #watchPartyJoinBanner{ grid-row: 3; }
+body[data-section="w2g"] #watchPartyPlayerContainer{ grid-row: 4; }
+body[data-section="w2g"] .wp-url-row{ grid-row: 5; }
+body[data-section="w2g"] #watchPartyNote{ grid-row: 6; }
+body[data-section="w2g"] .wp-player-container{
+    aspect-ratio: auto;
+    height: 100%;
+    min-height: 0;
+}
+body[data-section="w2g"] .wp-player-container video{ width: 100%; height: 100%; object-fit: contain; }
+body[data-section="w2g"] #app > .wp-swipe-wrap{
+    grid-column: 2;
+    grid-row: 1 / -1;
+    min-height: 0;
+    margin-top: 0;
+    display: flex;
+    flex-direction: column;
+}
+body[data-section="w2g"] .wp-swipe-track{ flex: 1; min-height: 0; }
+body[data-section="w2g"] .wp-swipe-page{ display: flex; flex-direction: column; min-height: 0; }
+body[data-section="w2g"] .wp-chat-box{ flex: 1; min-height: 0; height: auto; max-height: none; }
+
+/* Игры: карта во всю ширину */
+body[data-section="games"] .shell-main .container{ max-width: 1240px; }
+#rhythmMenuContainer{ grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+/* Секрет: записки — колонкой комфортной ширины, а не во весь экран */
+body[data-section="secret"] .shell-main .container{ max-width: 980px; }

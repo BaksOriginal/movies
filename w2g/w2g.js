@@ -2165,22 +2165,4 @@ async function showWatchPartyScreen() {
         renderWatchPartyChatMessages();
     }, 4000);
 
-    // Собственная навигация — как у чата и игр, не трогает историю каталога
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-
-    let homeBtn = document.createElement("button");
-    homeBtn.textContent = "🏠 Домой";
-    homeBtn.onclick = () => {
-        leaveWatchPartyScreen();
-        location.href = "../";
-    };
-    nav.appendChild(homeBtn);
-
-    let container = document.querySelector(".container");
-    if (container) {
-        container.insertBefore(nav, container.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
 }

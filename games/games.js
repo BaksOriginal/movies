@@ -4,11 +4,6 @@
 // Подключается на games/index.html ПОСЛЕ core.js.
 // Всё, что нужно из core.js: db, currentUser, app, vibrate, setEmojiTitle, hashStringToSeed.
 
-// Общий GitHub-репозиторий для списка треков ритм-игры (см. core.js: getGithubBranchSha)
-const GITHUB_RHYTHM_OWNER = "BaksOriginal";
-const GITHUB_RHYTHM_REPO = "movies";
-const GITHUB_RHYTHM_BRANCH = "main";
-
 // =======================================================
 // ИГРЫ (Змейка / Flappy Bird / Doodle Jump) — общая таблица лидеров на двоих
 // =======================================================
@@ -35,7 +30,6 @@ const GITHUB_RHYTHM_BRANCH = "main";
 
 let gameScoresCache = { snake: [], flappy: [], doodle: [], runner: [], ninja: [] };
 let activeGameCleanup = null; // остановка текущей запущенной игры (интервалы/rAF/слушатели), если она есть
-let gameLaunchedFromPautinka = false; // true, если сюда пришли по диплинку games/?play=...&from=pautinka
 
 // ==========================================
 // 8-БИТНЫЕ ЗВУКИ ДЛЯ ИГР
@@ -173,7 +167,9 @@ function resumeMusicAfterGames() {
     musicWasPlayingBeforeGames = false;
 }
 
-// Единая навигация для экрана игр: "⬅ Игры" (если внутри конкретной игры) + "🏠 Домой"
+// Навигация раздела игр: внутри конкретной игры — "назад" в оболочке
+// (к списку игр или обратно в Паутинку), а нижние вкладки на телефоне
+// прячутся, чтобы не отъедать место у игрового поля.
 function setGamesNav(showBackToMenu) {
     // Ставим музыку на паузу и блокируем выделение текста только один раз, при входе в раздел
     // "Игры" (а не при каждом переключении между играми внутри раздела).
@@ -181,53 +177,36 @@ function setGamesNav(showBackToMenu) {
         pauseMusicForGames();
     }
     document.body.classList.add("games-screen-active");
+    document.body.classList.toggle("shell-immersive", !!showBackToMenu);
 
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
-
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-
-    if (showBackToMenu) {
-        let backBtn = document.createElement("button");
-        if (gameLaunchedFromPautinka) {
-            backBtn.textContent = "⬅ Назад";
-            backBtn.onclick = () => { location.href = "../?openPautinka=1"; };
-        } else {
-            backBtn.textContent = "⬅ Игры";
-            backBtn.onclick = () => showGamesScreen();
-        }
-        nav.appendChild(backBtn);
-    }
-
-    let homeBtn = document.createElement("button");
-    homeBtn.textContent = "🏠 Домой";
-    homeBtn.onclick = () => { location.href = "../"; };
-    nav.appendChild(homeBtn);
-
-    let containerEl = document.querySelector(".container");
-    if (containerEl) {
-        containerEl.insertBefore(nav, containerEl.firstChild);
+    if (!showBackToMenu) {
+        setShellBack(null);
     } else {
-        document.body.insertBefore(nav, app);
+        setShellBack(() => showGamesScreen(), "Игры");
     }
 }
 
 // Показывает окно "Игра окончена" с результатом и кнопками "Заново"/"К играм"
+// Общая разметка окна "Игра окончена" (обычные игры и Ритм-Аркада)
+function buildGameOverHtml(score, isRecord, restartId, menuId, menuLabel) {
+    return `
+        <div class="modal-content gameover${isRecord ? " gameover-record" : ""}">
+            <div class="gameover-kicker">${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</div>
+            <div class="gameover-score">${score}</div>
+            <div class="gameover-label">очков</div>
+            <div class="gameover-actions">
+                <button type="button" id="${restartId}" class="ui-btn ui-pill ui-pill-accent">🔁 Ещё раз</button>
+                <button type="button" id="${menuId}" class="ui-btn ui-pill">${menuLabel}</button>
+            </div>
+        </div>
+    `;
+}
+
 function showGameOverModal(score, isRecord, onRestart) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "gameOverModal";
-    overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center;">
-            <h3>${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</h3>
-            <p style="font-size: 22px; font-weight: bold; color: var(--pink-soft); margin: 10px 0 20px;">Счёт: ${score}</p>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="gameOverRestart" class="btn-pink-style">🔁 Заново</button>
-                <button id="gameOverMenu" class="btn-action-cancel">🕹️ К играм</button>
-            </div>
-        </div>
-    `;
+    overlay.innerHTML = buildGameOverHtml(score, isRecord, "gameOverRestart", "gameOverMenu", "🕹️ К играм");
     document.body.appendChild(overlay);
     overlay.querySelector("#gameOverRestart").onclick = () => { overlay.remove(); onRestart(); };
     overlay.querySelector("#gameOverMenu").onclick = () => { overlay.remove(); showGamesScreen(); };
@@ -308,18 +287,19 @@ function setupResponsiveCanvas(canvas, logicalW, logicalH, desktopScale) {
 // короткое описание "что за игра" и таблица лидеров теперь показываются
 // не сразу на экране, а в модалке по тапу на значок (см. showGameInfoModal).
 const GAMES_META = [
-    { id: "snake",  emoji: "🐍", title: "Змейка",                  desc: "Классика: собирай еду, расти — и не влетай в стену или в свой же хвост.",  leaderboard: true,  start: () => startSnakeGame() },
-    { id: "flappy", emoji: "🍫", title: "Эчпочмоня vs. Шоколадки", desc: "Лети между шоколадками, не задевая их — чем дальше, тем плотнее строй.",     leaderboard: true,  start: () => startFlappyGame() },
-    { id: "doodle", emoji: "👾", title: "Doodle Jump",             desc: "Прыгай с платформы на платформу и забирайся как можно выше.",               leaderboard: true,  start: () => startDoodleGame() },
-    { id: "runner", emoji: "🥦", title: "Бега Брокколи",           desc: "Беги без остановки и перепрыгивай препятствия на пути.",                    leaderboard: true,  start: () => startRunnerGame() },
-    { id: "ninja",  emoji: "💣",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
-    { id: "rhythm", emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() }
+    { id: "snake", hue: 140,  emoji: "🐍", title: "Змейка",                  desc: "Классика: собирай еду, расти — и не влетай в стену или в свой же хвост.",  leaderboard: true,  start: () => startSnakeGame() },
+    { id: "flappy", hue: 28, emoji: "🍫", title: "Эчпочмоня vs. Шоколадки", desc: "Лети между шоколадками, не задевая их — чем дальше, тем плотнее строй.",     leaderboard: true,  start: () => startFlappyGame() },
+    { id: "doodle", hue: 268, emoji: "👾", title: "Doodle Jump",             desc: "Прыгай с платформы на платформу и забирайся как можно выше.",               leaderboard: true,  start: () => startDoodleGame() },
+    { id: "runner", hue: 95, emoji: "🥦", title: "Бега Брокколи",           desc: "Беги без остановки и перепрыгивай препятствия на пути.",                    leaderboard: true,  start: () => startRunnerGame() },
+    { id: "ninja", hue: 350,  emoji: "💣",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
+    { id: "rhythm", hue: 305, emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() }
 ];
 
-// Экран выбора игры: шестиугольные значки в шахматном порядке, соединённые
-// пунктирной линией. Названия и рекорды больше не висят на экране сразу —
-// тап по значку открывает модалку с описанием игры и кнопкой "Играть"
-// (см. showGameInfoModal).
+// Экран выбора игры — "карта": шестиугольные точки-уровни, соединённые
+// кривой пунктирной тропинкой. Рядом с каждой точкой — название и рекорд.
+// Тап по точке открывает окно игры с таблицей лидеров и кнопкой "Играть"
+// (см. showGameInfoModal). Раскладку считает layoutGamesMap(): на телефоне
+// тропинка петляет сверху вниз, на ПК — слева направо.
 async function showGamesScreen() {
     if (!currentUser) { location.href = "../"; return; }
 
@@ -344,39 +324,135 @@ async function showGamesScreen() {
     await loadGameScores();
     if (!container.isConnected) return;
 
-    container.innerHTML = `
-        <div class="games-hexmap" id="gamesHexMap">
-            <svg class="games-hexmap-line"></svg>
-            ${GAMES_META.map(g => `
-                <div class="hex-item" data-game="${g.id}" role="button" tabindex="0" aria-label="${g.title}">
-                    <span class="hex-shape"><span class="hex-shape-inner"><span class="hex-emoji">${g.emoji}</span></span></span>
-                </div>
-            `).join("")}
-        </div>
+    container.innerHTML = "";
+    const map = document.createElement("div");
+    map.className = "games-map";
+    map.innerHTML = `
+        <svg class="games-map-path" aria-hidden="true">
+            <path class="games-map-trail-glow"></path>
+            <path class="games-map-trail"></path>
+        </svg>
+        <span class="games-map-flag games-map-flag-start">Старт</span>
+        <span class="games-map-flag games-map-flag-end">🏁</span>
     `;
-
-    const hexMap = container.querySelector("#gamesHexMap");
-    hexMap.querySelectorAll(".hex-item").forEach(el => {
-        el.addEventListener("click", () => showGameInfoModal(el.dataset.game));
-        el.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showGameInfoModal(el.dataset.game); }
-        });
+    GAMES_META.forEach((game, i) => {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = "ui-btn map-node";
+        node.style.setProperty("--h", game.hue);
+        node.style.setProperty("--i", i);
+        node.setAttribute("aria-label", game.title);
+        node.innerHTML = `
+            <span class="map-hex">
+                <span class="map-hex-inner"><span class="map-hex-emoji">${game.emoji}</span></span>
+                <span class="map-hex-num">${i + 1}</span>
+            </span>
+            <span class="map-label">
+                <span class="map-label-title"></span>
+                <span class="map-label-score">${buildGameTileScore(game)}</span>
+            </span>
+        `;
+        node.querySelector(".map-label-title").textContent = game.title;
+        node.onclick = () => showGameInfoModal(game.id);
+        map.appendChild(node);
     });
-    initGamesHexMap(hexMap);
+    container.appendChild(map);
+    initGamesMap(map);
 
-    // Диплинк из "Паутинки" на конкретную игру: games/?play=snake&from=pautinka
-    // (раньше Паутинка запускала игру прямо inline, без перехода на страницу —
-    // теперь игры на отдельной странице, поэтому переход + автозапуск по параметру).
+    // Диплинк на конкретную игру с автозапуском: games/?play=snake
     const params = new URLSearchParams(location.search);
     const play = params.get("play");
-    if (params.get("from") === "pautinka") {
-        gameLaunchedFromPautinka = true;
-    }
     if (play) {
         history.replaceState(null, "", location.pathname);
         const g = GAMES_META.find(x => x.id === play);
         if (g) g.start();
     }
+}
+
+// Расставляет точки карты и прокладывает между ними тропинку. Телефон —
+// зигзаг сверху вниз (подписи сбоку), ПК — зигзаг слева направо (подписи
+// под точками). Тропинка — плавные кривые Безье через центры шестиугольников.
+function layoutGamesMap(map) {
+    const nodes = [...map.querySelectorAll(".map-node")];
+    if (nodes.length === 0) return;
+    const horizontal = map.clientWidth >= 760;
+    map.classList.toggle("games-map-horizontal", horizontal);
+
+    const width = map.clientWidth;
+    const points = nodes.map((node, i) => {
+        let x, y;
+        if (horizontal) {
+            const step = width / nodes.length;
+            x = step * (i + 0.5);
+            y = i % 2 === 0 ? 120 : 250;
+        } else {
+            x = i % 2 === 0 ? width * 0.24 : width * 0.76;
+            y = 90 + i * 150;
+        }
+        node.style.left = x + "px";
+        node.style.top = y + "px";
+        node.classList.toggle("map-node-flip", !horizontal && i % 2 === 1);
+        return { x, y };
+    });
+
+    const height = horizontal ? 400 : points[points.length - 1].y + 110;
+    map.style.height = height + "px";
+
+    // Хвосты тропинки: от флажка "Старт" и до финиша
+    const first = points[0], last = points[points.length - 1];
+    const start = horizontal ? { x: 34, y: first.y - 80 } : { x: first.x + 40, y: 22 };
+    const end = horizontal ? { x: width - 26, y: last.y + 80 } : { x: last.x - 40, y: height - 24 };
+    const all = [start, ...points, end];
+
+    let d = `M ${all[0].x} ${all[0].y}`;
+    for (let i = 1; i < all.length; i++) {
+        const p0 = all[i - 1], p1 = all[i];
+        if (horizontal) {
+            const dx = (p1.x - p0.x) * 0.55;
+            d += ` C ${p0.x + dx} ${p0.y}, ${p1.x - dx} ${p1.y}, ${p1.x} ${p1.y}`;
+        } else {
+            const dy = (p1.y - p0.y) * 0.6;
+            d += ` C ${p0.x} ${p0.y + dy}, ${p1.x} ${p1.y - dy}, ${p1.x} ${p1.y}`;
+        }
+    }
+    const svg = map.querySelector(".games-map-path");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.querySelectorAll("path").forEach(p => p.setAttribute("d", d));
+
+    const flagStart = map.querySelector(".games-map-flag-start");
+    const flagEnd = map.querySelector(".games-map-flag-end");
+    flagStart.style.left = start.x + "px";
+    flagStart.style.top = start.y + "px";
+    flagEnd.style.left = end.x + "px";
+    flagEnd.style.top = end.y + "px";
+}
+
+// Пересчитывает карту сразу и при ресайзе/повороте экрана, пока она есть на
+// странице — слушатель сам себя снимает, когда карта исчезла.
+let gamesMapResizeObserver = null;
+function initGamesMap(map) {
+    layoutGamesMap(map);
+    if (gamesMapResizeObserver) gamesMapResizeObserver.disconnect();
+    gamesMapResizeObserver = new ResizeObserver(() => {
+        if (map.isConnected) layoutGamesMap(map);
+        else gamesMapResizeObserver.disconnect();
+    });
+    gamesMapResizeObserver.observe(map);
+}
+
+// Строка рекордов на точке карты: свой рекорд и лидер
+function buildGameTileScore(game) {
+    if (!game.leaderboard) return "Треки и рекорды внутри";
+    const rows = (gameScoresCache[game.id] || []).slice().sort((a, b) => b.score - a.score);
+    if (rows.length === 0) return "Рекордов пока нет";
+    const mine = getMyBest(game.id);
+    const leader = rows[0];
+    const leaderText = `👑 ${escapeGameText(leader.username)} · ${leader.score}`;
+    return mine > 0 && leader.userId !== currentUser.id ? `Мой рекорд ${mine} · ${leaderText}` : leaderText;
+}
+
+function escapeGameText(str) {
+    return String(str || "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 }
 
 // Модалка "что за игра": название, короткое описание, таблица лидеров (если
@@ -403,46 +479,6 @@ function showGameInfoModal(gameId) {
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
     overlay.querySelector(".modal-close-btn").onclick = () => overlay.remove();
     overlay.querySelector("#gameInfoPlayBtn").onclick = () => { overlay.remove(); g.start(); };
-}
-
-// Считает центры значков ПОСЛЕ применения их "шахматных" transform:translateX
-// (через getBoundingClientRect, а не offsetLeft/Top, которые transform не
-// учитывают) и рисует пунктирную SVG-линию через все точки по порядку.
-function layoutGamesHexMap(map) {
-    const svg = map.querySelector(".games-hexmap-line");
-    const items = [...map.querySelectorAll(".hex-item")];
-    if (!svg || items.length === 0) return;
-
-    const mapRect = map.getBoundingClientRect();
-    const points = items.map(el => {
-        const r = el.getBoundingClientRect();
-        return { x: r.left + r.width / 2 - mapRect.left, y: r.top + r.height / 2 - mapRect.top };
-    });
-
-    svg.setAttribute("viewBox", `0 0 ${mapRect.width} ${mapRect.height}`);
-
-    let path = svg.querySelector(".games-hexmap-path");
-    if (!path) {
-        path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("class", "games-hexmap-path");
-        svg.appendChild(path);
-    }
-    path.setAttribute("d", points.map((p, i) => (i === 0 ? "M" : "L") + p.x + "," + p.y).join(" "));
-}
-
-// Пересчитывает линию сразу и при ресайзе/повороте экрана, пока карта игр
-// существует на странице — слушатель сам себя снимает, когда карта исчезла.
-let gamesHexMapResizeHandler = null;
-function initGamesHexMap(map) {
-    layoutGamesHexMap(map);
-    requestAnimationFrame(() => { if (map.isConnected) layoutGamesHexMap(map); }); // на случай если на первом кадре эмодзи ещё не легли по месту
-
-    if (gamesHexMapResizeHandler) window.removeEventListener("resize", gamesHexMapResizeHandler);
-    gamesHexMapResizeHandler = () => {
-        if (map.isConnected) layoutGamesHexMap(map);
-        else window.removeEventListener("resize", gamesHexMapResizeHandler);
-    };
-    window.addEventListener("resize", gamesHexMapResizeHandler);
 }
 
 // ------------------------- ЗМЕЙКА -------------------------
@@ -2381,8 +2417,8 @@ function startNinjaGame() {
 // =======================================================
 // РИТМ-АРКАДА — 6-я игра. Уровни НЕ прописаны заранее: они строятся
 // на лету анализом самого аудиофайла (энергетический onset-детектор
-// ищет резкие всплески громкости — то есть "биты"). Список треков
-// подтягивается динамически из папки GITHUB_RHYTHM_PATH на GitHub.
+// ищет резкие всплески громкости — то есть "биты"). Треки — фиксированный
+// набор файлов из папки rhythm_game/ на GitHub (см. RHYTHM_TRACK_FILES).
 // =======================================================
 //
 // Нужно один раз создать отдельную таблицу в Supabase (SQL editor) —
@@ -2398,55 +2434,29 @@ function startNinjaGame() {
 //   primary key (user_id, track_name)
 // );
 
-// ----------------- Список треков из GitHub -----------------
-let cachedRhythmTrackList = null;
+// ----------------- Список треков -----------------
+// Набор треков больше не меняется, поэтому список зашит прямо здесь — без
+// поиска новых файлов (раньше папка листилась через jsDelivr API + SHA
+// ветки с GitHub API). Сами файлы по-прежнему лежат в папке rhythm_game/
+// репозитория на GitHub и отдаются через CDN jsDelivr; раз они не меняются,
+// ссылка на ветку main без SHA безопасна — устаревать в кэше нечему.
+// Имя файла — стабильный ID трека: по нему хранятся рекорды в
+// rhythm_scores, так что переименовывать файлы нельзя.
+const RHYTHM_TRACKS_DIR = "https://cdn.jsdelivr.net/gh/BaksOriginal/movies@main/rhythm_game/";
+const RHYTHM_TRACK_FILES = [
+    "BenSound ♥ Angels By My Side.ogg",
+    "BenSound ♥ New Frontier.ogg",
+    "BenSound ♥ The Light Between Us.ogg",
+    "BenSound ♥ Unbreakable Resolve.ogg",
+];
 
-async function fetchRhythmTrackList(forceRefresh = false) {
-    if (cachedRhythmTrackList && !forceRefresh) return cachedRhythmTrackList;
-
-    // Раньше список тянулся через api.github.com/.../contents/ — у него жёсткий
-    // лимит 60 запросов/час НА IP для неавторизованных запросов, и он общий
-    // на всех посетителей с одного IP/VPN/NAT. При активном тестировании или
-    // нескольких игроках подряд лимит быстро исчерпывается (403 "rate limit
-    // exceeded"), и список треков становится пустым для всех сразу.
-    //
-    // Вместо этого используем jsDelivr — бесплатный CDN-прокси поверх GitHub
-    // с гораздо более мягкими лимитами и без токена. Он же отдаёт и сами
-    // .ogg-файлы (быстрее и без нагрузки на GitHub).
-    try {
-        // SHA вместо имени ветки — см. комментарий у getGithubBranchSha() —
-        // чтобы листинг и сами файлы не зависели от протухшего кэша "@main".
-        const ref = await getGithubBranchSha(GITHUB_RHYTHM_OWNER, GITHUB_RHYTHM_REPO, GITHUB_RHYTHM_BRANCH);
-        const apiUrl = `https://data.jsdelivr.com/v1/packages/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${ref}?structure=flat`;
-        const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error("jsDelivr API вернул статус " + res.status);
-        const json = await res.json();
-        const files = Array.isArray(json.files) ? json.files : [];
-
-        const prefix = `/${GITHUB_RHYTHM_PATH}/`;
-        const oggExtRe = /\.ogg$/i;
-
-        cachedRhythmTrackList = files
-            .filter(f => typeof f.name === "string" && f.name.startsWith(prefix) && oggExtRe.test(f.name))
-            .map(f => {
-                const fileName = f.name.slice(prefix.length); // имя файла без пути к папке
-                // Кодируем каждый сегмент пути отдельно — так пробелы, скобки,
-                // "#", "&" и т.п. в названии трека не сломают URL.
-                const encodedPath = f.name.split("/").map(encodeURIComponent).join("/");
-                return {
-                    key: fileName, // стабильный ID трека — используется как primary key в БД
-                    label: fileName.replace(oggExtRe, "").replace(/[_-]+/g, " ").trim(),
-                    url: `https://cdn.jsdelivr.net/gh/${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}@${ref}${encodedPath}`
-                };
-            })
-            .sort((a, b) => a.label.localeCompare(b.label, "ru"));
-
-        return cachedRhythmTrackList;
-    } catch (e) {
-        console.error("Ошибка при загрузке списка треков ритм-игры (jsDelivr):", e);
-        return [];
-    }
-}
+const RHYTHM_TRACKS = RHYTHM_TRACK_FILES
+    .map(fileName => ({
+        key: fileName,
+        label: fileName.replace(/\.ogg$/i, "").replace(/[_-]+/g, " ").trim(),
+        url: RHYTHM_TRACKS_DIR + encodeURIComponent(fileName)
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ru"));
 
 // ----------------- Рекорды: отдельно по каждому треку -----------------
 let rhythmScoresCache = {}; // { trackKey: [{userId, username, score}, ...] }
@@ -2619,17 +2629,10 @@ async function showRhythmMenu() {
 
     let container = document.createElement("div");
     container.id = "rhythmMenuContainer";
-    container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Загружаем список треков с GitHub...</p>`;
+    container.innerHTML = `<div class="ui-empty">Загружаем рекорды…</div>`;
     app.appendChild(container);
 
-    const tracks = await fetchRhythmTrackList(true); // переспрашиваем список заново при каждом заходе
-    if (!container.isConnected) return;
-
-    if (tracks.length === 0) {
-        container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Треков не найдено. Загрузите .ogg-файлы в папку "${GITHUB_RHYTHM_PATH}" репозитория ${GITHUB_RHYTHM_OWNER}/${GITHUB_RHYTHM_REPO}.</p>`;
-        return;
-    }
-
+    const tracks = RHYTHM_TRACKS;
     await loadRhythmScores(tracks.map(t => t.key));
     if (!container.isConnected) return;
 
@@ -2654,16 +2657,7 @@ function showRhythmGameOverModal(score, isRecord, onRestart, onMenu) {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "rhythmGameOverModal";
-    overlay.innerHTML = `
-        <div class="modal-content rhythm-gameover-modal" style="text-align: center;">
-            <h3>${isRecord ? "🏆 Новый рекорд!" : "Игра окончена"}</h3>
-            <p style="font-size: 22px; font-weight: bold; color: var(--pink-soft); margin: 10px 0 20px;">Счёт: ${score}</p>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="rhythmGameOverRestart" class="btn-pink-style">🔁 Заново</button>
-                <button id="rhythmGameOverMenu" class="btn-action-cancel">🎵 К трекам</button>
-            </div>
-        </div>
-    `;
+    overlay.innerHTML = buildGameOverHtml(score, isRecord, "rhythmGameOverRestart", "rhythmGameOverMenu", "🎵 К трекам");
     document.body.appendChild(overlay);
     overlay.querySelector("#rhythmGameOverRestart").onclick = () => { overlay.remove(); onRestart(); };
     overlay.querySelector("#rhythmGameOverMenu").onclick = () => { overlay.remove(); onMenu(); };
@@ -2701,7 +2695,7 @@ async function startRhythmLevel(track) {
     } catch (e) {
         console.error("Ошибка загрузки/анализа трека:", e);
         if (wrap.isConnected) {
-            wrap.innerHTML = `<p style="text-align:center;color:#9686b8;">Не удалось загрузить трек 😔<br>Проверьте, что файл лежит в папке "${GITHUB_RHYTHM_PATH}" и доступен по ссылке.</p>
+            wrap.innerHTML = `<p style="text-align:center;color:#9686b8;">Не удалось загрузить трек 😔<br>Проверьте, что файл лежит в папке rhythm_game.</p>
                 <button class="btn-action-cancel" id="rhythmBackErr" style="margin-top:12px;">⬅ Назад</button>`;
             wrap.querySelector("#rhythmBackErr").onclick = () => showRhythmMenu();
         }

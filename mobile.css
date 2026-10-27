@@ -1,0 +1,241 @@
+/* ============================================================
+   mobile.css — РАСКЛАДКА ТЕЛЕФОНА/ПЛАНШЕТА (< 1024px)
+   Подключается с media="(max-width: 1023.98px)": верхняя панель
+   приложения + нижние вкладки, контент в одну колонку.
+   ============================================================ */
+
+.only-desktop{ display: none !important; }
+
+.shell-sidebar{ display: none; }
+
+/* ---------- Верхняя панель ---------- */
+.shell-topbar{
+    height: calc(var(--topbar-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 8px 0 12px;
+}
+.shell-back{
+    width: 40px;
+    height: 40px;
+    margin-left: -6px;
+}
+.shell-back:active{ background: var(--surface-2); }
+.shell-back-label{ display: none; }
+
+/* Маленький заголовок в панели проявляется, когда крупный h1 уехал
+   вверх, или если на экране есть "назад" (как в нативных приложениях) */
+.shell-title{
+    opacity: 0;
+    transition: opacity .18s ease;
+}
+body.shell-scrolled .shell-title,
+body.shell-has-back .shell-title,
+body[data-section="home"] .shell-title{
+    opacity: 1;
+}
+
+.shell-search{ display: none; }
+
+.shell-action{
+    width: 40px;
+    height: 40px;
+    padding: 0;
+}
+.shell-action span{ display: none; }
+.shell-action .shell-icon{ width: 20px; height: 20px; }
+
+/* ---------- Нижние вкладки ---------- */
+.shell-tabbar{
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 950;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--bar-bg);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border-top: 1px solid var(--border);
+}
+.shell-tab{
+    position: relative;
+    flex-direction: column;
+    gap: 3px;
+    color: var(--text-faint);
+    font-size: 11px;
+    font-weight: 700;
+    transition: color .15s ease;
+}
+.shell-tab .shell-icon{ width: 24px; height: 24px; }
+.shell-tab.active{ color: var(--text); }
+.shell-tab.active .shell-icon{ color: var(--pink); }
+.shell-tab.active::before{
+    content: "";
+    position: absolute;
+    top: 0;
+    width: 28px;
+    height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: var(--pink);
+    box-shadow: 0 0 10px rgba(255,46,147,0.6);
+}
+.shell-tab:active .shell-icon{ transform: scale(.9); }
+
+/* Во время самой игры вкладки только мешают (место под холст, случайные тапы) */
+body.shell-immersive .shell-tabbar{ display: none; }
+
+/* ---------- Контент ---------- */
+.shell-main .container{
+    padding: 14px 16px calc(var(--tabbar-h) + 28px + env(safe-area-inset-bottom));
+}
+body.shell-immersive .shell-main .container{
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+}
+
+.shell-main .catalog-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+@media (min-width: 600px){
+    .shell-main .catalog-grid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cat-tiles{ grid-template-columns: repeat(4, 1fr); }
+    .rail-track{ --rail-card-w: 140px; }
+}
+
+.home-search{ margin-top: 14px; }
+
+/* Чат — как в мессенджере. Раньше лента сообщений была отдельной
+   прокруткой ВНУТРИ прокручиваемой страницы: свайп по ленте то листал
+   сообщения, то тащил всю страницу (и панель браузера iOS), а высота на
+   dvh пересчитывалась при каждом скрытии адресной строки — отсюда прыжки.
+   Теперь страница не прокручивается вовсе: высота экрана фиксирована
+   (svh — "маленький" вьюпорт, не меняется от панели браузера), а
+   прокручивается только сама лента. */
+body[data-section="chat"]{ overflow: hidden; }
+body[data-section="chat"] .shell-title{ opacity: 1; }
+body[data-section="chat"] .shell-main .container{
+    height: calc(100svh - var(--topbar-h) - env(safe-area-inset-top));
+    padding: 0 0 calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+}
+body.shell-typing[data-section="chat"] .shell-main .container{ padding-bottom: 0; }
+body[data-section="chat"] #app{
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    animation: none;
+}
+body[data-section="chat"] #app > h1{ display: none; }
+body[data-section="chat"] .chat-box{
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    padding: 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overscroll-behavior: contain;
+}
+body[data-section="chat"] #chatReplyBarBox{ padding: 0 12px; }
+body[data-section="chat"] .chat-input-row{
+    padding: 8px 12px;
+    background: var(--bar-bg);
+    border-top: 1px solid var(--border);
+}
+
+/* Чипы и сегменты листаются по краю экрана, а не обрезаются отступом */
+.chip-row,
+.segmented{
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+}
+.segmented{
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    background: transparent;
+    padding-top: 0;
+    padding-bottom: 0;
+    border: 0;
+}
+.segmented-item{
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+.segmented-item.active{ border-color: transparent; }
+
+.rail-track{
+    margin: 0 -16px;
+    padding: 0 16px 4px;
+    scroll-padding-left: 16px;
+}
+
+/* ============================================================
+   ВСПЛЫВАЮЩИЕ ОКНА → ШТОРКИ СНИЗУ
+   !important — у части окон размеры заданы инлайн-стилем в JS.
+   Закрытие свайпом вниз — в shell.js (initSheetGestures).
+   ============================================================ */
+.modal-overlay{
+    align-items: flex-end !important;
+    justify-content: stretch !important;
+    background: rgba(5,2,12,0.62);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+.modal-content{
+    width: 100% !important;
+    max-width: none !important;
+    max-height: calc(100dvh - 56px - env(safe-area-inset-top)) !important;
+    border-radius: 24px 24px 0 0 !important;
+    border-width: 1px 0 0;
+    padding: 30px 18px calc(18px + env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+    animation: shellSheetUp .3s cubic-bezier(.2,.8,.2,1) both;
+}
+.modal-content.sheet-dragging{ animation: none; transition: none; }
+.modal-content.sheet-releasing{ animation: none; transition: transform .22s ease; }
+.modal-sheet-handle{
+    display: block;
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    width: 40px;
+    height: 5px;
+    margin-left: -20px;
+    border-radius: 3px;
+    background: var(--border-strong);
+}
+
+/* Открыта экранная клавиатура — вкладки прячем (см. initTypingMode) */
+body.shell-typing .shell-tabbar{ display: none; }
+
+/* Переключатель "Чат / Комментарии" над лентой чата */
+body[data-section="chat"] #app > .lists-tabs{
+    margin: 10px 0 0;
+    flex-shrink: 0;
+}
+
+/* "Добавить тайтлы": панель сохранения прилипает над вкладками */
+.add-bar{ bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px); }
+body.shell-typing .add-bar{ bottom: 10px; }
+.add-field-year{ width: 84px; }
+.add-card .add-row:not(.add-row-title){ flex-direction: column; }
+
+/* Результаты онлайн-поиска: в 3 колонки на телефоне карточки слишком узкие */
+.online-search-results{ grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+/* Карточки каталога на телефоне: описание в узкой колонке — только шум,
+   оно есть в карточке тайтла по тапу на постер */
+@media (max-width: 599.98px){
+    .cc-desc{ display: none !important; }
+}
+.ts-actions{ grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ts-action{ font-size: 11.5px; min-height: 68px; }

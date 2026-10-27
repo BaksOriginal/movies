@@ -25,8 +25,17 @@ def tg_send_message(chat_id: int, text: str, reply_markup: dict | None = None) -
     requests.post(f"{TELEGRAM_API}/sendMessage", json=payload, timeout=10)
 
 
+def webapp_url(mode: str) -> str:
+    """Ссылка на мини-апп, сразу открытый на нужной вкладке (manual / search)."""
+    return f"{WEBAPP_URL}{'&' if '?' in WEBAPP_URL else '?'}mode={mode}"
+
+
 def webapp_keyboard() -> dict:
-    return {"inline_keyboard": [[{"text": "🎬 Добавить фильмы", "web_app": {"url": WEBAPP_URL}}]]}
+    # Бот умеет ровно две вещи — обе живут в мини-аппе
+    return {"inline_keyboard": [
+        [{"text": "➕ Добавить вручную", "web_app": {"url": webapp_url("manual")}}],
+        [{"text": "🔍 Онлайн-поиск", "web_app": {"url": webapp_url("search")}}],
+    ]}
 
 
 def is_authorized(user_id: int) -> bool:
@@ -43,7 +52,7 @@ def is_authorized(user_id: int) -> bool:
 def send_menu(chat_id: int) -> None:
     tg_send_message(
         chat_id,
-        "Жми на кнопочку ниже",
+        "Что добавим в каталог?",
         webapp_keyboard(),
     )
 

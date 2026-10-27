@@ -1,11 +1,6 @@
 let dbData = {}; // Сюда мы динамически соберем структуру категорий и жанров из базы данных
 let titleCreatedAt = {}; // "Название (год)" -> дата добавления в базу (для значка "новинка")
 
-// Текущее состояние тумблера "Компактный режим" (Настройки на главной) —
-// подгружается из аккаунта при каждом showHome(), см. loadUserSettingsFromDB()
-// ниже. По умолчанию выключен, пока не загружено иное.
-let compactModeEnabled = false;
-
 // ==========================================
 // ПАГИНАЦИЯ КАТАЛОГА (карточки, как в "Онлайн Поиске")
 // ==========================================
@@ -90,15 +85,63 @@ async function buildGenreNameLookupAsync(kind) {
 // ==========================================
 // TMDB-МЕТАДАННЫЕ ДЛЯ КАРТОЧЕК КАТАЛОГА (постер, мини-описание, жанры)
 // ==========================================
-// В отличие от fetchTmdbPoster() (только постер, для старой модалки
-// действий), карточкам каталога нужен ещё жанр и краткое описание —
+// Карточкам каталога нужны постер, жанр и краткое описание —
 // собираем всё за один и тот же поиск на TMDB и кэшируем по названию,
 // чтобы при повторной перерисовке экрана (смена страницы пагинации,
 // live-обновление оценок и т.п.) не дёргать TMDB заново.
 const tmdbCardMetaCache = new Map(); // "Название (год)" -> meta | null
 
-async function fetchTmdbCardMeta(itemText) {
-    if (tmdbCardMetaCache.has(itemText)) return tmdbCardMetaCache.get(itemText);
+// Постер/жанры/описание тайтла почти никогда не меняются, а без кэша каждая
+// карточка при каждом открытии сайта — это 1-2 запроса к TMDB через прокси.
+// Храним найденное в localStorage на 2 недели: при повторных заходах постеры
+// появляются сразу, без сети. Описание хранится уже обрезанным — длиннее
+// 130 символов карточка его всё равно не показывает.
+const TMDB_META_STORAGE_KEY = "tmdbCardMeta:v1";
+const TMDB_META_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+let tmdbMetaSaveTimer = null;
+const tmdbCardMetaSavedAt = new Map(); // "Название (год)" -> когда найдено (для TTL)
+
+(function restoreTmdbCardMetaCache() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(TMDB_META_STORAGE_KEY) || "{}");
+        const now = Date.now();
+        for (const key in saved) {
+            const entry = saved[key];
+            if (entry && now - entry.t < TMDB_META_TTL_MS) {
+                tmdbCardMetaCache.set(key, entry.m);
+                tmdbCardMetaSavedAt.set(key, entry.t);
+            }
+        }
+    } catch (e) { /* битый кэш — просто начинаем с пустого */ }
+})();
+
+function persistTmdbCardMetaCache() {
+    if (tmdbMetaSaveTimer) return;
+    tmdbMetaSaveTimer = setTimeout(() => {
+        tmdbMetaSaveTimer = null;
+        const out = {};
+        const now = Date.now();
+        tmdbCardMetaCache.forEach((meta, key) => {
+            if (!tmdbCardMetaSavedAt.has(key)) tmdbCardMetaSavedAt.set(key, now);
+            out[key] = { t: tmdbCardMetaSavedAt.get(key), m: meta };
+        });
+        try {
+            localStorage.setItem(TMDB_META_STORAGE_KEY, JSON.stringify(out));
+        } catch (e) { /* переполнен localStorage — не критично, останется кэш в памяти */ }
+    }, 1500);
+}
+
+const tmdbCardMetaInFlight = new Map(); // "Название (год)" -> Promise
+
+function fetchTmdbCardMeta(itemText) {
+    if (tmdbCardMetaCache.has(itemText)) return Promise.resolve(tmdbCardMetaCache.get(itemText));
+    if (tmdbCardMetaInFlight.has(itemText)) return tmdbCardMetaInFlight.get(itemText);
+    const request = requestTmdbCardMeta(itemText).finally(() => tmdbCardMetaInFlight.delete(itemText));
+    tmdbCardMetaInFlight.set(itemText, request);
+    return request;
+}
+
+async function requestTmdbCardMeta(itemText) {
 
     const match = itemText.match(/^(.*)\s\((\d{4})\)$/);
     const title = match ? match[1] : itemText;
@@ -123,18 +166,21 @@ async function fetchTmdbCardMeta(itemText) {
 
         if (!result) {
             tmdbCardMetaCache.set(itemText, null);
+            persistTmdbCardMetaCache();
             return null;
         }
 
         const genreMap = await buildGenreNameLookupAsync(mediaKind);
         const genreNames = (result.genre_ids || []).map(id => genreMap[id]).filter(Boolean).slice(0, 3).join(", ");
 
+        const overview = result.overview || "";
         const meta = {
             posterUrl: result.poster_path ? (TMDB_IMG_BASE_SMALL + result.poster_path) : null,
-            overview: result.overview || "",
+            overview: overview.length > 140 ? overview.slice(0, 140) + "…" : overview,
             genreNames
         };
         tmdbCardMetaCache.set(itemText, meta);
+        persistTmdbCardMetaCache();
         return meta;
     } catch (e) {
         console.error("Ошибка при запросе карточки каталога с TMDB:", e);
@@ -279,6 +325,28 @@ function sortGenreList(list) {
 }
 
 // Функция для загрузки тайтлов из Supabase и сборки структуры
+// Раньше каталог (все тайтлы) заново скачивался при КАЖДОМ возврате на
+// главную — отсюда и вечные тормоза на "Домой". Теперь он грузится один раз,
+// а дальше обновляется сам: после своих правок (refreshCurrentScreen) и по
+// realtime, когда тайтлы меняет партнёр (см. onCatalogRealtimeChange).
+let catalogLoaded = false;
+
+// Секретная категория не меняется никогда — её содержимое живёт прямо здесь,
+// в коде, а её строки из таблицы titles игнорируются. Формат тот же, что у
+// dbData: { "категория": { "жанр": ["Название (год)", { "Франшиза": [...] }] } }.
+const SECRET_CATALOG = {
+    "🗝️ Секрет": {
+        "💌 Послание для Любимой": [
+            "❤️ Я Тебя Очень Сильно ЛЮБЛЮ! ❤️ (2026)",
+            "😈 Моя ты Эчпочмоня 😈 (2026)",
+            "Спасибо что ты есть 💕 (2026)"
+        ],
+        "💻 Разработчик": [
+            "👑 Бакс Ориджинал 👑 (2026)"
+        ]
+    }
+};
+
 async function loadCatalogFromDB() {
     const { data: titles, error } = await db
         .from('titles')
@@ -295,6 +363,7 @@ async function loadCatalogFromDB() {
     const tempCreatedAt = {};
 
     titles.forEach(item => {
+        if (SECRET_CATALOG && isSecretCategory(item.category)) return;
         const cat = item.category;
         const gen = item.genre;
         const fran = item.franchise;
@@ -327,8 +396,15 @@ async function loadCatalogFromDB() {
         }
     }
 
+    if (SECRET_CATALOG) {
+        for (const cat in SECRET_CATALOG) {
+            tempStructure[cat] = JSON.parse(JSON.stringify(SECRET_CATALOG[cat]));
+        }
+    }
+
     dbData = tempStructure;
     titleCreatedAt = tempCreatedAt;
+    catalogLoaded = true;
 }
 
 // Проверка: был ли тайтл добавлен в базу недавно (в течение 2 суток)
@@ -515,15 +591,6 @@ let scheduledByDate = {};  // "YYYY-MM-DD" -> ["Название (год)", ...]
 let calendarViewYear = null;  // Год открытого сейчас месяца в календаре (null = ещё не открывался)
 let calendarViewMonth = null; // Месяц открытого сейчас месяца, 0-индексация (январь = 0)
 
-// Открыт ли Календарь/"Просмотрено" из плашки "🔖 Закладки" (компактный
-// режим) — от этого зависит, куда ведёт их собственная "⬅️ Назад" (см.
-// showCompactBookmarksScreen()/renderWatchedNav() ниже). Отдельные флаги, а
-// не параметр функции: renderCalendarScreen()/renderWatchedBucket()
-// перерисовывают свой экран заново (месяц вперёд/назад, переход к
-// подкатегории) без повторной передачи контекста, поэтому он должен жить
-// между вызовами.
-let calendarCameFromBookmarks = false;
-let watchedTopCameFromBookmarks = false;
 
 
 // ==========================================
@@ -553,16 +620,21 @@ initAuth({
         subscribeToChanges();
 
         if (!wasAlreadyInitialized) {
-            // Диплинк "назад в Паутинку" из игр (games/?play=...&from=pautinka
-            // ведёт сюда через games.js -> ../?openPautinka=1 при возврате)
-            const params = new URLSearchParams(location.search);
-            if (params.get("openPautinka") === "1") {
-                window.history.replaceState(null, "", location.pathname);
-                showPautinka();
+            // Диплинк с других страниц сайта на раздел главной: ../#wishlist и т.п.
+            if (location.hash.length > 1) {
+                await loadCatalogFromDB();
+                ensureMainShell();
+                if (!openScreenFromHash()) showHome();
             } else {
                 showHome();
             }
-            playLoginGlitchAnimation();
+            // Глитч-анимация — только сразу после входа по форме, а не при
+            // каждом открытии главной (переходы с Игр/Совместного просмотра
+            // — это тоже новая загрузка страницы с уже восстановленной сессией)
+            if (sessionStorage.getItem("playLoginGlitch") === "1") {
+                sessionStorage.removeItem("playLoginGlitch");
+                playLoginGlitchAnimation();
+            }
         } else {
             refreshCurrentScreen();
         }
@@ -586,6 +658,8 @@ initAuth({
             db.removeChannel(realtimeChannel);
             realtimeChannel = null;
         }
+        destroyShell();
+        mainShellReady = false;
         showLoginScreen();
     }
 });
@@ -821,58 +895,6 @@ function isSecretCategory(catKey) {
     return catKey.includes("Секрет") || catKey.includes("🔒") || catKey.includes("❤️");
 }
 
-// ==========================================
-// ⚙️ НАСТРОЙКИ АККАУНТА (пока один пункт — "Компактный режим")
-// ==========================================
-// Требуется таблица public.user_settings в Supabase. Выполните один раз
-// в SQL Editor вашего проекта:
-//
-//   create table if not exists public.user_settings (
-//     user_id uuid primary key references auth.users(id) on delete cascade,
-//     compact_mode boolean not null default false,
-//     updated_at timestamptz not null default now()
-//   );
-//
-//   alter table public.user_settings enable row level security;
-//
-//   create policy "user_settings_select" on public.user_settings
-//     for select using (true);
-//   create policy "user_settings_insert" on public.user_settings
-//     for insert with check (true);
-//   create policy "user_settings_update" on public.user_settings
-//     for update using (true);
-//
-// user_id — PRIMARY KEY: у каждого пользователя ровно одна строка настроек,
-// пишем всегда через UPSERT (onConflict: 'user_id'), см. setCompactMode().
-// Загружается заново при каждом showHome() (тот же приём, что и у
-// loadCatalogFromDB() чуть выше по этой функции) — поэтому переключение
-// работает мгновенно и одинаково видно после повторного входа в аккаунт,
-// в т.ч. с другого устройства/браузера.
-async function loadUserSettingsFromDB() {
-    if (!currentUser) { compactModeEnabled = false; return; }
-    const { data, error } = await db.from('user_settings')
-        .select('compact_mode')
-        .eq('user_id', currentUser.id);
-    if (error) {
-        console.error("Ошибка при загрузке настроек аккаунта:", error);
-        return;
-    }
-    compactModeEnabled = !!(data && data[0] && data[0].compact_mode);
-}
-
-async function setCompactMode(enabled) {
-    compactModeEnabled = enabled;
-    if (!currentUser) return;
-    const { error } = await db.from('user_settings')
-        .upsert(
-            { user_id: currentUser.id, compact_mode: enabled, updated_at: new Date().toISOString() },
-            { onConflict: 'user_id' }
-        );
-    if (error) {
-        console.error("Ошибка при сохранении настроек аккаунта:", error);
-    }
-}
-
 // Загрузка оценок (видны обе оценки — и Asmoday, и Myakish)
 async function loadRatingsFromDB() {
     const { data, error } = await db.from('ratings').select('title, username, score, user_id');
@@ -979,6 +1001,12 @@ function subscribeToChanges() {
             { event: '*', schema: 'public', table: 'scheduled_items' },
             () => { updateUIOnLiveChange(); }
         )
+        // Следим за самим каталогом (тайтлы добавил/изменил партнёр)
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'titles' },
+            () => { onCatalogRealtimeChange(); }
+        )
         // Следим за чатом (отдельно от каталога, поиск это не затрагивает)
         .on(
             'postgres_changes',
@@ -988,6 +1016,23 @@ function subscribeToChanges() {
             }
         )
         .subscribe();
+}
+
+// Тайтлы обычно добавляют пачкой (экран "Добавить тайтлы") — realtime
+// присылает по событию на строку, поэтому перезагрузку каталога слегка
+// откладываем и делаем одну на всю пачку.
+let catalogRealtimeTimer = null;
+function onCatalogRealtimeChange() {
+    clearTimeout(catalogRealtimeTimer);
+    catalogRealtimeTimer = setTimeout(async () => {
+        await loadCatalogFromDB();
+        if (!currentUser) return;
+        ensureMainShell();
+        // Главную перерисовываем сразу (она дешёвая); экраны каталога —
+        // нет, чтобы список не прыгал под пальцем: свежие данные подхватятся
+        // при следующем переходе
+        if (document.body.dataset.section === "home") showHome();
+    }, 800);
 }
 
 // Живое обновление интерфейса. Дергает базу и подтягивает актуальные
@@ -1015,36 +1060,12 @@ async function updateUIOnLiveChange() {
 // Именно эту функцию нужно звать сразу после оптимистичного локального
 // изменения (клик по звёздочке), чтобы не словить гонку с loadUserDataFromDB().
 function refreshUIFromState() {
-    // 1. Обновляем счетчики на кнопках главного экрана (только по явным id —
-    // раньше здесь искали ВСЕ кнопки по вхождению текста "Просмотрено"/"Будем
-    // смотреть", из-за чего заодно портились и подкатегории "Просмотрено
-    // мной/партнёром/нами" с похожим текстом на кнопках)
-    const watchedMainBtn = document.getElementById("watchedMainBtn");
-    if (watchedMainBtn) {
-        const totalWatched = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
-        const newText = "🎬 Просмотрено (" + totalWatched + ")";
-        // В компактном режиме это плашка с вложенными <span> (эмодзи сверху,
-        // подпись снизу, см. buildCompactTile()) — перезаписывать весь
-        // textContent элемента нельзя, иначе разметка плашки слетит. Если
-        // внутри есть .compact-tile-label — обновляем только его, иначе (в
-        // обычном режиме, где это просто <button>) — как и раньше, целиком.
-        const watchedLabel = watchedMainBtn.querySelector(".compact-tile-label");
-        if (watchedLabel) {
-            watchedLabel.textContent = stripLeadingEmoji(newText) || newText;
-        } else {
-            watchedMainBtn.textContent = newText;
-        }
-    }
-    const wishlistMainBtn = document.getElementById("wishlistMainBtn");
-    if (wishlistMainBtn) {
-        const newText = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-        const wishlistLabel = wishlistMainBtn.querySelector(".compact-tile-label");
-        if (wishlistLabel) {
-            wishlistLabel.textContent = stripLeadingEmoji(newText) || newText;
-        } else {
-            wishlistMainBtn.textContent = newText;
-        }
-    }
+    // 1. Счётчики на главной и в боковом меню оболочки
+    const homeStatWishlist = document.getElementById("homeStatWishlist");
+    if (homeStatWishlist) homeStatWishlist.textContent = wishlistTitles.size;
+    const homeStatWatched = document.getElementById("homeStatWatched");
+    if (homeStatWatched) homeStatWatched.textContent = getAllWatchedTitles().length;
+    updateShellCounts(getShellListCounts());
 
     // 2. Обновляем состояние кнопок ⭐/🔖 на карточках (секретная категория
     // карточек с кнопками не имеет — .catalog-card там вообще не создаётся,
@@ -1517,8 +1538,10 @@ function showLoginScreen() {
             email = username;
         }
 
+        sessionStorage.setItem("playLoginGlitch", "1");
         const { error } = await db.auth.signInWithPassword({ email, password });
         if (error) {
+            sessionStorage.removeItem("playLoginGlitch");
             alert("Ошибка входа: неверный никнейм или пароль.");
             console.error("Ошибка авторизации:", error.message);
         }
@@ -1625,65 +1648,28 @@ function buildFilterSummary(filters) {
 // дальше, не возвращаясь на главную страницу.
 function buildSearchBar(prefillQuery = "") {
     let searchContainer = document.createElement("div");
-    searchContainer.style.cssText = `
-        display: flex;
-        gap: 8px;
-        margin-bottom: 12px;
-        width: 100%;
-        box-sizing: border-box;
-    `;
+    searchContainer.className = "search-bar";
+    searchContainer.innerHTML = shellIcon("search");
 
     let searchInput = document.createElement("input");
-    searchInput.type = "text";
+    searchInput.type = "search";
     searchInput.className = "search-input-field";
-    searchInput.placeholder = "Поиск...";
+    searchInput.placeholder = "Поиск по каталогу";
+    searchInput.enterKeyHint = "search";
     searchInput.value = prefillQuery;
-    searchInput.style.cssText = `
-        flex-grow: 1;
-        min-width: 0;
-        padding: 10px 12px;
-        border-radius: 8px;
-        font-size: 18px;
-        font-weight: 600;
-        font-family: var(--font-body);
-        box-sizing: border-box;
-    `;
 
     let searchSubmitBtn = document.createElement("button");
-    searchSubmitBtn.className = "btn-search-icon";
-    searchSubmitBtn.textContent = "🔍";
-    searchSubmitBtn.style.cssText = `
-        width: 42px !important;
-        height: 42px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border-radius: 8px !important;
-        cursor: pointer;
-        font-size: 16px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        flex-shrink: 0;
-    `;
+    searchSubmitBtn.type = "button";
+    searchSubmitBtn.className = "ui-btn search-bar-btn";
+    searchSubmitBtn.title = "Искать";
+    searchSubmitBtn.textContent = "→";
 
     let filterBtn = document.createElement("button");
-    filterBtn.id = "searchFilterBtn";
-    filterBtn.className = "btn-filter-icon";
+    filterBtn.type = "button";
+    filterBtn.className = "ui-btn search-bar-btn btn-filter-icon";
+    filterBtn.title = "Фильтры";
     filterBtn.classList.toggle("active", hasActiveFilters(searchFilters));
     filterBtn.textContent = "⚙️";
-    filterBtn.style.cssText = `
-        width: 42px !important;
-        height: 42px !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border-radius: 8px !important;
-        cursor: pointer;
-        font-size: 16px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        flex-shrink: 0;
-    `;
 
     const doSearch = () => {
         const q = searchInput.value;
@@ -1935,51 +1921,6 @@ function showFilterModal(onFiltersChanged) {
     };
 }
 
-// ==========================================
-// ⚙️ МОДАЛКА "НАСТРОЙКИ" (кнопка на главной, слева от 🔊/🔇)
-// ==========================================
-function showSettingsModal() {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.id = "settingsModal";
-
-    overlay.innerHTML = `
-        <div class="modal-content">
-            <h3>⚙️ Настройки</h3>
-            <div class="settings-list">
-                <div class="settings-row">
-                    <div class="settings-row-text">
-                        <span class="settings-row-title">🗂️ Компактный режим</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" id="compactModeToggle" ${compactModeEnabled ? "checked" : ""}>
-                        <span class="switch-slider"></span>
-                    </label>
-                </div>
-            </div>
-            <div class="action-buttons" style="margin-top: 18px;">
-                <button type="button" class="btn-action-cancel" id="settingsCloseBtn">Закрыть</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(overlay);
-
-    const close = () => overlay.remove();
-    overlay.querySelector("#settingsCloseBtn").onclick = close;
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-
-    const toggle = overlay.querySelector("#compactModeToggle");
-    toggle.onchange = async () => {
-        toggle.disabled = true;
-        await setCompactMode(toggle.checked);
-        toggle.disabled = false;
-        // Мгновенно перерисовываем главный экран под новый режим — к моменту
-        // закрытия модалки за ней уже актуальная версия страницы.
-        if (currentUser) showHome();
-    };
-}
-
 // Главная страница
 // ==========================================
 // АНИМИРОВАННАЯ ПЛАШКА ГЛАВНОГО ЭКРАНА ("Время Кино" и т.д.)
@@ -2093,29 +2034,312 @@ function startHeroTypewriter(textEl) {
 // в script.js, только вызовы этой функции перед переходом на Игры/
 // Совместный просмотр (ищи по тексту "saveMusicPositionBeforeLeaving(); location.href").
 
-// Плашка меню главной страницы в компактном режиме — эмодзи сверху, подпись
-// снизу, той же природы, что и карточки buildSwipeDeck(), только меньше и
-// без счётчика тайтлов: используется в общей 2-колоночной сетке
-// .compact-tile-grid вместо кнопки на всю ширину. accentClass — один из
-// compact-tile-{cyan|gold|purple|green|pink} (см. style.css), под цветовую
-// кодировку разделов, что была у прежних полноразмерных кнопок.
-function buildCompactTile(label, onClick, accentClass, elId = null) {
-    const tile = document.createElement("button");
-    tile.type = "button";
-    tile.className = `compact-tile ${accentClass}`;
-    if (elId) tile.id = elId;
-    const emoji = extractLeadingEmoji(label) || "▫️";
-    const text = stripLeadingEmoji(label) || label;
-    tile.innerHTML = `
-        <span class="compact-tile-emoji">${emoji}</span>
-        <span class="compact-tile-label">${escapeHtml(text)}</span>
-    `;
-    tile.onclick = onClick;
-    return tile;
-}
-
 async function showHome() {
     startTransitionLock();
+    resetScreenState();
+    history = [];
+    categoryHistory = [];
+    pageHistory = [];
+    currentCategoryName = null;
+    if (!catalogLoaded) await loadCatalogFromDB();
+
+    if (!currentUser) return;
+    ensureMainShell();
+    setShellSection("home");
+
+    app.innerHTML = "";
+    app.classList.remove("long-list");
+
+    const home = document.createElement("div");
+    home.className = "home";
+    app.appendChild(home);
+
+    // ---- Верх: приветствие + ближайший просмотр | счётчики и поиск ----
+    const top = document.createElement("div");
+    top.className = "home-top";
+    home.appendChild(top);
+
+    const hero = document.createElement("section");
+    hero.className = "home-hero";
+    hero.innerHTML = `
+        <div>
+            <div class="home-hero-kicker"></div>
+            <div class="home-hero-title-wrap">
+                <div class="home-hero-title"><span class="movie-time-text"></span><span class="movie-time-cursor">|</span></div>
+            </div>
+        </div>
+    `;
+    hero.querySelector(".home-hero-kicker").textContent = `Привет, ${getUsernameFromEmail(currentUser.email)} 👋`;
+    hero.appendChild(buildHomeNextCard());
+    top.appendChild(hero);
+    startHeroTypewriter(hero.querySelector(".movie-time-text"));
+
+    const side = document.createElement("div");
+    side.className = "home-side";
+    top.appendChild(side);
+
+    const stats = document.createElement("div");
+    stats.className = "home-stats";
+    const stat = (id, value, label, onClick) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn home-stat";
+        btn.innerHTML = `<span class="home-stat-value" id="${id}">${value}</span><span class="home-stat-label">${label}</span>`;
+        btn.onclick = onClick;
+        stats.appendChild(btn);
+    };
+    const { normal } = getOrderedCategoryKeys();
+    stat("homeStatWishlist", wishlistTitles.size, "в планах", () => renderWishlistFolder());
+    stat("homeStatWatched", getAllWatchedTitles().length, "просмотрено", () => renderWatchedTop());
+    stat("homeStatCatalog", normal.reduce((sum, key) => sum + getAllTitlesFromCategory(dbData[key]).length, 0), "в каталоге",
+        () => { if (normal.length) openCategory(normal[0]); });
+    side.appendChild(stats);
+
+    // На ПК поиск живёт в верхней панели оболочки, на телефоне — здесь
+    const search = document.createElement("div");
+    search.className = "home-search only-mobile";
+    search.appendChild(buildSearchBar());
+    side.appendChild(search);
+
+    // ---- Категории ----
+    if (normal.length > 0) {
+        const tiles = document.createElement("div");
+        tiles.className = "cat-tiles";
+        normal.forEach(key => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "ui-btn cat-tile";
+            btn.style.setProperty("--h", getCategoryBaseHue(key));
+            btn.innerHTML = `
+                <span class="cat-tile-emoji">${getCategoryEmoji(key)}</span>
+                <span class="cat-tile-name">${escapeHtml(stripLeadingEmoji(key) || key)}</span>
+                <span class="cat-tile-count">${formatTitleCount(getAllTitlesFromCategory(dbData[key]).length)}</span>
+            `;
+            btn.onclick = () => openCategory(key);
+            tiles.appendChild(btn);
+        });
+        home.appendChild(buildUiSection("Каталог", tiles));
+    }
+
+    // ---- Ленты постеров ----
+    const recentlyAdded = getRecentlyAddedTitles();
+    if (recentlyAdded.length > 0) {
+        home.appendChild(buildUiSection("Новое на сайте", buildPosterRail(recentlyAdded.slice(0, 24), { badge: "NEW" }),
+            () => { currentCategoryName = null; openData(recentlyAdded, true, "⭐ Новое на сайте"); }));
+    }
+
+    const wishlist = Array.from(wishlistTitles);
+    if (wishlist.length > 0) {
+        home.appendChild(buildUiSection("Будем смотреть", buildPosterRail(wishlist.slice(0, 24)), () => renderWishlistFolder()));
+    }
+
+    const watchedTogether = Array.from(watchedTitlesBoth);
+    if (watchedTogether.length > 0) {
+        home.appendChild(buildUiSection("Посмотрели вместе", buildPosterRail(watchedTogether.slice(0, 24)), () => renderWatchedBucket("both")));
+    }
+}
+
+// Карточка "Следующий просмотр" в hero главной: ближайшая дата из календаря,
+// а если ничего не запланировано — предложение выбрать фильм рандомайзером.
+function buildHomeNextCard() {
+    const card = document.createElement("div");
+    card.className = "home-next";
+
+    const today = todayDateKey();
+    const nextDate = Object.keys(scheduledByDate).filter(d => d >= today && scheduledByDate[d].length > 0).sort()[0];
+
+    if (!nextDate) {
+        card.innerHTML = `
+            <div class="home-next-poster">🎲</div>
+            <div class="home-next-body">
+                <div class="home-next-label">Ничего не запланировано</div>
+                <div class="home-next-sub">Выберите, что посмотреть, или доверьтесь случаю</div>
+            </div>
+            <div class="home-next-actions"></div>
+        `;
+        const actions = card.querySelector(".home-next-actions");
+        actions.appendChild(buildUiPill("🎲 Случайно", () => showRandomTitleFromCatalog(), true));
+        actions.appendChild(buildUiPill("Календарь", () => showCalendarScreen()));
+        return card;
+    }
+
+    const titles = scheduledByDate[nextDate];
+    const itemText = titles[0];
+    const tomorrow = toDateKey(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    const dayLabel = nextDate === today ? "сегодня" : nextDate === tomorrow ? "завтра" : formatScheduledDateShort(nextDate);
+
+    card.innerHTML = `
+        <div class="home-next-poster">🎬</div>
+        <div class="home-next-body">
+            <div class="home-next-label"></div>
+            <div class="home-next-title"></div>
+            <div class="home-next-sub"></div>
+        </div>
+        <div class="home-next-actions"></div>
+    `;
+    card.querySelector(".home-next-label").textContent = `Смотрим ${dayLabel}`;
+    card.querySelector(".home-next-title").textContent = itemText;
+    card.querySelector(".home-next-sub").textContent = titles.length > 1 ? `и ещё ${titles.length - 1} в этот день` : "Запланировано в календаре";
+    const actions = card.querySelector(".home-next-actions");
+    actions.appendChild(buildUiPill("Подробнее", () => showActionMenu(itemText), true));
+    actions.appendChild(buildUiPill("Календарь", () => showCalendarScreen()));
+
+    fetchTmdbCardMeta(itemText).then(meta => {
+        if (!meta || !meta.posterUrl || !card.isConnected) return;
+        const img = document.createElement("img");
+        img.className = "home-next-poster";
+        img.src = meta.posterUrl;
+        img.alt = "";
+        card.querySelector(".home-next-poster").replaceWith(img);
+    });
+    return card;
+}
+
+function buildUiPill(label, onClick, accent = false) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ui-btn ui-pill" + (accent ? " ui-pill-accent" : "");
+    btn.textContent = label;
+    btn.onclick = onClick;
+    return btn;
+}
+
+function buildUiSection(title, content, onMore = null) {
+    const section = document.createElement("section");
+    section.className = "ui-section";
+    const head = document.createElement("div");
+    head.className = "ui-section-head";
+    const h = document.createElement("h2");
+    h.className = "ui-section-title";
+    h.textContent = title;
+    head.appendChild(h);
+    if (onMore) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "ui-btn ui-link";
+        more.textContent = "Все →";
+        more.onclick = onMore;
+        head.appendChild(more);
+    }
+    section.appendChild(head);
+    section.appendChild(content);
+    return section;
+}
+
+// Горизонтальная лента постеров. Тап по постеру — та же карточка тайтла,
+// что открывается долгим нажатием в каталоге (showActionMenu).
+function buildPosterRail(items, { badge = null } = {}) {
+    const rail = document.createElement("div");
+    rail.className = "rail";
+    const track = document.createElement("div");
+    track.className = "rail-track";
+    rail.appendChild(track);
+
+    items.forEach(itemText => {
+        const m = itemText.match(/^(.*)\s\((\d{4})\)$/);
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "ui-btn poster-card";
+        card.innerHTML = `
+            <div class="poster-card-img">🎬${badge ? `<span class="poster-card-badge">${badge}</span>` : ""}</div>
+            <div class="poster-card-title"></div>
+            ${m ? `<div class="poster-card-year">${m[2]}</div>` : ""}
+        `;
+        card.querySelector(".poster-card-title").textContent = m ? m[1] : itemText;
+        card.onclick = () => showActionMenu(itemText);
+        track.appendChild(card);
+
+        fetchTmdbCardMeta(itemText).then(meta => {
+            if (!meta || !meta.posterUrl || !card.isConnected) return;
+            const img = document.createElement("img");
+            img.src = meta.posterUrl;
+            img.alt = "";
+            img.loading = "lazy";
+            img.draggable = false;
+            card.querySelector(".poster-card-img").prepend(img);
+        });
+    });
+
+    // Стрелки прокрутки — только на ПК (на телефоне лента листается пальцем)
+    [["prev", -1], ["next", 1]].forEach(([cls, dir]) => {
+        const arrow = document.createElement("button");
+        arrow.type = "button";
+        arrow.className = `ui-btn rail-arrow rail-arrow-${cls}`;
+        arrow.setAttribute("aria-label", dir < 0 ? "Назад" : "Вперёд");
+        arrow.innerHTML = shellIcon("back");
+        arrow.onclick = () => track.scrollBy({ left: dir * track.clientWidth * 0.8 });
+        rail.appendChild(arrow);
+    });
+    return rail;
+}
+
+function formatTitleCount(n) {
+    const mod10 = n % 10, mod100 = n % 100;
+    const word = (mod10 === 1 && mod100 !== 11) ? "тайтл"
+        : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) ? "тайтла" : "тайтлов";
+    return `${n} ${word}`;
+}
+
+function getAllWatchedTitles() {
+    return Array.from(new Set([...watchedTitlesMine, ...watchedTitlesPartner, ...watchedTitlesBoth]));
+}
+
+// ==========================================
+// ОБОЛОЧКА ГЛАВНОЙ СТРАНИЦЫ (см. shell.js)
+// ==========================================
+
+// Категории каталога в фиксированном порядке: Фильмы -> Мультфильмы ->
+// Сериалы -> Аниме -> прочие, секретные — отдельно и в самом конце.
+function getOrderedCategoryKeys() {
+    const priorityOrder = ["Фильм", "Мультфильм", "Сериал", "Аниме"];
+    const priority = (key) => {
+        if (isSecretCategory(key)) return 1000;
+        for (let i = 0; i < priorityOrder.length; i++) {
+            if (key.includes(priorityOrder[i])) return i;
+        }
+        return 500;
+    };
+    const ordered = Object.keys(dbData).sort((a, b) => priority(a) - priority(b));
+    return {
+        normal: ordered.filter(key => !isSecretCategory(key)),
+        secret: ordered.filter(key => isSecretCategory(key)),
+    };
+}
+
+function buildShellCategoryList() {
+    return getOrderedCategoryKeys().normal.map(key => ({
+        key,
+        label: stripLeadingEmoji(key) || key,
+        emoji: getCategoryEmoji(key),
+        count: getAllTitlesFromCategory(dbData[key]).length,
+    }));
+}
+
+function getShellListCounts() {
+    return { wishlist: wishlistTitles.size, watched: getAllWatchedTitles().length };
+}
+
+let mainShellReady = false;
+function ensureMainShell() {
+    if (!mainShellReady) {
+        initShell({
+            page: "main",
+            onNavigate: navigateFromShell,
+            categories: buildShellCategoryList(),
+            counts: getShellListCounts(),
+            searchEl: buildSearchBar(),
+        });
+        mainShellReady = true;
+    } else {
+        setShellCategories(buildShellCategoryList());
+        updateShellCounts(getShellListCounts());
+    }
+}
+
+// Общая уборка перед переходом на любой экран: таймер опроса чата, игры,
+// полноэкранные режимы (добавление/онлайн-поиск/Паутинка) и флаги экранов.
+function resetScreenState() {
+    if (isChatScreenOpen) clearChatReplyTarget();
     isChatScreenOpen = false;
     currentWatchedBucket = null;
     isWishlistScreenOpen = false;
@@ -2128,825 +2352,72 @@ async function showHome() {
         activeGameCleanup();
         activeGameCleanup = null;
     }
-    document.body.classList.remove("games-screen-active");
-    // Подстраховка на случай других путей выхода на главную (не только
-    // явные кнопки "Домой" этих экранов, которые уже чистят это сами) —
-    // иначе десктопное расширение .container для этих режимов (см. CSS)
-    // могло бы остаться висеть на сайте даже после showHome().
-    document.body.classList.remove("batch-add-screen-active");
-    document.body.classList.remove("online-search-screen-active");
+    document.body.classList.remove("games-screen-active", "batch-add-screen-active", "online-search-screen-active");
+}
+
+function clearNavHistory() {
     history = [];
     categoryHistory = [];
     pageHistory = [];
-    currentCategoryName = null;
-    gameLaunchedFromPautinka = false;
-    await loadCatalogFromDB();
-    await loadUserSettingsFromDB();
-
-    let nav = document.querySelector(".navigation");
-    if (nav) nav.remove();
-
-    app.innerHTML = "";
-
-    const createIconButton = (icon, onClick) => {
-        let btn = document.createElement("button");
-        btn.textContent = icon;
-        btn.className = "icon-btn";
-        btn.style.cssText = `
-            width: 40px !important; height: 40px !important;
-            min-width: 40px !important; min-height: 40px !important;
-            padding: 0 !important; margin: 0 !important;
-            border-radius: 50% !important; display: flex !important;
-            justify-content: center !important; align-items: center !important;
-            cursor: pointer !important; font-size: 16px !important;
-            box-sizing: border-box !important; overflow: visible !important;
-            line-height: 1 !important; flex-shrink: 0 !important;
-        `;
-        btn.onclick = onClick;
-        return btn;
-    };
-
-    // Раньше здесь был отдельный "hero-bar" — карточка со своим фоном,
-    // в которую заворачивались шапка пользователя и плашка заголовка.
-    // Теперь оба живут прямо на общем фоне страницы, без обёртки.
-    if (currentUser) {
-        let header = document.createElement("div");
-        header.className = "user-header";
-
-        header.innerHTML = `<span id="userEmailSpan">${getUsernameFromEmail(currentUser.email)}</span>`;
-
-        let controls = document.createElement("div");
-        controls.className = "hero-controls";
-
-        // Кнопка "⚙️ Настройки" — слева от кнопки музыки (см. showSettingsModal()).
-        let settingsBtn = createIconButton("⚙️", () => showSettingsModal());
-
-        let musicBtn = createIconButton(isMusicPlaying ? "🔊" : "🔇", () => {
-            const audio = document.getElementById("bgMusic");
-            if (audio.paused) { audio.play(); isMusicPlaying = true; localStorage.setItem("musicEnabled", "true"); musicBtn.textContent = "🔊"; }
-            else { audio.pause(); isMusicPlaying = false; localStorage.setItem("musicEnabled", "false"); musicBtn.textContent = "🔇"; }
-        });
-
-        let logoutBtn = createIconButton("❌", performLogout);
-
-        controls.appendChild(settingsBtn);
-        controls.appendChild(musicBtn);
-        controls.appendChild(logoutBtn);
-        header.appendChild(controls);
-        app.appendChild(header);
-    }
-
-    // Плашка с "печатающимся" заголовком вместо статичного "Время Кино!"
-    let plate = document.createElement("div");
-    plate.className = "movie-time-plate";
-    plate.innerHTML = `
-        <div class="movie-time-inner">
-            <span class="movie-time-text" id="movieTimeText"></span><span class="movie-time-cursor">|</span>
-        </div>
-    `;
-    app.appendChild(plate);
-
-
-    startHeroTypewriter(plate.querySelector("#movieTimeText"));
-
-    if (currentUser) {
-        // ПОИСК РАСПОЛАГАЕТСЯ ЗДЕСЬ
-        app.appendChild(buildSearchBar());
-
-        // Сплиттер (после Поиска) — только в обычном режиме; в компактном
-        // все HR-разделители убраны, всё меню идёт единой сеткой плашек
-        // (см. compactGrid ниже).
-        if (!compactModeEnabled) {
-            let hrAfterSearch = document.createElement("hr");
-            hrAfterSearch.className = "neon-divider";
-            app.appendChild(hrAfterSearch);
-        }
-    }
-
-    // Общий контейнер для ВСЕХ плашек главного меню в компактном режиме —
-    // 2 в ряд, без разделителей (см. .compact-tile-grid в style.css).
-    // Создаётся и сразу вставляется в #app пустым; дальше по ходу функции
-    // в него по мере рендера добавляются плашки — это сохраняет порядок
-    // разделов (Каталог -> Совместный просмотр/Чат/... -> Календарь/
-    // Будем смотреть/Просмотрено -> Секрет -> Рандомайзер) без изменений.
-    const compactGrid = compactModeEnabled ? document.createElement("div") : null;
-    if (compactGrid) {
-        compactGrid.className = "compact-tile-grid";
-        app.appendChild(compactGrid);
-    }
-
-    // Рендерим кнопки категорий в фиксированном порядке:
-    // Фильмы -> Мультфильмы -> Сериалы -> Аниме -> (Добавить тайтл),
-    // а секретная категория переехала в самый низ страницы.
-    const categoryPriorityOrder = ["Фильм", "Мультфильм", "Сериал", "Аниме"];
-    function getCategoryPriority(key) {
-        // Секретная категория — всегда в конце
-        if (key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")) return 1000;
-        for (let i = 0; i < categoryPriorityOrder.length; i++) {
-            if (key.includes(categoryPriorityOrder[i])) return i;
-        }
-        // Неизвестная категория — после основных, но перед секретной
-        return 500;
-    }
-
-    const orderedCategoryKeys = Object.keys(dbData).sort(
-        (a, b) => getCategoryPriority(a) - getCategoryPriority(b)
-    );
-    const secretKeys = orderedCategoryKeys.filter(
-        key => key.includes("Секрет") || key.includes("🔒") || key.includes("❤️")
-    );
-    const normalKeys = orderedCategoryKeys.filter(key => !secretKeys.includes(key));
-
-    if (compactModeEnabled) {
-        // ⚙️ КОМПАКТНЫЙ РЕЖИМ — вместо кнопок категорий/"Новое на сайте"/
-        // "Добавить тайтл"/"Онлайн Поиск" одна плашка "Каталог" в общей
-        // сетке (открывает листаемую колоду карточек — см.
-        // showCompactCatalogScreen() и buildSwipeDeck() ниже).
-        if (normalKeys.length > 0) {
-            compactGrid.appendChild(buildCompactTile("🗂️ Каталог", () => showCompactCatalogScreen(), "compact-tile-cyan"));
-        }
-    } else {
-        // Обычные категории (Фильмы, Мультфильмы, Сериалы, Аниме и т.д.)
-        normalKeys.forEach(key => {
-            let button = document.createElement("button");
-            button.textContent = key;
-            button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
-            app.appendChild(button);
-        });
-
-        // Кнопка "⭐ Новое на сайте" — плоский список тайтлов, добавленных за
-        // последние 2 суток, вне зависимости от категории/жанра (см.
-        // getRecentlyAddedTitles() выше). Показываем только когда там реально
-        // есть что показать — иначе кнопка обещала бы то, чего нет.
-        if (normalKeys.length > 0) {
-            const recentlyAdded = getRecentlyAddedTitles();
-            if (recentlyAdded.length > 0) {
-                let newTitlesBtn = document.createElement("button");
-                newTitlesBtn.textContent = "⭐ Новое на сайте";
-                newTitlesBtn.onclick = () => {
-                    currentCategoryName = null;
-                    openData(recentlyAdded, true, "⭐ Новое на сайте");
-                };
-                app.appendChild(newTitlesBtn);
-            }
-        }
-
-        // Кнопка "Добавить тайтл" — сразу под обычными категориями
-        if (currentUser && normalKeys.length > 0) {
-            let addBtn = document.createElement("button");
-            addBtn.className = "btn-add-new";
-            addBtn.textContent = "➕ Добавить тайтл";
-            addBtn.onclick = () => showBatchAddTitlesScreen();
-            app.appendChild(addBtn);
-
-            // Кнопка "🔍 Онлайн Поиск" — поиск тайтлов на TMDB (название, жанр,
-            // год, рейтинг, тип) с быстрым добавлением найденного в каталог.
-            // Тот же класс, что у "Добавить тайтл" — тот же голубой акцент,
-            // чтобы визуально обе кнопки читались как одна смысловая пара.
-            let onlineSearchBtn = document.createElement("button");
-            onlineSearchBtn.className = "btn-add-new";
-            onlineSearchBtn.textContent = "🔍 Онлайн Поиск";
-            onlineSearchBtn.onclick = () => showOnlineSearchScreen();
-            app.appendChild(onlineSearchBtn);
-        }
-    }
-
-    // Рандомайзер теперь всегда идёт сразу после "Игр" (см. ниже) — если
-    // currentUser нет (значит, и "Игр" нет), он всё равно должен где-то
-    // появиться, поэтому запоминаем, отрисовали ли мы его здесь, и в конце
-    // функции подстраховываемся, если нет.
-    let randomizerRendered = false;
-
-    if (currentUser) {
-        if (compactModeEnabled) {
-            compactGrid.appendChild(buildCompactTile("🎬 Совместный просмотр", () => { saveMusicPositionBeforeLeaving(); location.href = "w2g/"; }, "compact-tile-gold"));
-            compactGrid.appendChild(buildCompactTile("💬 Чат", () => showChatScreen(), "compact-tile-purple"));
-            compactGrid.appendChild(buildCompactTile("🗨️ Комментарии", () => showAllCommentsScreen(), "compact-tile-purple"));
-            compactGrid.appendChild(buildCompactTile("🕹️ Игры", () => { saveMusicPositionBeforeLeaving(); location.href = "games/"; }, "compact-tile-green"));
-            compactGrid.appendChild(buildCompactTile("🎲 Рандомайзер", () => showRandomizerModal(), "compact-tile-cyan"));
-            randomizerRendered = true;
-        } else {
-        // Разделитель после блока категорий/"Добавить тайтл"
-        let hrAfterCategories = document.createElement("hr");
-        hrAfterCategories.className = "neon-divider";
-        app.appendChild(hrAfterCategories);
-
-        let watchPartyBtn = document.createElement("button");
-        watchPartyBtn.className = "btn-watchparty-gold";
-        watchPartyBtn.textContent = "🎬 Совместный просмотр";
-        watchPartyBtn.onclick = () => { saveMusicPositionBeforeLeaving(); location.href = "w2g/"; };
-        app.appendChild(watchPartyBtn);
-
-        // Разделитель перед чатом/комментариями
-        let hrBeforeChat = document.createElement("hr");
-        hrBeforeChat.className = "neon-divider";
-        app.appendChild(hrBeforeChat);
-
-        let chatBtn = document.createElement("button");
-        chatBtn.className = "btn-chat-purple";
-        chatBtn.textContent = "💬 Чат";
-        chatBtn.onclick = () => showChatScreen();
-        app.appendChild(chatBtn);
-
-        let allCommentsBtn = document.createElement("button");
-        allCommentsBtn.className = "btn-chat-purple";
-        allCommentsBtn.textContent = "🗨️ Комментарии";
-        allCommentsBtn.onclick = () => showAllCommentsScreen();
-        app.appendChild(allCommentsBtn);
-
-        // Сплиттер перед разделом игр
-        let hrBeforeGames = document.createElement("hr");
-        hrBeforeGames.className = "neon-divider";
-        app.appendChild(hrBeforeGames);
-
-        let gamesBtn = document.createElement("button");
-        gamesBtn.className = "btn-games-green";
-        gamesBtn.textContent = "🕹️ Игры";
-        gamesBtn.onclick = () => { saveMusicPositionBeforeLeaving(); location.href = "games/"; };
-        app.appendChild(gamesBtn);
-
-        // Рандомайзер — сразу после "Игр"
-        let randomizerBtn = document.createElement("button");
-        randomizerBtn.className = "btn-randomizer-cyan";
-        randomizerBtn.textContent = "🎲 Рандомайзер";
-        randomizerBtn.onclick = () => showRandomizerModal();
-        app.appendChild(randomizerBtn);
-        randomizerRendered = true;
-
-        // Разделитель перед "Будем смотреть"/"Просмотрено"
-        let hrBeforeWatchLists = document.createElement("hr");
-        hrBeforeWatchLists.className = "neon-divider";
-        app.appendChild(hrBeforeWatchLists);
-        }
-    }
-
-    if (compactModeEnabled) {
-        // "Календарь" + "Будем смотреть" + "Просмотрено" объединены в одну
-        // плашку "🔖 Закладки" — она открывает свою мини-колоду с этими
-        // тремя разделами (см. showCompactBookmarksScreen()). Без счётчика:
-        // плашка ведёт сразу к трём разным вещам, конкретные числа — уже
-        // внутри, на карточках "Будем смотреть"/"Просмотрено".
-        compactGrid.appendChild(buildCompactTile("🔖 Закладки", () => showCompactBookmarksScreen(), "compact-tile-pink"));
-    } else {
-        // Кнопка "Календарь" — сразу перед "Будем смотреть"
-        let calendarBtn = document.createElement("button");
-        calendarBtn.id = "calendarMainBtn";
-        calendarBtn.className = "btn-pink-style";
-        calendarBtn.textContent = "📅 Календарь";
-        calendarBtn.onclick = () => {
-            showCalendarScreen();
-        };
-        app.appendChild(calendarBtn);
-
-        let wishlistBtn = document.createElement("button");
-        wishlistBtn.id = "wishlistMainBtn";
-        wishlistBtn.className = "btn-pink-style";
-        wishlistBtn.textContent = "🍿 Будем смотреть (" + wishlistTitles.size + ")";
-        wishlistBtn.onclick = () => {
-            renderWishlistFolder();
-        };
-        app.appendChild(wishlistBtn);
-
-        // Кнопка "Просмотрено" на главной — ведёт в папку с 3 подкатегориями
-        // (мной / партнёром / нами)
-        let watchedBtn = document.createElement("button");
-        watchedBtn.id = "watchedMainBtn";
-        watchedBtn.className = "btn-pink-style";
-        const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
-        watchedBtn.textContent = "🎬 Просмотрено (" + totalWatchedCount + ")";
-        watchedBtn.onclick = () => {
-            renderWatchedTop();
-        };
-        app.appendChild(watchedBtn);
-    }
-
-    // Секретная категория — в самом низу страницы (за разделителем в
-    // обычном режиме; в компактном — просто следующими плашками в сетке)
-    if (secretKeys.length > 0) {
-        if (compactModeEnabled) {
-            secretKeys.forEach(key => {
-                compactGrid.appendChild(buildCompactTile(key, () => { currentCategoryName = key; openData(dbData[key], true); }, "compact-tile-gold"));
-            });
-        } else {
-            let hrBeforeSecret = document.createElement("hr");
-            hrBeforeSecret.className = "neon-divider";
-            app.appendChild(hrBeforeSecret);
-
-            secretKeys.forEach(key => {
-                let button = document.createElement("button");
-                button.textContent = key;
-                button.classList.add("btn-secret-gold");
-                button.onclick = () => { currentCategoryName = key; openData(dbData[key], true); };
-                app.appendChild(button);
-            });
-        }
-    }
-
-    // Рандомайзер уже отрисован выше, сразу после "Игр" (см.
-    // randomizerRendered) — если пользователь не залогинен (значит, там его
-    // не было, потому что не было и "Игр"), подстраховываемся и всё равно
-    // показываем его здесь, в конце.
-    if (!randomizerRendered) {
-        if (compactModeEnabled) {
-            compactGrid.appendChild(buildCompactTile("🎲 Рандомайзер", () => showRandomizerModal(), "compact-tile-cyan"));
-        } else {
-            let randomizerBtn = document.createElement("button");
-            randomizerBtn.className = "btn-randomizer-cyan";
-            randomizerBtn.textContent = "🎲 Рандомайзер";
-            randomizerBtn.onclick = () => showRandomizerModal();
-            app.appendChild(randomizerBtn);
-        }
-    }
 }
 
-// ==========================================
-// 🗂️ КОМПАКТНЫЙ РЕЖИМ — листаемая колода карточек
-// ==========================================
-// Общий строительный блок для двух экранов: верхнего уровня "Каталог"
-// (категории + "Новое на сайте" + функции "Добавить тайтл"/"Онлайн Поиск",
-// см. showCompactCatalogScreen()) и списка жанров внутри категории (см.
-// ветку compactModeEnabled в openData() ниже). items — массив вида
-// [{ emoji, label, count|null, onClick }]. Свайп на телефоне работает
-// нативной горизонтальной прокруткой со scroll-snap (см. .swipe-deck в
-// style.css) — надёжнее и проще самодельного drag-обработчика; стрелки по
-// бокам и точки-индикаторы достроены поверх той же прокрутки.
-function buildSwipeDeck(items) {
-    const wrap = document.createElement("div");
-    wrap.className = "swipe-deck-wrap";
-
-    const deck = document.createElement("div");
-    deck.className = "swipe-deck";
-
-    items.forEach(item => {
-        const card = document.createElement("div");
-        card.className = "swipe-card";
-        card.setAttribute("role", "button");
-        card.tabIndex = 0;
-        card.innerHTML = `
-            <span class="swipe-card-emoji">${item.emoji}</span>
-            <span class="swipe-card-label">${escapeHtml(item.label)}</span>
-            ${item.count != null ? `<span class="swipe-card-count">${item.count} тайтлов</span>` : ""}
-        `;
-        card.onclick = () => item.onClick();
-        card.onkeydown = (e) => {
-            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); item.onClick(); }
-        };
-        deck.appendChild(card);
-    });
-
-    wrap.appendChild(deck);
-
-    // Стрелки пролистывания по бокам — листают ровно на одну карточку вперёд/назад
-    const scrollByCards = (dir) => {
-        const card = deck.querySelector(".swipe-card");
-        if (!card) return;
-        const gap = parseFloat(getComputedStyle(deck).columnGap || getComputedStyle(deck).gap || "0") || 0;
-        const step = card.getBoundingClientRect().width + gap;
-        deck.scrollBy({ left: dir * step, behavior: "smooth" });
-    };
-
-    if (items.length > 1) {
-        let prevBtn = document.createElement("button");
-        prevBtn.type = "button";
-        prevBtn.className = "swipe-arrow swipe-arrow-prev";
-        prevBtn.setAttribute("aria-label", "Предыдущая карточка");
-        prevBtn.textContent = "‹";
-        prevBtn.onclick = () => scrollByCards(-1);
-
-        let nextBtn = document.createElement("button");
-        nextBtn.type = "button";
-        nextBtn.className = "swipe-arrow swipe-arrow-next";
-        nextBtn.setAttribute("aria-label", "Следующая карточка");
-        nextBtn.textContent = "›";
-        nextBtn.onclick = () => scrollByCards(1);
-
-        wrap.appendChild(prevBtn);
-        wrap.appendChild(nextBtn);
-
-        // Точки-индикаторы текущей позиции — подсвечиваются по прокрутке
-        const dots = document.createElement("div");
-        dots.className = "swipe-dots";
-        items.forEach(() => dots.appendChild(document.createElement("span")));
-        Array.from(dots.children).forEach(d => d.classList.add("swipe-dot"));
-        wrap.appendChild(dots);
-
-        const dotEls = Array.from(dots.children);
-        dotEls[0].classList.add("swipe-dot-active");
-        let rafPending = false;
-        deck.addEventListener("scroll", () => {
-            if (rafPending) return;
-            rafPending = true;
-            requestAnimationFrame(() => {
-                rafPending = false;
-                const card = deck.querySelector(".swipe-card");
-                if (!card) return;
-                const gap = parseFloat(getComputedStyle(deck).columnGap || getComputedStyle(deck).gap || "0") || 0;
-                const step = card.getBoundingClientRect().width + gap;
-                const idx = step > 0 ? Math.round(deck.scrollLeft / step) : 0;
-                dotEls.forEach((d, i) => d.classList.toggle("swipe-dot-active", i === idx));
-            });
-        }, { passive: true });
-    }
-
-    return wrap;
+// Открывает категорию каталога "с нуля" — из меню, плиток главной или вкладок
+function openCategory(key) {
+    if (!dbData[key]) return;
+    resetScreenState();
+    clearNavHistory();
+    currentCategoryName = key;
+    openData(dbData[key], true);
 }
 
-// Экран верхнего уровня "Каталог" — то, что открывает кнопка "🗂️ Каталог"
-// на главной в компактном режиме. Использует ту же "отметку" в history, что
-// и Паутинка (см. PAUTINKA_HISTORY_MARKER/showPautinka() и обработку в
-// goBack() ниже) — COMPACT_CATALOG_HISTORY_MARKER, — чтобы "⬅️ Назад" со
-// экрана жанров категории (открытой отсюда) возвращал именно в "Каталог",
-// а не сразу на главную. fromHistory=true — экран перерисован кнопкой
-// "Назад" (отметка уже лежит в history, повторно её добавлять не нужно).
-const COMPACT_CATALOG_HISTORY_MARKER = Symbol("compactCatalog");
-
-function showCompactCatalogScreen(fromHistory = false) {
-    startTransitionLock();
-    isChatScreenOpen = false;
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
+// Пункты бокового меню / вкладок / шторки "Ещё" (см. shell.js).
+// Возвращает true, если пункт обработан здесь, на главной странице.
+function navigateFromShell(id) {
+    if (id.startsWith("category:")) {
+        openCategory(id.slice("category:".length));
+        return true;
     }
-
-    if (!fromHistory) {
-        // Тот же приём, что и в openData()/showPautinka(): перед добавлением
-        // нового шага запоминаем страницу пагинации экрана, с которого
-        // уходим (см. объявление pageHistory), затем кладём свою отметку.
-        if (history.length > 0) {
-            pageHistory[history.length - 1] = catalogCurrentPage;
+    switch (id) {
+        case "home": showHome(); return true;
+        case "catalog": {
+            const { normal } = getOrderedCategoryKeys();
+            if (normal.length) openCategory(normal[0]);
+            return true;
         }
-        history.push(COMPACT_CATALOG_HISTORY_MARKER);
-        categoryHistory.push(null);
-        pageHistory.push(1);
-    }
-    currentCategoryName = null;
-
-    app.innerHTML = "";
-
-    let title = document.createElement("h1");
-    setEmojiTitle(title, "🗂️ Каталог");
-    app.appendChild(title);
-
-    const categoryPriorityOrder = ["Фильм", "Мультфильм", "Сериал", "Аниме"];
-    function getCategoryPriority(key) {
-        if (isSecretCategory(key)) return 1000;
-        for (let i = 0; i < categoryPriorityOrder.length; i++) {
-            if (key.includes(categoryPriorityOrder[i])) return i;
+        case "wishlist": resetScreenState(); clearNavHistory(); renderWishlistFolder(); return true;
+        case "watched": resetScreenState(); clearNavHistory(); renderWatchedTop(); return true;
+        case "calendar": resetScreenState(); clearNavHistory(); showCalendarScreen(); return true;
+        case "chat": resetScreenState(); clearNavHistory(); showChatScreen(); return true;
+        case "comments": resetScreenState(); clearNavHistory(); showAllCommentsScreen(); return true;
+        case "random": showRandomizerModal(); return true;
+        case "secret": {
+            const { secret } = getOrderedCategoryKeys();
+            if (secret.length) openCategory(secret[0]);
+            return true;
         }
-        return 500;
+        case "add": resetScreenState(); showBatchAddTitlesScreen(); return true;
+        case "online": resetScreenState(); showOnlineSearchScreen(); return true;
     }
-    const normalKeys = Object.keys(dbData)
-        .filter(key => !isSecretCategory(key))
-        .sort((a, b) => getCategoryPriority(a) - getCategoryPriority(b));
-
-    const items = normalKeys.map(key => ({
-        emoji: getCategoryEmoji(key),
-        label: stripLeadingEmoji(key) || key,
-        count: getAllTitlesFromCategory(dbData[key]).length,
-        onClick: () => { currentCategoryName = key; openData(dbData[key], true); }
-    }));
-
-    // "⭐ Новое на сайте" — та же карточка-функция, что и кнопка на главной
-    // в обычном режиме, только листаемая вместе с категориями.
-    if (normalKeys.length > 0) {
-        const recentlyAdded = getRecentlyAddedTitles();
-        if (recentlyAdded.length > 0) {
-            items.push({
-                emoji: "⭐",
-                label: "Новое на сайте",
-                count: recentlyAdded.length,
-                onClick: () => { currentCategoryName = null; openData(recentlyAdded, true, "⭐ Новое на сайте"); }
-            });
-        }
-    }
-
-    // "Функции" (по терминологии из ТЗ) — добавление тайтла и онлайн-поиск,
-    // тоже карточками в той же колоде.
-    if (currentUser && normalKeys.length > 0) {
-        items.push({ emoji: "➕", label: "Добавить тайтл", count: null, onClick: () => showBatchAddTitlesScreen() });
-        items.push({ emoji: "🔍", label: "Онлайн Поиск", count: null, onClick: () => showOnlineSearchScreen() });
-    }
-
-    if (items.length > 0) {
-        app.appendChild(buildSwipeDeck(items));
-    } else {
-        let empty = document.createElement("p");
-        empty.style.textAlign = "center";
-        empty.style.color = "#999";
-        empty.textContent = "Каталог пока пуст.";
-        app.appendChild(empty);
-    }
-
-    addNavigation();
+    return false; // w2g / games — отдельные страницы
 }
 
-// Экран "🔖 Закладки" (компактный режим) — объединяет "Календарь",
-// "Будем смотреть" и "Просмотрено" в одну листаемую колоду карточек, той же
-// природы, что и "Каталог" выше. В отличие от "Каталога" (который ведёт в
-// openData()/историю), все три раздела здесь и так живут вне общей history
-// — у них своя навигация (см. комментарий над WATCHED_BUCKETS) — поэтому
-// собственной history-отметки не требуется: достаточно передать им
-// cameFromBookmarks=true, и их "⬅️ Назад" сама укажет сюда же
-// (renderWishlistFolder()/showCalendarScreen()/renderWatchedTop() выше).
-function showCompactBookmarksScreen() {
-    startTransitionLock();
-    isChatScreenOpen = false;
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
+// Диплинк с других страниц сайта (../#wishlist, ../#category:...) — оболочка
+// на Играх/Совместном просмотре ведёт сюда для разделов главной
+function openScreenFromHash() {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id) return false;
+    window.history.replaceState(null, "", location.pathname + location.search);
+    if (id === "home") return false;
+    if (id.startsWith("category:") && !dbData[id.slice("category:".length)]) return false;
+    // Рандомайзер — окно, а не экран: под ним должна быть главная
+    if (id === "random") {
+        showHome().then(() => showRandomizerModal());
+        return true;
     }
-    currentCategoryName = null;
-
-    app.innerHTML = "";
-
-    let title = document.createElement("h1");
-    setEmojiTitle(title, "🔖 Закладки");
-    app.appendChild(title);
-
-    const totalWatchedCount = watchedTitlesMine.size + watchedTitlesPartner.size + watchedTitlesBoth.size;
-    const items = [
-        { emoji: "📅", label: "Календарь", count: null, onClick: () => showCalendarScreen(true) },
-        { emoji: "🍿", label: "Будем смотреть", count: wishlistTitles.size, onClick: () => renderWishlistFolder(true) },
-        { emoji: "🎬", label: "Просмотрено", count: totalWatchedCount, onClick: () => renderWatchedTop(true) }
-    ];
-    app.appendChild(buildSwipeDeck(items));
-
-    renderWatchedNav(null);
+    return navigateFromShell(id);
 }
 
-// ==========================================
-// РАНДОМАЙЗЕР — КОЛЕСО ФОРТУНЫ
-// ==========================================
-// Палитра секторов колеса — переиспользуем неоновые токены темы, чтобы
-// колесо не выбивалось из общего стиля страницы.
-const RANDOMIZER_WHEEL_COLORS = ["#ff2e93", "#8b3bff", "#2ee8ff", "#ffd15c", "#ff7fc4", "#5a1fb0"];
-
-// Отрисовка секторов колеса на канвасе под текущий список позиций.
-// Сектор 0 всегда начинается строго сверху (там же, где неподвижный
-// указатель) и дальше идёт по часовой стрелке — это упрощает расчёт угла
-// поворота при прокрутке в spin().
-//
-// Раньше размер шрифта задавался в внутренних пикселях канваса (520×520),
-// а сам канвас на экране растягивался всего до ~230×230 (см. .randomizer-wheel-canvas
-// в CSS) — то есть текст, "нарисованный" как будто бы 19px, реально
-// показывался на экране примерно 8px. Теперь канвас подгоняется под
-// devicePixelRatio, а всё рисование ведётся в реальных экранных пикселях
-// (ctx.setTransform), поэтому размер шрифта, который мы задаём, — это и
-// есть видимый размер. Дополнительно размер шрифта подбирается для каждого
-// слова отдельно: сначала прикидывается по угловой ширине сектора (меньше
-// секторов — крупнее шрифт), затем ещё уменьшается, только если конкретное
-// слово реально не помещается по радиусу (ctx.measureText), а не по
-// количеству символов "на глаз", как было раньше.
-function drawRandomizerWheel(canvas, items) {
-    const stage = canvas.closest(".randomizer-wheel-stage");
-    const rect = (stage || canvas).getBoundingClientRect();
-    const displaySize = Math.max(120, Math.round(rect.width) || 230);
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    // Внутреннее разрешение канваса — под реальный размер на экране и
-    // плотность пикселей устройства (чёткость на retina), а рисуем дальше
-    // в координатах "как на экране" через setTransform.
-    canvas.width = displaySize * dpr;
-    canvas.height = displaySize * dpr;
-
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const size = displaySize;
-    const center = size / 2;
-    const radius = center - 3;
-    const hubRadius = size * 0.09; // радиус центральной втулки (см. .randomizer-wheel-hub) — текст не должен на неё наезжать
-    const textStart = radius - 8;       // ближе к внешнему краю колеса
-    const textEnd = hubRadius + 12;     // не долезаем до втулки
-    const maxTextWidth = Math.max(20, textStart - textEnd);
-    const segAngle = (Math.PI * 2) / items.length;
-
-    const MAX_FONT = 26;
-    const MIN_FONT = 10;
-
-    ctx.clearRect(0, 0, size, size);
-
-    items.forEach((item, i) => {
-        const startAngle = i * segAngle - Math.PI / 2;
-        const endAngle = startAngle + segAngle;
-
-        ctx.beginPath();
-        ctx.moveTo(center, center);
-        ctx.arc(center, center, radius, startAngle, endAngle);
-        ctx.closePath();
-        ctx.fillStyle = RANDOMIZER_WHEEL_COLORS[i % RANDOMIZER_WHEEL_COLORS.length];
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "rgba(10,6,19,0.85)";
-        ctx.stroke();
-
-        // Прикидка стартового размера шрифта по угловой ширине сектора —
-        // чем меньше позиций введено, тем крупнее текст (до MAX_FONT).
-        const wedgeThickness = segAngle * (textStart + textEnd) / 2;
-        let fontSize = Math.min(MAX_FONT, Math.max(MIN_FONT, wedgeThickness * 0.82));
-
-        ctx.font = `700 ${fontSize}px 'Jura', 'Segoe UI', Arial, sans-serif`;
-        let textWidth = ctx.measureText(item).width;
-
-        // А дальше уменьшаем, только если конкретное слово реально не
-        // помещается по длине сектора — короткие слова крупный шрифт не теряют.
-        while (textWidth > maxTextWidth && fontSize > MIN_FONT) {
-            fontSize -= 1;
-            ctx.font = `700 ${fontSize}px 'Jura', 'Segoe UI', Arial, sans-serif`;
-            textWidth = ctx.measureText(item).width;
-        }
-
-        let label = item;
-        if (textWidth > maxTextWidth) {
-            // Даже минимальным шрифтом целиком не влезает — обрезаем с многоточием
-            while (label.length > 1 && ctx.measureText(label + "…").width > maxTextWidth) {
-                label = label.slice(0, -1);
-            }
-            label = label + "…";
-        }
-
-        // Подпись сектора — читается от центра к краю колеса
-        ctx.save();
-        ctx.translate(center, center);
-        ctx.rotate(startAngle + segAngle / 2);
-        ctx.textAlign = "right";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "#f2e9ff";
-        ctx.shadowColor = "rgba(0,0,0,0.65)";
-        ctx.shadowBlur = 3;
-        ctx.fillText(label, textStart, 0);
-        ctx.restore();
-    });
-
-    // Внешний неоновый обод колеса
-    ctx.beginPath();
-    ctx.arc(center, center, radius, 0, Math.PI * 2);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(46,232,255,0.55)";
-    ctx.stroke();
-}
-
-// Световые искры, разлетающиеся из центра колеса в момент остановки —
-// вместе с randomizer-wheel-glow-burst (CSS) и вспышкой на самом колесе
-// это и есть "красивый световой эффект в конце".
-function spawnRandomizerSparks(container) {
-    const SPARK_COUNT = 20;
-    const colors = ["#ffd15c", "#2ee8ff", "#ff2e93", "#ffffff"];
-
-    for (let i = 0; i < SPARK_COUNT; i++) {
-        const spark = document.createElement("div");
-        spark.className = "randomizer-spark";
-
-        const angle = Math.random() * Math.PI * 2;
-        const distance = 60 + Math.random() * 90;
-        const color = colors[Math.floor(Math.random() * colors.length)];
-
-        spark.style.setProperty("--spark-x", (Math.cos(angle) * distance) + "px");
-        spark.style.setProperty("--spark-y", (Math.sin(angle) * distance) + "px");
-        spark.style.background = color;
-        spark.style.boxShadow = `0 0 8px ${color}`;
-        spark.style.animationDelay = (Math.random() * 0.15) + "s";
-
-        container.appendChild(spark);
-        setTimeout(() => spark.remove(), 1400);
-    }
-}
-
-// Модалка "Рандомайзер": пользователь вводит позиции через запятую
-// (пробелы вокруг запятых игнорируются), колесо крутится ~5 секунд и
-// останавливается на случайно выбранной позиции со световым эффектом.
-function showRandomizerModal() {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.id = "randomizerModal";
-    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-
-    overlay.innerHTML = `
-        <div class="modal-content randomizer-modal-content">
-            <h3>🎲 Рандомайзер</h3>
-            <div class="modal-form">
-                <textarea
-                    id="randomizerInput"
-                    class="randomizer-textarea"
-                    rows="3"
-                    placeholder="Позиции через запятую, например: кола, пепси, фанта"
-                ></textarea>
-            </div>
-            <div class="randomizer-wheel-area" id="randomizerWheelArea">
-                <div class="randomizer-wheel-stage" id="randomizerWheelStage">
-                    <div class="randomizer-wheel-glow" id="randomizerWheelGlow"></div>
-                    <div class="randomizer-sparks" id="randomizerSparks"></div>
-                    <div class="randomizer-wheel-pointer"></div>
-                    <canvas id="randomizerWheelCanvas" class="randomizer-wheel-canvas" width="520" height="520"></canvas>
-                    <div class="randomizer-wheel-hub">🎲</div>
-                </div>
-            </div>
-            <div id="randomizerResult" class="randomizer-result"></div>
-            <div class="modal-buttons">
-                <button type="button" class="btn-save" id="randomizerPickBtn">🎡 Рандом</button>
-                <button type="button" class="btn-cancel" id="randomizerCloseBtn">Закрыть</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const inputEl = overlay.querySelector("#randomizerInput");
-    const resultEl = overlay.querySelector("#randomizerResult");
-    const wheelArea = overlay.querySelector("#randomizerWheelArea");
-    const wheelStage = overlay.querySelector("#randomizerWheelStage");
-    const canvas = overlay.querySelector("#randomizerWheelCanvas");
-    const glowEl = overlay.querySelector("#randomizerWheelGlow");
-    const sparksEl = overlay.querySelector("#randomizerSparks");
-    const pickBtn = overlay.querySelector("#randomizerPickBtn");
-    inputEl.focus();
-
-    const SPIN_DURATION_MS = 5000;
-    // Накопительный угол поворота колеса. Каждая новая прокрутка прибавляется
-    // к нему, а не сбрасывается на 0 — колесо всегда крутится только вперёд,
-    // без "отмотки" назад к началу перед следующим спином.
-    let currentRotation = 0;
-    let isSpinning = false;
-
-    pickBtn.onclick = () => {
-        if (isSpinning) return;
-
-        // Разделитель — запятая, пробелы вокруг позиций игнорируются,
-        // пустые позиции (двойные запятые, висящая запятая в конце) — тоже.
-        const items = inputEl.value
-            .split(",")
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
-
-        if (items.length === 0) {
-            resultEl.classList.remove("randomizer-result-hit");
-            resultEl.textContent = "Сначала введи хотя бы одну позицию через запятую";
-            return;
-        }
-
-        // Сброс визуальных следов предыдущей прокрутки
-        resultEl.classList.remove("randomizer-result-hit");
-        resultEl.textContent = "";
-        glowEl.classList.remove("randomizer-wheel-glow-burst");
-        wheelStage.classList.remove("randomizer-wheel-stage-flash");
-        sparksEl.innerHTML = "";
-
-        wheelArea.classList.add("randomizer-wheel-area-visible");
-        drawRandomizerWheel(canvas, items);
-
-        const winnerIndex = Math.floor(Math.random() * items.length);
-        const segAngleDeg = 360 / items.length;
-        // Небольшое случайное смещение внутри сектора-победителя —
-        // указатель не всегда останавливается ровно по центру сектора,
-        // как и на настоящем колесе фортуны.
-        const jitter = (Math.random() - 0.5) * segAngleDeg * 0.7;
-        const winnerCenterDeg = winnerIndex * segAngleDeg + segAngleDeg / 2 + jitter;
-
-        // Указатель неподвижен и смотрит строго вверх (0°). Считаем, на
-        // сколько градусов довернуть колесо вперёд, чтобы сектор-победитель
-        // оказался под ним, плюс несколько полных оборотов для эффектности.
-        const targetMod = (360 - winnerCenterDeg + 360) % 360;
-        const currentMod = ((currentRotation % 360) + 360) % 360;
-        const fullSpins = 6;
-        const delta = fullSpins * 360 + ((targetMod - currentMod + 360) % 360);
-        currentRotation += delta;
-
-        isSpinning = true;
-        pickBtn.disabled = true;
-        pickBtn.style.opacity = "0.6";
-        pickBtn.style.cursor = "not-allowed";
-        pickBtn.textContent = "🎡 Крутится...";
-
-        canvas.style.transition = `transform ${SPIN_DURATION_MS / 1000}s cubic-bezier(0.16, 0.72, 0.14, 1)`;
-        canvas.style.transform = `rotate(${currentRotation}deg)`;
-
-        setTimeout(() => {
-            isSpinning = false;
-            pickBtn.disabled = false;
-            pickBtn.style.opacity = "1";
-            pickBtn.style.cursor = "pointer";
-            pickBtn.textContent = "🎡 Ещё раз";
-
-            const pick = items[winnerIndex];
-            resultEl.textContent = "🎯 " + pick;
-            resultEl.classList.add("randomizer-result-hit");
-
-            // Световой эффект в момент остановки: вспышка на самом колесе,
-            // расширяющееся радиальное свечение и разлетающиеся искры.
-            void wheelStage.offsetWidth;
-            wheelStage.classList.add("randomizer-wheel-stage-flash");
-            glowEl.classList.add("randomizer-wheel-glow-burst");
-            spawnRandomizerSparks(sparksEl);
-        }, SPIN_DURATION_MS);
-    };
-
-    overlay.querySelector("#randomizerCloseBtn").onclick = () => overlay.remove();
-}
+// Рандомайзер (колесо фортуны) живёт в randomizer.js — он общий для всех страниц
 
 // Отрисовка строки элемента (тайтла)
 // Простой обработчик "долгого нажатия" для одного конкретного элемента
@@ -3054,7 +2525,7 @@ function renderFranchiseCard(franchiseName, franchiseTitles, container) {
 
     let card = document.createElement("div");
     card.className = "catalog-card catalog-card-franchise";
-    card.onclick = () => openData(franchiseTitles, true);
+    card.onclick = () => openData(franchiseTitles, true, "🎞️ " + franchiseName);
 
     let posterWrap = document.createElement("div");
     posterWrap.className = "cc-poster-wrap cc-poster-franchise";
@@ -3112,9 +2583,20 @@ function renderItemRow(itemText, container) {
             let textSpan = document.createElement("span");
             textSpan.className = "dev-plaque-text";
             textSpan.textContent = displayText;
+            const role = document.createElement("span");
+            role.className = "dev-plaque-role";
+            role.textContent = "Сделал этот сайт с любовью";
+            textSpan.appendChild(role);
             itemDiv.appendChild(textSpan);
         } else {
             itemDiv.classList.add("secret-scratch-card");
+
+            // Карточки идут подряд в одном контейнере — номер считаем по уже добавленным
+            const noteNum = container.querySelectorAll(".secret-scratch-card").length + 1;
+            let numSpan = document.createElement("span");
+            numSpan.className = "secret-note-num";
+            numSpan.textContent = `Записка №${noteNum}`;
+            itemDiv.appendChild(numSpan);
 
             let textSpan = document.createElement("span");
             textSpan.className = "secret-scratch-text";
@@ -3166,13 +2648,11 @@ function renderItemRow(itemText, container) {
         posterWrap.appendChild(badge);
     }
 
-    // Долгое нажатие на постер → единая модалка тайтла (Трейлер/Комментарии/
-    // Кинопоиск ID). Короткое нажатие ничего не делает — сознательно, чтобы
-    // не было двух разных способов открыть одно и то же меню.
+    // Тап (и, по старой привычке, долгое нажатие) по постеру → карточка тайтла
     attachLongPress(
         posterWrap,
         () => showActionMenu(itemText),
-        null
+        () => showActionMenu(itemText)
     );
 
     card.appendChild(posterWrap);
@@ -3277,7 +2757,7 @@ function fitSecretTextToOneLine(wrapperEl, cardWidth) {
     const textEl = wrapperEl.querySelector(".secret-scratch-text");
     if (!textEl) return;
 
-    const maxFontSize = 20; // базовый размер, как у обычных карточек .item
+    const maxFontSize = 22;
     const minFontSize = 11; // дальше уже не уменьшаем, чтобы не превратить в нечитаемую строку
     const availableWidth = Math.max(20, cardWidth - 40); // за вычетом отступов карточки
 
@@ -3287,6 +2767,22 @@ function fitSecretTextToOneLine(wrapperEl, cardWidth) {
     while (textEl.scrollWidth > availableWidth && fontSize > minFontSize) {
         fontSize -= 1;
         textEl.style.fontSize = fontSize + "px";
+    }
+}
+
+// Сердечки, вылетающие из только что открытой записки
+function spawnSecretHearts(cardEl) {
+    const HEARTS = ["❤️", "💕", "💖", "💗", "✨"];
+    for (let i = 0; i < 14; i++) {
+        const heart = document.createElement("span");
+        heart.className = "secret-heart";
+        heart.textContent = HEARTS[i % HEARTS.length];
+        heart.style.left = (10 + Math.random() * 80) + "%";
+        heart.style.setProperty("--dx", (Math.random() * 120 - 60) + "px");
+        heart.style.setProperty("--dy", (-60 - Math.random() * 90) + "px");
+        heart.style.animationDelay = (Math.random() * 0.25) + "s";
+        cardEl.appendChild(heart);
+        setTimeout(() => heart.remove(), 1600);
     }
 }
 
@@ -3305,27 +2801,41 @@ function setupScratchCard(wrapperEl, canvasEl) {
         ctx.clearRect(0, 0, w, h);
 
         const grad = ctx.createLinearGradient(0, 0, w, h);
-        grad.addColorStop(0, "#4a1942");
-        grad.addColorStop(0.5, "#8a2d5e");
-        grad.addColorStop(1, "#3a1240");
+        grad.addColorStop(0, "#5b1747");
+        grad.addColorStop(0.5, "#9b2c6c");
+        grad.addColorStop(1, "#45155a");
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
 
-        // Диагональные блики, как у настоящей скретч-фольги
-        ctx.strokeStyle = "rgba(255, 215, 130, 0.16)";
-        ctx.lineWidth = 3;
-        for (let x = -h; x < w; x += 14) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x + h, h);
-            ctx.stroke();
-        }
-
-        ctx.fillStyle = "rgba(255, 221, 150, 0.95)";
-        ctx.font = "600 13px sans-serif";
+        // Россыпь сердечек и блёсток — детерминированно по размеру карточки,
+        // чтобы при перерисовке узор не "прыгал"
+        let seed = Math.round(w * 7 + h * 13);
+        const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
+        for (let i = 0; i < Math.round(w * h / 900); i++) {
+            const x = rand() * w, y = rand() * h;
+            if (rand() < 0.35) {
+                ctx.font = `${10 + rand() * 8}px sans-serif`;
+                ctx.globalAlpha = 0.18 + rand() * 0.2;
+                ctx.fillStyle = "#ffd1e8";
+                ctx.fillText("♥", x, y);
+            } else {
+                ctx.globalAlpha = 0.25 + rand() * 0.5;
+                ctx.fillStyle = "#ffe3a3";
+                ctx.beginPath();
+                ctx.arc(x, y, 0.8 + rand() * 1.4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = "rgba(255, 228, 170, 0.98)";
+        ctx.font = "700 15px 'Manrope', sans-serif";
+        ctx.shadowColor = "rgba(0,0,0,0.35)";
+        ctx.shadowBlur = 6;
         ctx.fillText("✨ Погладь Меня ✨", w / 2, h / 2);
+        ctx.shadowBlur = 0;
     }
 
     function sizeCanvas() {
@@ -3380,6 +2890,8 @@ function setupScratchCard(wrapperEl, canvasEl) {
         canvasEl.style.transition = "opacity 0.35s ease";
         canvasEl.style.opacity = "0";
         vibrate([40, 30, 60]);
+        wrapperEl.classList.add("secret-revealed");
+        spawnSecretHearts(wrapperEl);
         setTimeout(() => canvasEl.remove(), 380);
     }
 
@@ -3413,36 +2925,6 @@ function setupScratchCard(wrapperEl, canvasEl) {
 }
 
 // Всплывающее меню выбора действия
-// Ищет постер тайтла на TMDB (сначала как фильм, потом как сериал)
-async function fetchTmdbPoster(itemText) {
-    const match = itemText.match(/^(.*)\s\((\d{4})\)$/);
-    const title = match ? match[1] : itemText;
-    const year = match ? match[2] : null;
-
-    try {
-        const movieParams = { query: title };
-        if (year) movieParams.year = year;
-        let res = await tmdbFetch("/search/movie", movieParams);
-        let json = await res.json();
-        let result = json.results && json.results[0];
-
-        if (!result) {
-            const tvParams = { query: title };
-            if (year) tvParams.first_air_date_year = year;
-            res = await tmdbFetch("/search/tv", tvParams);
-            json = await res.json();
-            result = json.results && json.results[0];
-        }
-
-        if (result && result.poster_path) {
-            return TMDB_IMG_BASE + result.poster_path;
-        }
-        return null;
-    } catch (e) {
-        console.error("Ошибка при запросе постера с TMDB:", e);
-        return null;
-    }
-}
 
 
 // Ищет тайтл на Кинопоиске по названию+году через метаданные kinopoisk.dev
@@ -3556,16 +3038,14 @@ function buildRatingsSummaryHtml(itemText) {
     return rows;
 }
 
+// Карточка тайтла — всё о нём в одном окне: постер, жанры, описание, оценки
+// обоих, статус в наших списках и все действия (раньше часть действий была
+// только кнопками на карточке каталога, а часть — только здесь).
 function showActionMenu(itemText) {
     if (itemText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || itemText.includes("Бакс Ориджинал")) return;
 
     // На некоторых устройствах долгое нажатие может сработать дважды подряд
-    // (например, от mousedown и touchstart одновременно) — тогда в DOM
-    // оказывались ДВЕ одинаковые модалки с одинаковыми id, и обработчики
-    // клика через getElementById привязывались к первой (уже невидимой),
-    // а пользователь видел вторую — из-за этого кнопки визуально были на
-    // месте, но не реагировали на нажатия.
-    // Удаляем предыдущую копию модалки тайтла, если она вдруг ещё осталась.
+    // (mousedown + touchstart) — не плодим две одинаковые модалки с одинаковыми id
     const existingMenu = document.getElementById("actionMenuModal");
     if (existingMenu) existingMenu.remove();
 
@@ -3574,52 +3054,74 @@ function showActionMenu(itemText) {
     overlay.id = "actionMenuModal";
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
+    const m = itemText.match(/^(.*)\s\((\d{4})\)$/);
+    const status = watchedTitles.has(itemText) ? "✓ Просмотрено"
+        : wishlistTitles.has(itemText) ? "🍿 Будем смотреть" : null;
+    const scheduled = scheduledByTitle[itemText] ? `📅 ${formatScheduledDateShort(scheduledByTitle[itemText])}` : null;
+
     overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 14px;" id="menuTitle"></h3>
-            <div id="amRatingsBox" class="am-ratings-box"></div>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
-                <button class="btn-pink-style" id="actTrailer">🎬 Трейлер на YouTube</button>
-                <button class="btn-pink-style" id="actComment">💬 Комментарии</button>
+        <div class="modal-content title-sheet">
+            <div class="ts-head">
+                <div class="ts-poster"><span>🎬</span></div>
+                <div class="ts-info">
+                    <h3 class="ts-title" id="menuTitle"></h3>
+                    <div class="ts-meta" id="tsMeta"></div>
+                    <div class="ts-badges">
+                        ${status ? `<span class="ts-badge">${status}</span>` : ""}
+                        ${scheduled ? `<span class="ts-badge ts-badge-gold">${scheduled}</span>` : ""}
+                    </div>
+                </div>
             </div>
-            <p id="kinopoiskIdBox" style="margin: 15px 0 5px; font-size: 13px; color: var(--text-dim);">🔎 Ищем Кинопоиск ID…</p>
-            <button class="btn-cancel-gray" id="actCancel" style="margin-top: 10px; width: 100%;">Отмена</button>
+            <p class="ts-overview" id="tsOverview"></p>
+            <div id="amRatingsBox" class="am-ratings-box"></div>
+            <div class="ts-actions">
+                <button type="button" class="ui-btn ts-action" id="actRate"><span>⭐</span>Оценить</button>
+                <button type="button" class="ui-btn ts-action" id="actLists"><span>🔖</span>В списки</button>
+                <button type="button" class="ui-btn ts-action" id="actComment"><span>💬</span>Комментарии</button>
+                <button type="button" class="ui-btn ts-action" id="actTrailer"><span>🎬</span>Трейлер</button>
+            </div>
+            <div class="ts-footer">
+                <span id="kinopoiskIdBox">Ищем на Кинопоиске…</span>
+                <button type="button" class="ui-btn ui-link" id="actEdit">✏️ Изменить</button>
+            </div>
         </div>
     `;
 
-    overlay.querySelector("#menuTitle").textContent = itemText;
+    overlay.querySelector("#menuTitle").textContent = m ? m[1] : itemText;
+    overlay.querySelector("#tsMeta").textContent = m ? m[2] : "";
     overlay.querySelector("#amRatingsBox").innerHTML = buildRatingsSummaryHtml(itemText);
     document.body.appendChild(overlay);
 
-    // Строка "Кинопоиск ID: ..." под кнопками — без ссылки, просто справочно
+    fetchTmdbCardMeta(itemText).then(meta => {
+        if (!meta || !overlay.isConnected) return;
+        if (meta.posterUrl) overlay.querySelector(".ts-poster").innerHTML = `<img src="${meta.posterUrl}" alt="">`;
+        if (meta.genreNames) overlay.querySelector("#tsMeta").textContent = [m && m[2], meta.genreNames].filter(Boolean).join(" · ");
+        overlay.querySelector("#tsOverview").textContent = meta.overview || "";
+    });
+
     findKinopoiskId(itemText).then(id => {
         if (!overlay.isConnected) return;
         const kpBox = overlay.querySelector("#kinopoiskIdBox");
-        if (!kpBox) return;
-        kpBox.textContent = id ? `Кинопоиск ID: ${id}` : "Кинопоиск ID не найден";
+        if (!id) {
+            kpBox.textContent = "На Кинопоиске не найден";
+            return;
+        }
+        kpBox.innerHTML = `<a href="https://www.kinopoisk.ru/film/${id}/" target="_blank" rel="noopener">Кинопоиск ↗</a> · ID ${id}`;
     });
 
-    overlay.querySelector("#actTrailer").onclick = () => {
-        overlay.remove();
+    // Каждое действие открывает своё окно вместо этого
+    const then = (fn) => () => { overlay.remove(); fn(); };
+    overlay.querySelector("#actRate").onclick = then(() => showRatingModal(itemText));
+    overlay.querySelector("#actLists").onclick = then(() => handleStarClick(itemText));
+    overlay.querySelector("#actComment").onclick = then(() => showCommentsModal(itemText));
+    overlay.querySelector("#actEdit").onclick = then(() => showEditDeleteModal(itemText));
+    overlay.querySelector("#actTrailer").onclick = then(() => {
         const query = encodeURIComponent(itemText + " трейлер");
         window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
-    };
-
-    overlay.querySelector("#actComment").onclick = () => {
-        overlay.remove();
-        showCommentsModal(itemText);
-    };
-
-    overlay.querySelector("#actCancel").onclick = () => {
-        overlay.remove();
-    };
+    });
 }
 
 
-// Лёгкая модалка "Изменить/Удалить" — открывается кнопкой-карандашом на
-// карточке. Сама логика (загрузка тайтла из БД для редактирования, удаление
-// со всеми связанными записями) не меняется — это handleEditClick/
-// handleDeleteClick, которые уже были и раньше вызывались из showActionMenu.
 function showEditDeleteModal(itemText) {
     const existingMenu = document.getElementById("editDeleteModal");
     if (existingMenu) existingMenu.remove();
@@ -3895,11 +3397,10 @@ async function showAllCommentsScreen() {
         chatPollInterval = null;
     }
     currentCategoryName = null;
-
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
+    setShellSection("comments");
 
     app.innerHTML = "";
+    app.appendChild(buildChatTabs("comments"));
 
     let title = document.createElement("h1");
     setEmojiTitle(title, "🗨️ Комментарии");
@@ -3907,29 +3408,18 @@ async function showAllCommentsScreen() {
 
     let container = document.createElement("div");
     container.id = "allCommentsContainer";
-    container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Загрузка...</p>`;
+    container.innerHTML = `<div class="ui-empty">Загрузка…</div>`;
     app.appendChild(container);
-
-    // Своя навигация (не трогает историю поиска/каталога) — как у экрана чата
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-
-    let homeBtn = document.createElement("button");
-    homeBtn.textContent = "🏠 Домой";
-    homeBtn.onclick = () => playVhsRewindTransition(showHome);
-    nav.appendChild(homeBtn);
-
-    let containerEl = document.querySelector(".container");
-    if (containerEl) {
-        containerEl.insertBefore(nav, containerEl.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
 
     await renderAllComments(container);
 }
 
-// Загружает и (пере)отрисовывает содержимое экрана "Комментарии"
+// Фильтр ленты комментариев: "all" | "mine" | "partner"
+let allCommentsFilter = "all";
+
+// Загружает и (пере)отрисовывает экран "Комментарии" — лента, свежие сверху,
+// с разделителями по дням. У каждого комментария — автор, время, текст и
+// плашка тайтла (тап по ней — карточка тайтла, по тексту — окно комментария).
 async function renderAllComments(container) {
     const allComments = await loadAllComments();
     if (!container.isConnected) return;
@@ -3937,99 +3427,108 @@ async function renderAllComments(container) {
     container.innerHTML = "";
 
     if (allComments.length === 0) {
-        container.innerHTML = `<p style="text-align:center;color:#9686b8;font-size:13px;">Комментариев пока нет.</p>`;
+        const empty = document.createElement("div");
+        empty.className = "ui-empty";
+        empty.innerHTML = `<span class="ui-empty-emoji">🗨️</span>`;
+        empty.appendChild(document.createTextNode("Комментариев пока нет. Оставить первый можно из карточки тайтла."));
+        container.appendChild(empty);
         return;
     }
 
-    // Группируем по названию тайтла, сохраняя порядок первого появления
-    const byTitle = {};
-    const titleOrder = [];
-    allComments.forEach(c => {
-        if (!byTitle[c.title]) {
-            byTitle[c.title] = [];
-            titleOrder.push(c.title);
+    const isMine = (c) => currentUser && c.user_id === currentUser.id;
+    const counts = {
+        all: allComments.length,
+        mine: allComments.filter(isMine).length,
+        partner: allComments.filter(c => !isMine(c)).length,
+    };
+
+    const chips = document.createElement("div");
+    chips.className = "chip-row";
+    [["all", "Все"], ["mine", "Мои"], ["partner", "Партнёра"]].forEach(([key, label]) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn chip" + (allCommentsFilter === key ? " active" : "");
+        btn.innerHTML = `<span>${label}</span><span class="chip-count">${counts[key]}</span>`;
+        btn.onclick = () => {
+            if (allCommentsFilter === key) return;
+            allCommentsFilter = key;
+            renderAllComments(container);
+        };
+        chips.appendChild(btn);
+    });
+    container.appendChild(chips);
+
+    const visible = allComments
+        .filter(c => allCommentsFilter === "all" || (allCommentsFilter === "mine") === isMine(c))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const feed = document.createElement("div");
+    feed.className = "comment-feed";
+    let lastDay = null;
+    visible.forEach(c => {
+        const day = toDateKey(new Date(c.created_at));
+        if (day !== lastDay) {
+            lastDay = day;
+            const sep = document.createElement("div");
+            sep.className = "comment-feed-day";
+            sep.textContent = formatFeedDay(day);
+            feed.appendChild(sep);
         }
-        byTitle[c.title].push(c);
+        feed.appendChild(buildCommentFeedItem(c, isMine(c), container));
     });
-
-    titleOrder.forEach(titleName => {
-        const group = document.createElement("div");
-        group.className = "comment-title-group";
-        group.style.marginBottom = "22px";
-
-        // Карточка тайтла слева + комментарии по нему справа (вместо
-        // прежнего текстового заголовка h3 над списком).
-        const row = document.createElement("div");
-        row.className = "ac-row";
-        row.appendChild(buildAcTitleCard(titleName));
-
-        const commentsCol = document.createElement("div");
-        commentsCol.className = "ac-comments-col";
-
-        byTitle[titleName].forEach(c => {
-            const bubble = document.createElement("div");
-            bubble.className = "ac-comment-card";
-            bubble.innerHTML = `
-                <div class="ac-comment-header"><span>${escapeHtml(c.username)}</span></div>
-                <div class="ac-comment-text"></div>
-            `;
-            bubble.querySelector(".ac-comment-text").textContent = c.comment;
-            // Изменить/удалить здесь больше нельзя — длинный комментарий
-            // тут же обрезается (line-clamp в CSS), чтобы не растягивать
-            // карточку далеко за пределы постера тайтла слева. Целиком
-            // текст + кнопки правки/удаления (только для своего комментария)
-            // — в отдельной модалке по тапу.
-            bubble.onclick = () => showCommentDetailModal(c, container);
-            commentsCol.appendChild(bubble);
-        });
-
-        row.appendChild(commentsCol);
-        group.appendChild(row);
-        container.appendChild(group);
-    });
+    if (visible.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "ui-empty";
+        empty.textContent = "Здесь пока пусто";
+        feed.appendChild(empty);
+    }
+    container.appendChild(feed);
 }
 
-// Мини-карточка тайтла слева от его комментариев на общем экране
-// "Комментарии" — постер подгружается лениво из того же кэша TMDB, что и у
-// обычных карточек каталога (fetchTmdbCardMeta), клик открывает единую
-// модалку тайтла (Трейлер/Комментарии/Кинопоиск ID).
-function buildAcTitleCard(titleName) {
-    const card = document.createElement("div");
-    card.className = "ac-title-card";
-    card.onclick = () => showActionMenu(titleName);
+function formatFeedDay(dateKey) {
+    const today = todayDateKey();
+    const yesterday = toDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    if (dateKey === today) return "Сегодня";
+    if (dateKey === yesterday) return "Вчера";
+    const d = parseDateKey(dateKey);
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return d.toLocaleDateString("ru-RU", sameYear ? { day: "numeric", month: "long" } : { day: "numeric", month: "long", year: "numeric" });
+}
 
-    const posterWrap = document.createElement("div");
-    posterWrap.className = "ac-title-poster-wrap";
+function buildCommentFeedItem(c, mine, container) {
+    const item = document.createElement("article");
+    item.className = "comment-feed-item" + (mine ? " comment-feed-mine" : "");
 
-    const posterImg = document.createElement("img");
-    posterImg.className = "ac-title-poster";
-    posterImg.alt = titleName;
-    posterImg.style.display = "none";
-    posterWrap.appendChild(posterImg);
+    const name = c.username || "Аноним";
+    const m = (c.title || "").match(/^(.*)\s\((\d{4})\)$/);
+    item.innerHTML = `
+        <div class="cf-avatar"></div>
+        <div class="cf-body">
+            <div class="cf-head">
+                <span class="cf-name"></span>
+                <span class="cf-time">${new Date(c.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            <div class="cf-text"></div>
+            <button type="button" class="ui-btn cf-title">
+                <span class="cf-title-poster">🎬</span>
+                <span class="cf-title-name"></span>
+                <span class="cf-title-year">${m ? m[2] : ""}</span>
+            </button>
+        </div>
+    `;
+    item.querySelector(".cf-avatar").textContent = name.slice(0, 1).toUpperCase();
+    item.querySelector(".cf-name").textContent = name;
+    item.querySelector(".cf-text").textContent = c.comment;
+    item.querySelector(".cf-title-name").textContent = m ? m[1] : c.title;
 
-    const posterPlaceholder = document.createElement("div");
-    posterPlaceholder.className = "ac-title-poster ac-title-poster-placeholder";
-    posterPlaceholder.textContent = "🎬";
-    posterWrap.appendChild(posterPlaceholder);
+    item.querySelector(".cf-text").onclick = () => showCommentDetailModal(c, container);
+    item.querySelector(".cf-title").onclick = () => showActionMenu(c.title);
 
-    card.appendChild(posterWrap);
-
-    const nameDiv = document.createElement("div");
-    nameDiv.className = "ac-title-name";
-    nameDiv.textContent = titleName.replace(/\s*\(\d{4}\)$/, "");
-    card.appendChild(nameDiv);
-
-    fetchTmdbCardMeta(titleName).then(meta => {
-        if (!card.isConnected) return;
-        if (meta && meta.posterUrl) {
-            posterImg.src = meta.posterUrl;
-            posterImg.loading = "lazy";
-            posterImg.style.display = "block";
-            posterPlaceholder.style.display = "none";
-        }
-    }).catch(() => {});
-
-    return card;
+    fetchTmdbCardMeta(c.title).then(meta => {
+        if (!meta || !meta.posterUrl || !item.isConnected) return;
+        item.querySelector(".cf-title-poster").innerHTML = `<img src="${meta.posterUrl}" alt="" loading="lazy">`;
+    });
+    return item;
 }
 
 // Модалка одного комментария на общем экране "Комментарии" — открывается
@@ -4224,14 +3723,7 @@ function buildPerPageBar(totalItems, onChange) {
 
 function openData(content, saveHistory = true, customTitle = null, preservePage = false) {
     startTransitionLock();
-    isChatScreenOpen = false;
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
-    }
+    resetScreenState();
     if (saveHistory) {
         // Перед тем как уйти вглубь (на новый экран поверх текущего),
         // запоминаем страницу пагинации, на которой находился текущий
@@ -4248,16 +3740,65 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
 
     app.innerHTML = "";
 
-    if (customTitle) {
+    // ---- Оболочка: активный раздел и "назад" ----
+    const categoryRoot = currentCategoryName && dbData[currentCategoryName] ? currentCategoryName : null;
+    const shellSection = categoryRoot
+        ? (isSecretCategory(categoryRoot) ? "secret" : "catalog")
+        : (currentCategoryName === "🔍 Результаты поиска" ? "search" : "list");
+    setShellSection(shellSection, shellSection === "secret" ? null : categoryRoot);
+    if (saveHistory) window.scrollTo(0, 0);
+    addNavigation();
+
+    // Экран категории: жанры больше не отдельный экран со списком кнопок —
+    // это чипы-фильтры над общей сеткой. "Все" — все тайтлы категории сразу.
+    let genreCtx = getGenreContext(content);
+    // В Секрете нет "Все" — сразу открывается первый раздел
+    if (genreCtx && genreCtx.active === null && isSecretCategory(currentCategoryName)) {
+        const firstKey = Object.keys(genreCtx.map)[0];
+        if (history[history.length - 1] === content) history[history.length - 1] = genreCtx.map[firstKey];
+        content = genreCtx.map[firstKey];
+        genreCtx = { map: genreCtx.map, active: firstKey };
+    }
+    const listContent = genreCtx && genreCtx.active === null ? flattenGenreMap(genreCtx.map) : content;
+
+    const titleText = customTitle || (categoryRoot && genreCtx ? categoryRoot : null);
+    if (titleText) {
+        const head = document.createElement("div");
+        head.className = "page-head";
         let title = document.createElement("h1");
-        setEmojiTitle(title, customTitle);
-        app.appendChild(title);
+        setEmojiTitle(title, titleText);
+        head.appendChild(title);
+        const total = getAllTitlesFromCategory(listContent).length;
+        if (total > 0 && !(categoryRoot && isSecretCategory(categoryRoot))) {
+            const meta = document.createElement("div");
+            meta.className = "page-head-meta";
+            meta.textContent = formatTitleCount(total);
+            head.appendChild(meta);
+        }
+        app.appendChild(head);
+        setShellTitle(stripLeadingEmoji(titleText) || titleText);
+    }
+
+    if (categoryRoot && genreCtx && isSecretCategory(categoryRoot)) {
+        const sub = document.createElement("p");
+        sub.className = "secret-sub";
+        sub.textContent = "Это только для тебя 💌";
+        app.appendChild(sub);
+    }
+
+    if (categoryRoot && genreCtx) {
+        if (!isSecretCategory(categoryRoot)) app.appendChild(buildCategoryTabs(categoryRoot));
+        app.appendChild(buildGenreChips(genreCtx));
     }
 
     // На экране результатов поиска показываем ту же панель поиска —
-    // чтобы можно было искать дальше, не возвращаясь на главную
+    // чтобы можно было искать дальше (на ПК она и так в верхней панели)
     if (currentCategoryName === "🔍 Результаты поиска" && currentUser) {
-        app.appendChild(buildSearchBar(lastSearchQuery));
+        const searchWrap = document.createElement("div");
+        searchWrap.className = "only-mobile";
+        searchWrap.style.marginBottom = "14px";
+        searchWrap.appendChild(buildSearchBar(lastSearchQuery));
+        app.appendChild(searchWrap);
     }
 
     // Раньше каждая кнопка/строка добавлялась прямо в #app по одной —
@@ -4275,13 +3816,13 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
     // (см. count-footer ниже), а строка "Тайтлов: N" в панели пагинации
     // выдала бы то же самое число.
     const isInSecretCategory = currentCategoryName && isSecretCategory(currentCategoryName);
-    let pageItems = content;
-    const isPaginatedList = Array.isArray(content) && content.length > 0 && !isInSecretCategory;
+    let pageItems = listContent;
+    const isPaginatedList = Array.isArray(listContent) && listContent.length > 0 && !isInSecretCategory;
 
     if (isPaginatedList) {
         if (!preservePage) catalogCurrentPage = 1;
 
-        const totalItems = content.length;
+        const totalItems = listContent.length;
         const perPage = catalogItemsPerPage;
         const totalPages = perPage > 0 ? Math.max(1, Math.ceil(totalItems / perPage)) : 1;
         if (catalogCurrentPage > totalPages) catalogCurrentPage = totalPages;
@@ -4291,7 +3832,7 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
 
         if (perPage > 0) {
             const start = (catalogCurrentPage - 1) * perPage;
-            pageItems = content.slice(start, start + perPage);
+            pageItems = listContent.slice(start, start + perPage);
         }
     }
 
@@ -4329,30 +3870,14 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
         if (gridContainer.childElementCount > 0) listFragment.appendChild(gridContainer);
     }
     else if (typeof content === "object" && content !== null) {
-        // Эта ветка отвечает ровно за список ЖАНРОВ внутри категории (dbData
-        // не вложен глубже: категория -> объект жанров -> массив тайтлов,
-        // см. комментарий у titleSortKey() выше) — поэтому в компактном
-        // режиме здесь тот же "листаемый" визуальный язык, что и у самого
-        // "Каталога" на главной (см. buildSwipeDeck()/showCompactCatalogScreen()).
-        // Жанр без собственного ведущего эмодзи получает ❔ — в отличие от
-        // категорий, у которых есть детерминированный фолбэк по типу
-        // (getCategoryEmoji()), для произвольных жанров такого нет.
-        if (compactModeEnabled) {
-            const genreItems = Object.keys(content).map(key => ({
-                emoji: extractLeadingEmoji(key) || "❔",
-                label: stripLeadingEmoji(key) || key,
-                count: getAllTitlesFromCategory(content[key]).length,
-                onClick: () => openData(content[key], true)
-            }));
-            listFragment.appendChild(buildSwipeDeck(genreItems));
-        } else {
-            for (let key in content) {
-                let value = content[key];
-                let button = document.createElement("button");
-                button.textContent = key;
-                button.onclick = () => openData(value, true);
-                listFragment.appendChild(button);
-            }
+        // Запасной вариант: карта жанров без известной категории (на экранах
+        // категорий жанры — чипы над сеткой, см. getGenreContext)
+        for (let key in content) {
+            let value = content[key];
+            let button = document.createElement("button");
+            button.textContent = key;
+            button.onclick = () => openData(value, true);
+            listFragment.appendChild(button);
         }
     }
 
@@ -4362,8 +3887,8 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
     // (кроме секретной категории — там подсчёт не нужен вовсе). Считаем по
     // ПОЛНОМУ content, а не по текущей странице — иначе цифра "плавала" бы
     // при переключении страниц.
-    const totalTitlesCount = getAllTitlesFromCategory(content).length;
-    if (totalTitlesCount > 0 && !isInSecretCategory) {
+    const totalTitlesCount = getAllTitlesFromCategory(listContent).length;
+    if (totalTitlesCount > 0 && !isInSecretCategory && !titleText) {
         let countFooter = document.createElement("p");
         countFooter.className = "count-footer";
         countFooter.textContent = `Всего тайтлов: ${totalTitlesCount}`;
@@ -4371,7 +3896,7 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
     }
 
     if (isPaginatedList) {
-        const totalItems = content.length;
+        const totalItems = listContent.length;
         const perPage = catalogItemsPerPage;
         const totalPages = perPage > 0 ? Math.max(1, Math.ceil(totalItems / perPage)) : 1;
         app.appendChild(buildNumberedPager(catalogCurrentPage, totalPages, (p) => {
@@ -4381,45 +3906,97 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
         }));
     }
 
-    // Секретный граф-режим просмотра каталога — кнопка-портал живёт только
-    // на самом верхнем экране секретной категории (сразу после клика по
-    // кнопке "Секрет" на главной), а не во всех её подкатегориях. currentCategoryName
-    // не меняется при переходе вглубь подкатегорий, поэтому одного isInSecretCategory
-    // недостаточно — дополнительно проверяем, что content это именно верхний
-    // объект dbData[currentCategoryName], а не что-то вложенное внутрь него.
-    const isTopLevelSecretScreen = isInSecretCategory && content === dbData[currentCategoryName];
-    if (isTopLevelSecretScreen) {
-        let pautinkaBtn = document.createElement("button");
-        pautinkaBtn.className = "btn-secret-gold";
-        pautinkaBtn.textContent = "🕸️ Паутинка";
-        pautinkaBtn.onclick = () => showPautinka();
-        app.appendChild(pautinkaBtn);
-    }
 
-    addNavigation();
 }
 
-// Откат на один шаг назад по истории экранов. Общая логика для обычной
-// кнопки "⬅️ Назад" в навигации и для кнопки возврата внутри самой Паутинки.
-// Если на вершине истории после отката лежит "отметка" Паутинки
-// (PAUTINKA_HISTORY_MARKER) — заново открывает Паутинку вместо обычного
-// экрана с данными, чтобы выход из экрана, открытого через Паутинку, вёл
-// обратно в саму Паутинку, а не перескакивал через неё.
+// Контекст экрана категории: какая карта жанров (dbData[категория]) сейчас
+// открыта и какой жанр выбран (null — "Все"). null, если это не экран
+// категории/жанра (франшиза, поиск, "Новое на сайте").
+function getGenreContext(content) {
+    const map = currentCategoryName ? dbData[currentCategoryName] : null;
+    if (!map || !content) return null;
+    // После перезагрузки каталога из БД в history могут лежать уже старые
+    // объекты — карту жанров узнаём по типу, а не по ссылке
+    if (!Array.isArray(content)) return { map, active: null };
+    for (const key in map) {
+        if (map[key] === content) return { map, active: key };
+    }
+    return null;
+}
+
+function flattenGenreMap(map) {
+    const all = [];
+    for (const key in map) all.push(...map[key]);
+    sortGenreList(all);
+    return all;
+}
+
+// Переключает жанр на месте — без нового шага в истории, чтобы "назад"
+// не проходил по каждому нажатому чипу
+function replaceCurrentScreen(content) {
+    if (history.length === 0) {
+        openData(content, true);
+        return;
+    }
+    history[history.length - 1] = content;
+    categoryHistory[categoryHistory.length - 1] = currentCategoryName;
+    pageHistory[pageHistory.length - 1] = 1;
+    openData(content, false);
+    window.scrollTo(0, 0);
+}
+
+function buildGenreChips(genreCtx) {
+    const row = document.createElement("div");
+    row.className = "chip-row";
+    const showCounts = !isSecretCategory(currentCategoryName);
+    const chip = (label, list, isActive, onClick) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn chip" + (isActive ? " active" : "");
+        const labelSpan = document.createElement("span");
+        labelSpan.textContent = label;
+        btn.appendChild(labelSpan);
+        if (showCounts) {
+            const countSpan = document.createElement("span");
+            countSpan.className = "chip-count";
+            countSpan.textContent = getAllTitlesFromCategory(list).length;
+            btn.appendChild(countSpan);
+        }
+        btn.onclick = onClick;
+        row.appendChild(btn);
+        if (isActive) requestAnimationFrame(() => btn.scrollIntoView({ inline: "center", block: "nearest" }));
+    };
+    if (showCounts) chip("Все", genreCtx.map, genreCtx.active === null, () => replaceCurrentScreen(genreCtx.map));
+    Object.keys(genreCtx.map).forEach(key => {
+        chip(key, genreCtx.map[key], genreCtx.active === key, () => replaceCurrentScreen(genreCtx.map[key]));
+    });
+    return row;
+}
+
+// Вкладки категорий над каталогом (на телефоне; на ПК категории в боковом меню)
+function buildCategoryTabs(activeKey) {
+    const { normal } = getOrderedCategoryKeys();
+    const tabs = document.createElement("div");
+    tabs.className = "segmented only-mobile";
+    normal.forEach(key => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn segmented-item" + (key === activeKey ? " active" : "");
+        btn.textContent = key;
+        btn.onclick = () => { if (key !== activeKey) openCategory(key); };
+        tabs.appendChild(btn);
+    });
+    return tabs;
+}
+
+// Откат на один шаг назад по истории экранов (кнопка "назад" в оболочке).
 function goBack() {
     history.pop();
     categoryHistory.pop();
     pageHistory.pop();
     let previous = history[history.length - 1];
 
-    if (previous === PAUTINKA_HISTORY_MARKER) {
-        showPautinka(true);
-    } else if (previous === COMPACT_CATALOG_HISTORY_MARKER) {
-        // Отметка экрана "Каталог" (компактный режим) — см. её объявление
-        // и showCompactCatalogScreen(). Без этой ветки previous — сам Symbol,
-        // а не данные категории, и его случайно уносило дальше в openData()
-        // как обычный content, рисуя пустой экран.
-        showCompactCatalogScreen(true);
-    } else if (previous) {
+    if (previous) {
         // Восстанавливаем ту "категорию", которая была актуальна именно
         // для этого экрана — иначе, например, возврат в подкатегорию
         // Секрета после захода в Паутинку и открытия там обычного жанра
@@ -4446,77 +4023,25 @@ function backWouldGoHome() {
     return history.length <= 1;
 }
 
-// Навигационная панель Назад/Домой
+// "Назад" для экранов каталога — кнопка в оболочке (см. shell.js)
 function addNavigation() {
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) {
-        oldNav.remove();
-    }
-
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-
-    if (!backWouldGoHome()) {
-        let back = document.createElement("button");
-        back.textContent = "⬅️ Назад";
-
-        back.onclick = () => playVhsRewindTransition(goBack);
-
-        nav.appendChild(back);
-    }
-
-    let home = document.createElement("button");
-    home.textContent = "🏠 Домой";
-    home.onclick = () => playVhsRewindTransition(showHome);
-
-    nav.appendChild(home);
-
-    let container = document.querySelector(".container");
-    if (container) {
-        container.insertBefore(nav, container.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
+    setShellBack(backWouldGoHome() ? null : () => playVhsRewindTransition(goBack));
 }
 
 // =======================================================
-// 🕸️ ПАУТИНКА — граф-режим просмотра каталога
+// ЭМОДЗИ И ЦВЕТА КАТЕГОРИЙ
 // =======================================================
-// Секретный альтернативный способ просмотра сайта: вместо списков — большая
-// "паутина" из узлов. В центре — 🏠 (выход на главную), вокруг него по кругу
-// 5 хабов (Фильмы/Мультфильмы/Сериалы/Аниме/Игры), а от каждого хаба нити
-// расходятся к его "листьям" — ЖАНРАМ этой категории (не отдельным тайтлам,
-// их было бы слишком много) или, у хаба "Игры" — к самим 6 играм.
-//
-// Экран рисуется НЕ внутри #app, а отдельным слоем прямо в <body> — у #app
-// есть анимация pageChange с transform:translateX(...), а ненулевой
-// transform на предке "запирает" все дочерние position:fixed элементы
-// внутри его рамки вместо реального viewport'а (см. комментарий в CSS).
-
-// Единый список 6 игр сайта для узлов-листьев хаба "Игры". Каждая launch-
-// функция уже сама включает setGamesNav()/pauseMusicForGames() — то есть
-// музыка (если играла) погаснет ТОЛЬКО в момент реального захода в игру,
-// а не при просто открытии Паутинки.
-const PAUTINKA_GAMES = [
-    { key: "snake",  label: "Змейка",                     emoji: "🐍", launch: () => { saveMusicPositionBeforeLeaving(); location.href = "games/?play=snake&from=pautinka"; } },
-    { key: "flappy", label: "Эчпочмоня vs. Шоколадки",     emoji: "🍫", launch: () => { saveMusicPositionBeforeLeaving(); location.href = "games/?play=flappy&from=pautinka"; } },
-    { key: "doodle", label: "Doodle Jump",                emoji: "👾", launch: () => { saveMusicPositionBeforeLeaving(); location.href = "games/?play=doodle&from=pautinka"; } },
-    { key: "runner", label: "Бега Брокколи",               emoji: "🥦", launch: () => { saveMusicPositionBeforeLeaving(); location.href = "games/?play=runner&from=pautinka"; } },
-    { key: "ninja",  label: "Эмодзи Ниндзя",               emoji: "💣", launch: () => { saveMusicPositionBeforeLeaving(); location.href = "games/?play=ninja&from=pautinka"; } },
-    { key: "rhythm", label: "Ритм-Аркада",                 emoji: "🎵", launch: () => { saveMusicPositionBeforeLeaving(); location.href = "games/?play=rhythm&from=pautinka"; } },
-];
-const PAUTINKA_GAMES_HUE = 152; // единый цвет для всех 6 игр (изумрудно-бирюзовый)
 
 // Достаёт ведущий эмодзи из строки категории (как setEmojiTitle), либо null
 function extractLeadingEmoji(text) {
     const match = String(text).match(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)/u);
     return match ? match[1] : null;
 }
-// Убирает ведущий эмодзи + пробел из строки категории — под ним и так будет своя иконка в узле
+// Убирает ведущий эмодзи + пробел из строки категории
 function stripLeadingEmoji(text) {
     return String(text).replace(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s*/u, "");
 }
-// Эмодзи хаба категории: берём собственный из названия, а если его почему-то нет — подставляем по типу
+// Эмодзи категории: берём собственный из названия, а если его почему-то нет — подставляем по типу
 function getCategoryEmoji(catKey) {
     return extractLeadingEmoji(catKey) ||
         (catKey.includes("Мультфильм") ? "🧸" :
@@ -4532,369 +4057,6 @@ function getCategoryBaseHue(catKey) {
     if (catKey.includes("Фильм")) return 336;        // розовый
     return 12; // запасной вариант — если вдруг появится ещё одна обычная категория сверх этих 4х
 }
-// Небольшое, но детерминированное смещение оттенка в зависимости от жанра —
-// чтобы разные жанры внутри одной категории отличались цветом, но узнаваемо
-// оставались в её "семье" цветов
-function getGenreHue(catKey, genre) {
-    const base = getCategoryBaseHue(catKey);
-    const offset = (hashStringToSeed(catKey + "::" + genre) % 31) - 15; // от -15 до +15 градусов
-    return (base + offset + 360) % 360;
-}
-// Экранирование текста/атрибутов при сборке SVG-разметки строками (названия
-// тайтлов приходят из базы как есть и могут содержать &, <, >, ")
-function escapeSvgText(str) {
-    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-function escapeSvgAttr(str) {
-    return escapeSvgText(str).replace(/"/g, "&quot;");
-}
-// Обрезает длинные подписи под узлами, чтобы не разъезжались по всей паутине
-function pautinkaTruncate(text, maxLen) {
-    const t = String(text);
-    return t.length > maxLen ? t.slice(0, maxLen - 1).trimEnd() + "…" : t;
-}
-// Закрывает Паутинку (убирает полноэкранную накладку) — вызывается перед
-// любым переходом ПРОЧЬ из этого режима (домой, в игру или на список тайтлов жанра)
-function leavePautinka() {
-    const overlay = document.getElementById("pautinkaOverlay");
-    if (overlay) overlay.remove();
-}
-
-// Уникальная "отметка" в history/categoryHistory, обозначающая, что на этом
-// шаге была открыта именно Паутинка (а не обычный экран с данными). Позволяет
-// кнопке "Назад" с экрана жанра, открытого ИЗ Паутинки, вернуться в саму
-// Паутинку, а не перескакивать сразу к тому, что было открыто до неё.
-const PAUTINKA_HISTORY_MARKER = Symbol("pautinka");
-
-// Если true — текущая игра была запущена узлом-игрой прямо из Паутинки
-// (в обход обычного экрана "🕹️ Игры"), и кнопка "⬅️" внутри игры должна
-// возвращать в Паутинку, а не в список игр. Сбрасывается при любом обычном
-// заходе в раздел игр (showGamesScreen) и на главном экране (showHome).
-let gameLaunchedFromPautinka = false;
-
-// Главная функция режима "Паутинка".
-// fromHistory=true — Паутинка перерисовывается при возврате кнопкой "Назад"
-// (то есть её отметка уже лежит в history/categoryHistory, повторно
-// добавлять её не нужно). fromHistory=false (обычный вызов по кнопке
-// "🕸️ Паутинка") — Паутинка добавляется в историю как новый шаг.
-async function showPautinka(fromHistory = false) {
-    isChatScreenOpen = false;
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-    if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
-    if (typeof activeGameCleanup !== "undefined" && activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
-
-    if (!fromHistory) {
-        // Тот же приём, что и в openData(): перед добавлением нового шага
-        // запоминаем страницу пагинации экрана, с которого уходим, чтобы
-        // pageHistory не разъехался по длине с history/categoryHistory
-        // (иначе индексы этих трёх параллельных стеков перестанут совпадать
-        // для всех более ранних шагов истории).
-        if (history.length > 0) {
-            pageHistory[history.length - 1] = catalogCurrentPage;
-        }
-        history.push(PAUTINKA_HISTORY_MARKER);
-        categoryHistory.push(null);
-        pageHistory.push(1);
-    }
-    currentCategoryName = null;
-
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
-    const oldOverlay = document.getElementById("pautinkaOverlay");
-    if (oldOverlay) oldOverlay.remove();
-
-    app.innerHTML = "";
-
-    // --- 1. Собираем узлы (в мировых координатах, центр (0,0) — узел "Домой") ---
-    const R1 = 230; // радиус кольца хабов вокруг Домой (было 170 — увеличено для большего простора между узлами)
-    const HOME_R = 44, HUB_R = 30, GENRE_R = 19, GAME_R = 21;
-
-    const normalCatKeys = Object.keys(dbData).filter(cat => !isSecretCategory(cat));
-    // Хабы: обычные категории + отдельный хаб "Игры"
-    const hubDefs = normalCatKeys.map(catKey => ({ kind: "category", key: catKey }));
-    hubDefs.push({ kind: "games", key: "__GAMES__" });
-
-    const numHubs = hubDefs.length;
-    const wedgeDeg = Math.min(112, (360 / numHubs) * 0.92);
-    const wedgeRad = wedgeDeg * Math.PI / 180;
-
-    const nodes = []; // {type, x, y, r, hue, emoji, label, payload}
-    const threads = []; // {x1,y1,x2,y2, hue, animated}
-
-    nodes.push({ type: "home", x: 0, y: 0, r: HOME_R, emoji: "🏠", label: "Домой" });
-
-    hubDefs.forEach((hub, i) => {
-        const angle = (-Math.PI / 2) + i * (2 * Math.PI / numHubs); // старт сверху, по часовой
-        const hubX = R1 * Math.cos(angle);
-        const hubY = R1 * Math.sin(angle);
-        const hubHue = hub.kind === "games" ? PAUTINKA_GAMES_HUE : getCategoryBaseHue(hub.key);
-
-        nodes.push({
-            type: "hub",
-            hubKind: hub.kind,
-            key: hub.key,
-            x: hubX, y: hubY, r: HUB_R,
-            hue: hubHue,
-            emoji: hub.kind === "games" ? "🕹️" : getCategoryEmoji(hub.key),
-            label: hub.kind === "games" ? "Игры" : pautinkaTruncate(stripLeadingEmoji(hub.key), 16),
-        });
-        threads.push({ x1: 0, y1: 0, x2: hubX, y2: hubY, hue: hubHue, animated: true });
-
-        // --- Листья хаба: у категорий это ЖАНРЫ (финальные объекты — без
-        // отдельных тайтлов, их слишком много), у "Игры" — сами 6 игр ---
-        let leaves; // [{emoji|null, label, hue, payload}]
-        if (hub.kind === "games") {
-            leaves = PAUTINKA_GAMES.map(g => ({ emoji: g.emoji, label: g.label, hue: PAUTINKA_GAMES_HUE, gameKey: g.key }));
-        } else {
-            leaves = Object.keys(dbData[hub.key] || {}).map(genreKey => ({
-                emoji: null,
-                label: genreKey,
-                hue: getGenreHue(hub.key, genreKey),
-                catKey: hub.key,
-                genreKey: genreKey,
-            }));
-        }
-
-        const n = leaves.length;
-        if (n === 0) return;
-
-        const R2 = Math.max(R1 + 130, (n * (hub.kind === "games" ? 48 : 82)) / wedgeRad); // было R1+90 и 34/60 — увеличено для большего расстояния между листьями
-
-        leaves.forEach((leaf, j) => {
-            const leafAngle = n === 1
-                ? angle
-                : angle - wedgeRad / 2 + wedgeRad * (j + 0.5) / n;
-            const lx = R2 * Math.cos(leafAngle);
-            const ly = R2 * Math.sin(leafAngle);
-            const isGame = hub.kind === "games";
-
-            nodes.push({
-                type: isGame ? "game" : "genre",
-                x: lx, y: ly,
-                r: isGame ? GAME_R : GENRE_R,
-                hue: leaf.hue,
-                emoji: leaf.emoji,
-                label: pautinkaTruncate(leaf.label, isGame ? 20 : 18),
-                catKey: leaf.catKey,
-                genreKey: leaf.genreKey,
-                gameKey: leaf.gameKey,
-            });
-            // Раньше здесь стояло `animated: isGame` — импульс по нити
-            // "бежал" только у листьев хаба "Игры", у обычных категорий
-            // (Фильмы/Сериалы/... -> жанр) нити оставались статичными.
-            // Теперь пульс идёт по ВСЕМ нитям одинаково.
-            threads.push({ x1: hubX, y1: hubY, x2: lx, y2: ly, hue: leaf.hue, animated: true });
-        });
-    });
-
-    // --- 2. Считаем общий bounding box и сдвигаем всё в положительные координаты ---
-    const PAD = 90;
-    let minX = 0, minY = 0, maxX = 0, maxY = 0;
-    nodes.forEach(n => {
-        const labelPad = n.r + 26; // место под подпись снизу узла
-        minX = Math.min(minX, n.x - n.r - 20);
-        maxX = Math.max(maxX, n.x + n.r + 20);
-        minY = Math.min(minY, n.y - n.r - 20);
-        maxY = Math.max(maxY, n.y + labelPad);
-    });
-    minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
-    const totalW = maxX - minX;
-    const totalH = maxY - minY;
-    const offX = -minX, offY = -minY;
-
-    nodes.forEach(n => { n.fx = n.x + offX; n.fy = n.y + offY; });
-    threads.forEach(t => {
-        t.fx1 = t.x1 + offX; t.fy1 = t.y1 + offY;
-        t.fx2 = t.x2 + offX; t.fy2 = t.y2 + offY;
-    });
-
-    // --- 3. Генерируем разметку ---
-    let threadsHtml = "";
-    threads.forEach((t, i) => {
-        const color = `hsl(${t.hue} 85% 65%)`;
-        if (t.animated) {
-            threadsHtml += `<line class="pautinka-thread-base" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke-width="1.5" />`;
-            // pathLength="100" нормализует длину ЛЮБОЙ нити к 100 условным
-            // единицам, независимо от её реальной длины в пикселях. Раньше
-            // тут была CSS-переменная (--len, реальная длина в px), заданная
-            // инлайново на каждой линии, а общий @keyframes читал её через
-            // var(--len). Safari считает такие var() в keyframes отдельно
-            // для каждого элемента, а Chrome/Firefox — один раз на всё
-            // правило анимации, поэтому у всех нитей с разной длиной
-            // получался один и тот же (чужой) сдвиг, и импульс был
-            // фактически не виден нигде, кроме iPhone. С pathLength нужный
-            // сдвиг всегда один и тот же (см. @keyframes pautinkaThreadFlow
-            // в CSS) — переменная больше не нужна вовсе.
-            threadsHtml += `<line class="pautinka-thread-pulse" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="${color}" stroke-width="2.2" pathLength="100" stroke-dasharray="8 92" style="color:${color}; animation-delay:${(i % 7) * -0.4}s;" />`;
-        } else {
-            threadsHtml += `<line class="pautinka-thread-base" x1="${t.fx1}" y1="${t.fy1}" x2="${t.fx2}" y2="${t.fy2}" stroke="hsla(${t.hue},70%,60%,0.28)" stroke-width="1.2" />`;
-        }
-    });
-
-    let nodesHtml = "";
-    nodes.forEach((n, idx) => {
-        const popDelay = Math.min(idx * 0.035, 1.4);
-        const floatDur = 3.2 + (idx % 5) * 0.5;
-        const floatDelay = (idx % 9) * -0.3;
-        const fillColor = n.type === "home" ? "hsl(45 90% 62%)" : `hsl(${n.hue} 72% 56%)`;
-        const strokeColor = n.type === "home" ? "hsl(45 95% 80%)" : `hsl(${n.hue} 85% 78%)`;
-        const shapeClass = "pautinka-node-shape" + (n.type === "home" ? " pautinka-home-shape" : "");
-        const emojiFontSize = n.type === "home" ? n.r * 0.98 : n.r * 1.15;
-        // Раньше эмодзи узла рисовался как SVG <text> — на многих платформах
-        // (особенно в мобильных WebView) SVG-текст не умеет в цветные эмодзи
-        // и рисует их плоским залитым силуэтом вместо родной картинки.
-        // Обычный HTML-текст с этим не сталкивается, поэтому эмодзи теперь
-        // рендерится через <foreignObject> с <div> внутри (см. ниже и
-        // .pautinka-node-emoji в CSS) — подпись узла (.pautinka-label) ниже
-        // остаётся как раньше SVG-текстом, ей это не мешает.
-        // Квадрат foreignObject чуть больше font-size — с запасом на
-        // составные эмодзи (несколько кодпоинтов, ZWJ-последовательности
-        // вроде иконки Ниндзя), у которых визуальная "коробка" бывает шире
-        // одного символа.
-        const emojiBox = emojiFontSize * 1.5;
-        // Хабы (Фильмы/Мультфильмы/Сериалы/Аниме/Игры — 5 штук) больше не
-        // кликабельны: у них нет role="button"/tabindex, поэтому убрана
-        // рамка фокуса, hover-подсветка и любая обработка кликов — они
-        // теперь чисто визуальные ориентиры на паутине, "активны" только
-        // их листья (жанры/игры) и центральный узел "Домой".
-        const isStaticHub = n.type === "hub";
-        const nodeClass = "pautinka-node pautinka-node-pop" + (isStaticHub ? " pautinka-node-static" : "");
-        const interactiveAttrs = isStaticHub ? "" : `tabindex="0" role="button" aria-label="${escapeSvgAttr(n.label)}"`;
-
-        nodesHtml += `
-        <g class="${nodeClass}" data-idx="${idx}" ${interactiveAttrs} style="animation-delay:${popDelay}s;">
-            <g class="pautinka-node-float" style="animation-duration:${floatDur}s; animation-delay:${floatDelay}s;">
-                ${(n.type === "hub" || n.type === "home") ? `<circle class="pautinka-sonar" cx="${n.fx}" cy="${n.fy}" r="${n.r}" stroke="${strokeColor}" style="animation-delay:${(idx % 5) * -0.5}s;" />` : ""}
-                <circle class="${shapeClass}" cx="${n.fx}" cy="${n.fy}" r="${n.r}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" />
-                ${n.emoji ? `<foreignObject x="${n.fx - emojiBox / 2}" y="${n.fy - emojiBox / 2}" width="${emojiBox}" height="${emojiBox}" style="pointer-events:none; overflow:visible;"><div xmlns="http://www.w3.org/1999/xhtml" class="pautinka-node-emoji" style="font-size:${emojiFontSize}px;">${n.emoji}</div></foreignObject>` : ""}
-                <text class="pautinka-label" x="${n.fx}" y="${n.fy + n.r + 15}" font-size="${n.type === 'hub' || n.type === 'home' ? 13 : n.type === 'genre' ? 12 : 10.5}" font-weight="${n.type === 'hub' || n.type === 'home' ? 700 : n.type === 'genre' ? 600 : 500}">${escapeSvgText(n.label)}</text>
-            </g>
-        </g>`;
-    });
-
-    const svgMarkup = `
-        <svg id="pautinkaSvg" class="pautinka-svg" viewBox="0 0 ${totalW} ${totalH}" width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
-            <g class="pautinka-threads">${threadsHtml}</g>
-            <g class="pautinka-nodes">${nodesHtml}</g>
-        </svg>`;
-
-    // --- 4. Собираем экран ---
-    const overlay = document.createElement("div");
-    overlay.id = "pautinkaOverlay";
-
-    const heading = document.createElement("div");
-    heading.className = "pautinka-heading";
-    heading.textContent = "🕸️ Паутинка";
-    overlay.appendChild(heading);
-
-    const scroll = document.createElement("div");
-    scroll.className = "pautinka-scroll";
-    scroll.innerHTML = svgMarkup;
-    overlay.appendChild(scroll);
-
-    const zoomControls = document.createElement("div");
-    zoomControls.className = "pautinka-zoom-controls";
-    zoomControls.innerHTML = `
-        <button type="button" class="round-btn" id="pautinkaZoomIn">➕</button>
-        <button type="button" class="round-btn" id="pautinkaZoomOut">➖</button>
-    `;
-    overlay.appendChild(zoomControls);
-
-    document.body.appendChild(overlay);
-
-    const svg = document.getElementById("pautinkaSvg");
-
-    // --- 5. Центрируем стартовый вид на узле "Домой" ---
-    let zoomLevel = 1;
-    const MIN_ZOOM = 0.4, MAX_ZOOM = 2.2;
-    function applyZoom(newZoom, focusWorldX, focusWorldY) {
-        newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
-        svg.style.width = (totalW * newZoom) + "px";
-        svg.style.height = (totalH * newZoom) + "px";
-        zoomLevel = newZoom;
-        if (typeof focusWorldX === "number") {
-            scroll.scrollLeft = focusWorldX * zoomLevel - scroll.clientWidth / 2;
-            scroll.scrollTop = focusWorldY * zoomLevel - scroll.clientHeight / 2;
-        }
-    }
-    applyZoom(1);
-    // Центр на узле "Домой" (nodes[0])
-    scroll.scrollLeft = nodes[0].fx * zoomLevel - scroll.clientWidth / 2;
-    scroll.scrollTop = nodes[0].fy * zoomLevel - scroll.clientHeight / 2;
-
-    document.getElementById("pautinkaZoomIn").onclick = () => {
-        const centerX = (scroll.scrollLeft + scroll.clientWidth / 2) / zoomLevel;
-        const centerY = (scroll.scrollTop + scroll.clientHeight / 2) / zoomLevel;
-        applyZoom(zoomLevel * 1.25, centerX, centerY);
-    };
-    document.getElementById("pautinkaZoomOut").onclick = () => {
-        const centerX = (scroll.scrollLeft + scroll.clientWidth / 2) / zoomLevel;
-        const centerY = (scroll.scrollTop + scroll.clientHeight / 2) / zoomLevel;
-        applyZoom(zoomLevel / 1.25, centerX, centerY);
-    };
-
-    // --- 6. Пан мышью (тач и так скроллится нативно, с инерцией) ---
-    let isDragging = false, dragStartX = 0, dragStartY = 0, dragScrollL = 0, dragScrollT = 0;
-    scroll.addEventListener("pointerdown", (e) => {
-        if (e.pointerType !== "mouse") return;
-        if (e.target.closest(".pautinka-node")) return;
-        isDragging = true;
-        scroll.classList.add("pautinka-dragging");
-        dragStartX = e.clientX; dragStartY = e.clientY;
-        dragScrollL = scroll.scrollLeft; dragScrollT = scroll.scrollTop;
-    });
-    window.addEventListener("pointermove", (e) => {
-        if (!isDragging) return;
-        scroll.scrollLeft = dragScrollL - (e.clientX - dragStartX);
-        scroll.scrollTop = dragScrollT - (e.clientY - dragStartY);
-    });
-    window.addEventListener("pointerup", () => { isDragging = false; scroll.classList.remove("pautinka-dragging"); });
-
-    // --- 7. Обработчики узлов ---
-    svg.querySelectorAll(".pautinka-node").forEach(g => {
-        const meta = nodes[Number(g.dataset.idx)];
-
-        // Хабы (5 штук: Фильмы/Мультфильмы/Сериалы/Аниме/Игры) полностью
-        // некликабельны — никаких обработчиков на них не вешаем вообще.
-        if (meta.type === "hub") return;
-
-        const setActive = () => g.classList.add("pautinka-node-active");
-        const clearActive = () => g.classList.remove("pautinka-node-active");
-        g.addEventListener("pointerdown", setActive);
-        g.addEventListener("pointerup", clearActive);
-        g.addEventListener("pointerleave", clearActive);
-        g.addEventListener("pointercancel", clearActive);
-
-        const activate = () => {
-            if (meta.type === "home") {
-                leavePautinka();
-                showHome();
-            } else if (meta.type === "genre") {
-                // Жанр — финальный объект в Паутинке: ведёт на обычный экран
-                // со списком его тайтлов (со звёздочками, постерами по
-                // долгому нажатию и т.д.) — как при обычном просмотре каталога
-                leavePautinka();
-                currentCategoryName = meta.catKey;
-                openData(dbData[meta.catKey][meta.genreKey], true);
-            } else if (meta.type === "game") {
-                const game = PAUTINKA_GAMES.find(g2 => g2.key === meta.gameKey);
-                if (game) {
-                    leavePautinka();
-                    gameLaunchedFromPautinka = true;
-                    game.launch();
-                }
-            }
-        };
-
-        g.addEventListener("click", (e) => { e.stopPropagation(); activate(); });
-        g.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
-        });
-    });
-}
-
 // =======================================================
 // ЧАТ МЕЖДУ ПОЛЬЗОВАТЕЛЯМИ (полностью изолирован от поиска/каталога)
 // =======================================================
@@ -5349,16 +4511,13 @@ function renderChatMessages() {
 // Экран чата (не связан с историей навигации каталога/поиска)
 async function showChatScreen() {
     startTransitionLock();
+    resetScreenState();
     isChatScreenOpen = true;
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
     currentCategoryName = null;
-
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
+    setShellSection("chat");
 
     app.innerHTML = "";
+    app.appendChild(buildChatTabs("chat"));
 
     let title = document.createElement("h1");
     setEmojiTitle(title, "💬 Чат");
@@ -5472,30 +4631,6 @@ async function showChatScreen() {
         renderChatMessages();
     }, 4000);
 
-    // Собственная навигация чата — не трогает историю поиска/каталога
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-
-    let homeBtn = document.createElement("button");
-    homeBtn.textContent = "🏠 Домой";
-    homeBtn.onclick = () => playVhsRewindTransition(() => {
-        isChatScreenOpen = false;
-        clearChatReplyTarget();
-        if (chatPollInterval) {
-            clearInterval(chatPollInterval);
-            chatPollInterval = null;
-        }
-        showHome();
-    });
-
-    nav.appendChild(homeBtn);
-
-    let container = document.querySelector(".container");
-    if (container) {
-        container.insertBefore(nav, container.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
 
     chatInput.focus();
 }
@@ -5706,168 +4841,82 @@ function closeBatchAddScreen() {
 }
 
 function showBatchAddTitlesScreen() {
-    const categories = Object.keys(dbData).filter(cat => {
-        return !cat.includes("Секрет") && !cat.includes("🔒") && !cat.includes("❤️");
-    });
+    const categories = getOrderedCategoryKeys().normal;
 
     if (categories.length === 0) {
         alert("Нет доступных категорий для добавления тайтла.");
         return;
     }
 
-    // Сбрасываем состояния других полноэкранных режимов (чат/вишлист/игры и
-    // т.п.) — та же гигиена, что перед открытием любого другого экрана.
-    isChatScreenOpen = false;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-    currentWatchedBucket = null;
-    if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
-    if (typeof activeGameCleanup !== "undefined" && activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
-
+    resetScreenState();
     document.body.classList.add("batch-add-screen-active");
 
-    // Собственная навигация экрана: "Назад" — на тот экран, откуда пришли
-    // (не через goBack()/history.pop(), т.к. этот экран сам не сохранён в
-    // history — как и другие полноэкранные режимы вроде "Совместного просмотра").
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
-
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-    // "Назад" не нужен, если экран открыт прямо с главной — closeBatchAddScreen()
-    // в этом случае и так вызовет showHome() (см. её реализацию выше).
-    if (history.length > 0) {
-        let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅️ Назад";
-        backBtn.onclick = () => playVhsRewindTransition(closeBatchAddScreen);
-        nav.appendChild(backBtn);
-    }
-    let homeBtn = document.createElement("button");
-    homeBtn.textContent = "🏠 Домой";
-    // Кнопка "Домой" должна вести домой всегда (в отличие от "Назад" —
-    // closeBatchAddScreen() иногда вместо этого открывает предыдущий экран
-    // истории), но при этом обязана убрать batch-add-screen-active — иначе
-    // десктопное расширение .container (см. CSS) так и останется висеть
-    // на сайте даже после ухода с этого экрана.
-    homeBtn.onclick = () => playVhsRewindTransition(() => {
-        document.body.classList.remove("batch-add-screen-active");
-        showHome();
-    });
-    nav.appendChild(homeBtn);
-    let containerEl = document.querySelector(".container");
-    if (containerEl) {
-        containerEl.insertBefore(nav, containerEl.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
+    setShellSection("add");
+    setShellBack(history.length > 0 ? () => playVhsRewindTransition(closeBatchAddScreen) : null);
 
     app.innerHTML = "";
 
-    let title = document.createElement("h1");
+    const head = document.createElement("div");
+    head.className = "page-head";
+    const title = document.createElement("h1");
     setEmojiTitle(title, "➕ Добавить тайтлы");
-    app.appendChild(title);
+    head.appendChild(title);
+    app.appendChild(head);
 
-    const screenWrap = document.createElement("div");
-    screenWrap.className = "batch-add-screen";
+    const screenWrap = document.createElement("form");
+    screenWrap.className = "add-screen";
+    screenWrap.noValidate = true;
     screenWrap.innerHTML = `
-        <form class="batch-add-form" id="batchAddForm">
-            <div class="batch-header-row">
-                <span>Название</span>
-                <span>Год</span>
-                <span>Категория</span>
-                <span>Жанр</span>
-                <span>Франшиза</span>
-                <span></span>
-            </div>
-            <div class="batch-rows" id="batchRows"></div>
-
-            <div class="batch-controls">
-                <button type="button" class="btn-add-row" id="batchAddRowBtn">➕ Ещё строка</button>
-                <span class="batch-row-count" id="batchRowCount"></span>
-            </div>
-
-            <div class="modal-buttons">
-                <button type="submit" class="btn-save">Сохранить все</button>
-                <button type="button" class="btn-cancel" id="batchCancelBtn">Отмена</button>
-            </div>
-        </form>
+        <p class="add-hint">
+            Нашли тайтл в интернете? Быстрее через
+            <button type="button" class="ui-btn ui-link" id="addGoOnline">онлайн-поиск</button> —
+            там название, год и жанр подставятся сами.
+        </p>
+        <div class="add-cards" id="batchRows"></div>
+        <button type="button" class="ui-btn add-more" id="batchAddRowBtn">＋ Ещё тайтл</button>
+        <div class="add-bar">
+            <span class="add-bar-count" id="batchRowCount"></span>
+            <button type="submit" class="ui-btn ui-pill ui-pill-accent add-save" id="batchSaveBtn">Сохранить</button>
+        </div>
     `;
     app.appendChild(screenWrap);
 
     const batchRows = screenWrap.querySelector("#batchRows");
     const addRowBtn = screenWrap.querySelector("#batchAddRowBtn");
     const rowCountLabel = screenWrap.querySelector("#batchRowCount");
-    const submitBtn = screenWrap.querySelector(".btn-save");
+    const submitBtn = screenWrap.querySelector("#batchSaveBtn");
+
+    screenWrap.querySelector("#addGoOnline").onclick = () => showOnlineSearchScreen();
 
     const defaultYear = new Date().getFullYear();
     let rowSeq = 0;
 
-    function categoryOptionsHtml(selected) {
-        return categories
-            .map(cat => `<option value="${cat}" ${cat === selected ? "selected" : ""}>${cat}</option>`)
-            .join("");
-    }
-
-    // Те же правила заполнения даталистов жанров/франшиз, что и в
-    // одиночной форме выше — просто применяются к конкретной строке rowEl,
-    // а не к единственной глобальной форме.
-    function updateGenresDatalistForRow(rowEl) {
-        const selectedCategory = rowEl.querySelector(".rCategory").value;
-        const genreDatalist = rowEl.querySelector(".rGenreList");
-        const localGenres = new Set();
-
-        const categoryData = dbData[selectedCategory];
-        if (categoryData && typeof categoryData === "object" && !Array.isArray(categoryData)) {
-            for (let genreKey in categoryData) {
-                localGenres.add(genreKey);
-            }
-        }
-
-        genreDatalist.innerHTML = Array.from(localGenres)
-            .sort()
-            .map(g => `<option value="${g}">`)
-            .join("");
-    }
-
-    function updateFranchisesDatalistForRow(rowEl) {
-        const selectedCategory = rowEl.querySelector(".rCategory").value;
-        const selectedGenre = rowEl.querySelector(".rGenre").value.trim();
-        const franDatalist = rowEl.querySelector(".rFranchiseList");
-        const localFranchises = new Set();
-
-        if (dbData[selectedCategory] && dbData[selectedCategory][selectedGenre]) {
-            const listOrObj = dbData[selectedCategory][selectedGenre];
-            if (Array.isArray(listOrObj)) {
-                listOrObj.forEach(item => {
-                    if (typeof item === "object" && item !== null) {
-                        Object.keys(item).forEach(franchiseName => localFranchises.add(franchiseName));
-                    }
-                });
-            }
-        }
-
-        franDatalist.innerHTML = Array.from(localFranchises)
-            .sort()
-            .map(f => `<option value="${f}">`)
-            .join("");
-    }
-
     function currentRowEls() {
-        return Array.from(batchRows.querySelectorAll(".batch-row"));
+        return Array.from(batchRows.querySelectorAll(".add-card"));
+    }
+
+    function filledRowCount() {
+        return currentRowEls().filter(row => row.querySelector(".rTitle").value.trim()).length;
     }
 
     function updateRowChrome() {
         const rows = currentRowEls();
-        // Кнопку "удалить строку" прячем, если строка последняя единственная —
-        // всегда должна остаться хотя бы одна строка для заполнения.
-        rows.forEach(row => {
-            row.querySelector(".btn-remove-row").style.visibility = rows.length > 1 ? "visible" : "hidden";
+        rows.forEach((row, i) => {
+            row.querySelector(".add-card-num").textContent = `Тайтл ${i + 1}`;
+            row.querySelector(".add-card-remove").hidden = rows.length < 2;
         });
-        rowCountLabel.textContent = `${rows.length} / ${MAX_BATCH_ADD_ROWS}`;
-        const atLimit = rows.length >= MAX_BATCH_ADD_ROWS;
-        addRowBtn.disabled = atLimit;
-        addRowBtn.style.opacity = atLimit ? "0.4" : "1";
-        addRowBtn.style.cursor = atLimit ? "not-allowed" : "pointer";
+        const filled = filledRowCount();
+        rowCountLabel.textContent = filled > 0 ? `Готово к сохранению: ${filled}` : "Заполните хотя бы название";
+        submitBtn.disabled = filled === 0;
+        submitBtn.textContent = filled > 1 ? `Сохранить ${filled}` : "Сохранить";
+        addRowBtn.hidden = rows.length >= MAX_BATCH_ADD_ROWS;
+    }
+
+    // Подсказки жанров/франшиз — из уже существующих в выбранной категории
+    function refreshSuggestions(rowEl) {
+        const category = rowEl.dataset.category;
+        populateGenreDatalist(rowEl.querySelector(".rGenreList"), category);
+        populateFranchiseDatalist(rowEl.querySelector(".rFranchiseList"), category, rowEl.querySelector(".rGenre").value.trim());
     }
 
     function addRow(prefill = {}) {
@@ -5877,126 +4926,125 @@ function showBatchAddTitlesScreen() {
         const rowId = `batchRow${rowSeq}`;
 
         const rowEl = document.createElement("div");
-        rowEl.className = "batch-row";
-        rowEl.dataset.rowId = rowId;
+        rowEl.className = "add-card";
+        rowEl.dataset.category = prefill.category || categories[0];
         rowEl.innerHTML = `
-            <div class="batch-field">
-                <label class="mobile-label">Название</label>
-                <input type="text" class="rTitle" placeholder="Например: Крик 7" value="${prefill.title || ""}">
+            <div class="add-card-head">
+                <span class="add-card-num"></span>
+                <button type="button" class="ui-btn add-card-remove" title="Убрать">✕</button>
             </div>
-            <div class="batch-field">
-                <label class="mobile-label">Год</label>
-                <input type="number" class="rYear" placeholder="${defaultYear}" value="${prefill.year || defaultYear}">
+            <div class="add-row add-row-title">
+                <label class="add-field add-field-grow">
+                    <span>Название</span>
+                    <input type="text" class="rTitle" placeholder="Например: Крик 7" autocomplete="off">
+                </label>
+                <label class="add-field add-field-year">
+                    <span>Год</span>
+                    <input type="number" class="rYear" inputmode="numeric" placeholder="${defaultYear}">
+                </label>
             </div>
-            <div class="batch-field">
-                <label class="mobile-label">Категория</label>
-                <select class="rCategory">${categoryOptionsHtml(prefill.category)}</select>
+            <div class="add-cats"></div>
+            <div class="add-row">
+                <label class="add-field add-field-grow">
+                    <span>Жанр</span>
+                    <input type="text" class="rGenre" placeholder="Начните вводить" list="${rowId}-genres" autocomplete="off">
+                    <datalist class="rGenreList" id="${rowId}-genres"></datalist>
+                </label>
+                <label class="add-field add-field-grow">
+                    <span>Франшиза <em>необязательно</em></span>
+                    <input type="text" class="rFranchise" placeholder="—" list="${rowId}-franchises" autocomplete="off">
+                    <datalist class="rFranchiseList" id="${rowId}-franchises"></datalist>
+                </label>
             </div>
-            <div class="batch-field">
-                <label class="mobile-label">Жанр</label>
-                <input type="text" class="rGenre" placeholder="Например: Ужасы" list="${rowId}-genres" value="${prefill.genre || ""}">
-                <datalist class="rGenreList" id="${rowId}-genres"></datalist>
-            </div>
-            <div class="batch-field">
-                <label class="mobile-label">Франшиза</label>
-                <input type="text" class="rFranchise" placeholder="Необязательно" list="${rowId}-franchises" value="${prefill.franchise || ""}">
-                <datalist class="rFranchiseList" id="${rowId}-franchises"></datalist>
-            </div>
-            <button type="button" class="btn-remove-row" title="Удалить строку">✕</button>
         `;
+        rowEl.querySelector(".rYear").value = prefill.year || defaultYear;
+
+        // Категория — чипами, а не выпадающим списком: их всего 4
+        const catsEl = rowEl.querySelector(".add-cats");
+        categories.forEach(cat => {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "ui-btn chip" + (cat === rowEl.dataset.category ? " active" : "");
+            chip.textContent = cat;
+            chip.onclick = () => {
+                if (rowEl.dataset.category === cat) return;
+                rowEl.dataset.category = cat;
+                catsEl.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === chip));
+                rowEl.querySelector(".rGenre").value = "";
+                refreshSuggestions(rowEl);
+            };
+            catsEl.appendChild(chip);
+        });
 
         batchRows.appendChild(rowEl);
 
-        const catSelect = rowEl.querySelector(".rCategory");
-        const genreInput = rowEl.querySelector(".rGenre");
-
-        catSelect.addEventListener("change", () => {
-            updateGenresDatalistForRow(rowEl);
-            genreInput.value = "";
-            updateFranchisesDatalistForRow(rowEl);
-        });
-        genreInput.addEventListener("input", () => updateFranchisesDatalistForRow(rowEl));
-
-        rowEl.querySelector(".btn-remove-row").addEventListener("click", () => {
+        rowEl.querySelector(".rGenre").addEventListener("input", () => refreshSuggestions(rowEl));
+        rowEl.querySelector(".rTitle").addEventListener("input", updateRowChrome);
+        rowEl.querySelector(".add-card-remove").onclick = () => {
             rowEl.remove();
             updateRowChrome();
-        });
+        };
 
-        updateGenresDatalistForRow(rowEl);
-        updateFranchisesDatalistForRow(rowEl);
+        refreshSuggestions(rowEl);
         updateRowChrome();
-
         return rowEl;
     }
 
     addRowBtn.onclick = () => {
-        // Удобство: новая строка подхватывает категорию и год предыдущей —
-        // тайтлы почти всегда добавляют пачками из одной категории/года,
-        // это экономит клики при заполнении 5-10 строк подряд.
         const rows = currentRowEls();
         const lastRow = rows[rows.length - 1];
         const prefill = lastRow
-            ? {
-                  category: lastRow.querySelector(".rCategory").value,
-                  year: lastRow.querySelector(".rYear").value
-              }
+            ? { category: lastRow.dataset.category, year: lastRow.querySelector(".rYear").value }
             : {};
         const newRow = addRow(prefill);
-        if (newRow) newRow.querySelector(".rTitle").focus();
+        if (newRow) {
+            newRow.scrollIntoView({ behavior: "smooth", block: "center" });
+            newRow.querySelector(".rTitle").focus({ preventScroll: true });
+        }
     };
 
     for (let i = 0; i < INITIAL_BATCH_ADD_ROWS; i++) addRow();
 
-    screenWrap.querySelector("#batchCancelBtn").onclick = () => closeBatchAddScreen();
-
-    screenWrap.querySelector("#batchAddForm").onsubmit = async (e) => {
+    screenWrap.onsubmit = async (e) => {
         e.preventDefault();
 
-        const rowEls = currentRowEls();
         const toInsert = [];
-        let firstErrorRowNumber = null;
+        let firstErrorRow = null;
 
-        rowEls.forEach((rowEl, idx) => {
+        currentRowEls().forEach(rowEl => {
+            rowEl.classList.remove("add-card-error");
             const titleVal = rowEl.querySelector(".rTitle").value.trim();
-            // Полностью пустую строку (не заполнили название) просто пропускаем —
-            // не нужно заставлять пользователя удалять лишние заготовленные строки.
             if (!titleVal) return;
 
             const yearVal = parseInt(rowEl.querySelector(".rYear").value, 10);
-            const catVal = rowEl.querySelector(".rCategory").value;
+            const catVal = rowEl.dataset.category;
             const genreVal = rowEl.querySelector(".rGenre").value.trim();
-            let franchiseVal = rowEl.querySelector(".rFranchise").value.trim();
-            if (franchiseVal === "") franchiseVal = null;
+            const franchiseVal = rowEl.querySelector(".rFranchise").value.trim() || null;
 
             if (!yearVal || !catVal || !genreVal) {
-                if (firstErrorRowNumber === null) firstErrorRowNumber = idx + 1;
+                rowEl.classList.add("add-card-error");
+                if (!firstErrorRow) firstErrorRow = rowEl;
                 return;
             }
 
             toInsert.push({ title: titleVal, year: yearVal, category: catVal, genre: genreVal, franchise: franchiseVal });
         });
 
-        if (firstErrorRowNumber !== null) {
-            alert(`Строка №${firstErrorRowNumber}: заполните год, категорию и жанр (или сотрите название, если строка не нужна).`);
+        if (firstErrorRow) {
+            firstErrorRow.scrollIntoView({ behavior: "smooth", block: "center" });
+            vibrate(60);
             return;
         }
-
-        if (toInsert.length === 0) {
-            alert("Заполните хотя бы одну строку — укажите название тайтла.");
-            return;
-        }
+        if (toInsert.length === 0) return;
 
         submitBtn.disabled = true;
         submitBtn.textContent = "Сохраняем…";
 
-        // Один запрос на весь пакет — Supabase/PostgREST принимает массив
-        // объектов в insert() и вставляет все строки за один INSERT.
         const result = await db.from("titles").insert(toInsert);
 
         if (result.error) {
             alert("Ошибка сохранения: " + result.error.message);
-            submitBtn.disabled = false;
-            submitBtn.textContent = "Сохранить все";
+            updateRowChrome();
         } else {
             document.body.classList.remove("batch-add-screen-active");
             await refreshCurrentScreen();
@@ -6004,22 +5052,6 @@ function showBatchAddTitlesScreen() {
     };
 }
 
-// ==========================================
-// ОНЛАЙН-ПОИСК (TMDB) — экран "🔍 Онлайн Поиск"
-// ==========================================
-// Поиск/фильтрация идёт по TMDB (бесплатно, без прокси, без ощутимых
-// лимитов). Настоящий рейтинг/ID с Кинопоиска в карточках результатов НЕ
-// показываем — это был бы отдельный запрос к kinopoisk.dev на каждую из
-// 20 карточек страницы, что моментально съело бы его скромный дневной
-// лимит. Вместо этого точный рейтинг Кинопоиска подтягивается по одному
-// запросу, лениво, только когда пользователь реально нажал "Добавить" на
-// конкретной карточке — см. findKinopoiskMatch() и showAddFromOnlineSearchModal()
-// ниже. Обычный findKinopoiskId() (используется при открытии уже
-// добавленного тайтла в каталоге) при этом продолжает работать как раньше.
-
-// Плоский набор "Название (Год)" (в нижнем регистре) всех тайтлов, которые
-// уже есть в базе — чтобы в результатах поиска показать "✅ Уже в базе"
-// вместо кнопки "Добавить" и не плодить дубли.
 function buildExistingTitlesSet() {
     return new Set(getAllTitlesFromCategory(dbData).map(t => t.trim().toLowerCase()));
 }
@@ -6224,35 +5256,8 @@ function showOnlineSearchScreen() {
 
     document.body.classList.add("online-search-screen-active");
 
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
-
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-    if (history.length > 0) {
-        let backBtn = document.createElement("button");
-        backBtn.textContent = "⬅️ Назад";
-        backBtn.onclick = () => playVhsRewindTransition(closeOnlineSearchScreen);
-        nav.appendChild(backBtn);
-    }
-    let homeBtn = document.createElement("button");
-    homeBtn.textContent = "🏠 Домой";
-    // Та же причина, что и в showBatchAddTitlesScreen(): "Домой" должна
-    // всегда вести на главную (не через closeOnlineSearchScreen(), который
-    // иногда вместо этого открывает предыдущий экран истории), но обязана
-    // снять online-search-screen-active — иначе десктопное расширение
-    // .container так и останется висеть после ухода с этого экрана.
-    homeBtn.onclick = () => playVhsRewindTransition(() => {
-        document.body.classList.remove("online-search-screen-active");
-        showHome();
-    });
-    nav.appendChild(homeBtn);
-    let containerEl = document.querySelector(".container");
-    if (containerEl) {
-        containerEl.insertBefore(nav, containerEl.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
+    setShellSection("online");
+    setShellBack(history.length > 0 ? () => playVhsRewindTransition(closeOnlineSearchScreen) : null);
 
     app.innerHTML = "";
     let titleEl = document.createElement("h1");
@@ -6672,92 +5677,80 @@ let shakeDetectionStarted = false; // чтобы не навешивать сл�
 // (см. refreshUIFromState()), и своя маленькая навигация.
 
 const WATCHED_BUCKETS = {
-    mine:    { label: "🙋 Просмотрено мной",       set: () => watchedTitlesMine },
-    partner: { label: "🧑‍🤝‍🧑 Просмотрено партнёром", set: () => watchedTitlesPartner },
-    both:    { label: "❤️ Просмотрено нами",       set: () => watchedTitlesBoth },
+    mine:    { label: "🙋 Просмотрено мной",       chip: "🙋 Мной",       set: () => watchedTitlesMine },
+    partner: { label: "🧑‍🤝‍🧑 Просмотрено партнёром", chip: "🧑‍🤝‍🧑 Партнёром", set: () => watchedTitlesPartner },
+    both:    { label: "❤️ Просмотрено нами",       chip: "❤️ Вместе",     set: () => watchedTitlesBoth },
 };
 
-function renderWatchedNav(backHandler) {
-    let oldNav = document.querySelector(".navigation");
-    if (oldNav) oldNav.remove();
-
-    let nav = document.createElement("div");
-    nav.className = "navigation";
-
-    if (backHandler) {
-        let back = document.createElement("button");
-        back.textContent = "⬅️ Назад";
-        back.onclick = () => playVhsRewindTransition(backHandler);
-        nav.appendChild(back);
-    }
-
-    let home = document.createElement("button");
-    home.textContent = "🏠 Домой";
-    home.onclick = () => playVhsRewindTransition(showHome);
-    nav.appendChild(home);
-
-    let container = document.querySelector(".container");
-    if (container) {
-        container.insertBefore(nav, container.firstChild);
-    } else {
-        document.body.insertBefore(nav, app);
-    }
+// Вкладки раздела "Списки" (на телефоне это одна вкладка нижней панели
+// на три экрана; на ПК они спрятаны — те же пункты есть в боковом меню)
+function buildListsTabs(active) {
+    const tabs = document.createElement("div");
+    tabs.className = "segmented lists-tabs";
+    [
+        ["wishlist", `Будем смотреть · ${wishlistTitles.size}`],
+        ["watched", `Просмотрено · ${getAllWatchedTitles().length}`],
+        ["calendar", "Календарь"],
+    ].forEach(([id, label]) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn segmented-item" + (id === active ? " active" : "");
+        btn.textContent = label;
+        btn.onclick = () => { if (id !== active) navigateFromShell(id); };
+        tabs.appendChild(btn);
+    });
+    return tabs;
 }
 
-// Верхний экран "Просмотрено" — 3 кнопки-подкатегории со счётчиками.
-// cameFromBookmarks=true — открыт из плашки "🔖 Закладки" (компактный режим),
-// тогда "⬅️ Назад" ведёт туда, а не сразу на главную (см. showCompactBookmarksScreen()).
-function renderWatchedTop(cameFromBookmarks = false) {
-    startTransitionLock();
-    isChatScreenOpen = false;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
-    }
-    currentCategoryName = "🎬 Просмотрено";
-    currentWatchedBucket = 'top';
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-    watchedTopCameFromBookmarks = cameFromBookmarks;
-
-    app.innerHTML = "";
-
-    let title = document.createElement("h1");
-    setEmojiTitle(title, "🎬 Просмотрено");
-    app.appendChild(title);
-
-    if (compactModeEnabled) {
-        // Компактный режим: те же большие листаемые плашки, что и в
-        // "Каталоге"/списке жанров — см. buildSwipeDeck().
-        const items = Object.keys(WATCHED_BUCKETS).map(key => {
-            const bucket = WATCHED_BUCKETS[key];
-            return {
-                emoji: extractLeadingEmoji(bucket.label) || "❔",
-                label: stripLeadingEmoji(bucket.label) || bucket.label,
-                count: bucket.set().size,
-                onClick: () => renderWatchedBucket(key)
-            };
-        });
-        app.appendChild(buildSwipeDeck(items));
-    } else {
-        for (let key in WATCHED_BUCKETS) {
-            const bucket = WATCHED_BUCKETS[key];
-            let btn = document.createElement("button");
-            btn.textContent = `${bucket.label} (${bucket.set().size})`;
-            btn.onclick = () => renderWatchedBucket(key);
-            app.appendChild(btn);
-        }
-    }
-
-    // Верхний экран раздела — "Назад" отсюда либо в "Закладки" (если оттуда
-    // и пришли), либо дублировал бы "Домой".
-    renderWatchedNav(cameFromBookmarks ? () => showCompactBookmarksScreen() : null);
+// То же для вкладки "Чат" на телефоне: чат и комментарии
+function buildChatTabs(active) {
+    const tabs = document.createElement("div");
+    tabs.className = "segmented lists-tabs";
+    [["chat", "💬 Чат"], ["comments", "🗨️ Комментарии"]].forEach(([id, label]) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn segmented-item" + (id === active ? " active" : "");
+        btn.textContent = label;
+        btn.onclick = () => { if (id !== active) navigateFromShell(id); };
+        tabs.appendChild(btn);
+    });
+    return tabs;
 }
 
-// Экран одной подкатегории (мной / партнёром / нами) со списком тайтлов
-// Общий хелпер: рендерит плоский список тайтлов в grid-сетку карточек —
-// используется на экранах "Просмотрено"/"Будем смотреть", где, в отличие
-// от openData(), нет папок жанров/франшиз и пагинации, только плоский список.
+function buildListPageHead(titleText, count) {
+    const head = document.createElement("div");
+    head.className = "page-head";
+    const title = document.createElement("h1");
+    setEmojiTitle(title, titleText);
+    head.appendChild(title);
+    const meta = document.createElement("div");
+    meta.className = "page-head-meta";
+    meta.textContent = formatTitleCount(count);
+    head.appendChild(meta);
+    return head;
+}
+
+function renderTitleListOrEmpty(list, emptyEmoji, emptyText) {
+    if (list.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "ui-empty";
+        empty.innerHTML = `<span class="ui-empty-emoji">${emptyEmoji}</span>`;
+        empty.appendChild(document.createTextNode(emptyText));
+        app.appendChild(empty);
+    } else {
+        // Собираем сетку карточек за кадром и вставляем одним куском
+        const listFragment = document.createDocumentFragment();
+        renderCardGrid(list, listFragment);
+        app.appendChild(listFragment);
+    }
+    app.classList.toggle("long-list", list.length > 25);
+}
+
+function sortTitlesAlphabetically(list) {
+    return list.sort((a, b) => titleSortKey(a).localeCompare(titleSortKey(b), "ru"));
+}
+
+// Общий хелпер: рендерит плоский список тайтлов в grid-сетку карточек
 function renderCardGrid(list, container) {
     const grid = document.createElement("div");
     grid.className = "catalog-grid";
@@ -6765,115 +5758,77 @@ function renderCardGrid(list, container) {
     container.appendChild(grid);
 }
 
-function renderWatchedBucket(bucketKey) {
-    startTransitionLock();
-    isChatScreenOpen = false;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
-    }
-    currentCategoryName = "🎬 Просмотрено";
-    currentWatchedBucket = bucketKey;
-    isWishlistScreenOpen = false;
-    isCalendarScreenOpen = false;
-
-    const bucket = WATCHED_BUCKETS[bucketKey];
-    if (!bucket) { renderWatchedTop(); return; }
-
-    app.innerHTML = "";
-
-    let title = document.createElement("h1");
-    setEmojiTitle(title, bucket.label);
-    app.appendChild(title);
-
-    const list = Array.from(bucket.set());
-    if (list.length === 0) {
-        let empty = document.createElement("p");
-        empty.style.textAlign = "center";
-        empty.style.color = "#999";
-        empty.textContent = "Здесь пока пусто.";
-        app.appendChild(empty);
-    } else {
-        // Тот же приём, что и в openData(): собираем сетку карточек за
-        // кадром и вставляем одним куском, а не по одной в живой #app.
-        const listFragment = document.createDocumentFragment();
-        renderCardGrid(list, listFragment);
-        app.appendChild(listFragment);
-    }
-    app.classList.toggle("long-list", list.length > 25);
-
-    let countFooter = document.createElement("p");
-    countFooter.className = "count-footer";
-    countFooter.textContent = `Всего тайтлов: ${list.length}`;
-    app.appendChild(countFooter);
-
-    renderWatchedNav(() => renderWatchedTop(watchedTopCameFromBookmarks));
+// "Просмотрено": все просмотренные + чипы "мной / партнёром / нами".
+function renderWatchedTop() {
+    renderWatchedScreen(null);
 }
 
-// Экран "Будем смотреть" — плоский список вишлиста. cameFromBookmarks=true —
-// открыт из плашки "🔖 Закладки" (компактный режим), см. renderWatchedTop().
-function renderWishlistFolder(cameFromBookmarks = false) {
+function renderWatchedBucket(bucketKey) {
+    renderWatchedScreen(WATCHED_BUCKETS[bucketKey] ? bucketKey : null);
+}
+
+function renderWatchedScreen(bucketKey) {
     startTransitionLock();
-    isChatScreenOpen = false;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
-    }
-    currentCategoryName = "🍿 Будем смотреть";
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = true;
-    isCalendarScreenOpen = false;
+    resetScreenState();
+    currentCategoryName = "🎬 Просмотрено";
+    currentWatchedBucket = bucketKey || 'top';
+    setShellSection("watched");
 
     app.innerHTML = "";
+    app.appendChild(buildListsTabs("watched"));
 
-    let title = document.createElement("h1");
-    setEmojiTitle(title, "🍿 Будем смотреть");
-    app.appendChild(title);
+    const list = sortTitlesAlphabetically(bucketKey ? Array.from(WATCHED_BUCKETS[bucketKey].set()) : getAllWatchedTitles());
+    app.appendChild(buildListPageHead("🎬 Просмотрено", list.length));
 
-    const list = Array.from(wishlistTitles);
-    if (list.length === 0) {
-        let empty = document.createElement("p");
-        empty.style.textAlign = "center";
-        empty.style.color = "#999";
-        empty.textContent = "Здесь пока пусто.";
-        app.appendChild(empty);
-    } else {
-        const listFragment = document.createDocumentFragment();
-        renderCardGrid(list, listFragment);
-        app.appendChild(listFragment);
-    }
-    app.classList.toggle("long-list", list.length > 25);
+    const chips = document.createElement("div");
+    chips.className = "chip-row";
+    const chip = (label, count, isActive, onClick) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn chip" + (isActive ? " active" : "");
+        const labelSpan = document.createElement("span");
+        labelSpan.textContent = label;
+        const countSpan = document.createElement("span");
+        countSpan.className = "chip-count";
+        countSpan.textContent = count;
+        btn.append(labelSpan, countSpan);
+        btn.onclick = onClick;
+        chips.appendChild(btn);
+    };
+    chip("Все", getAllWatchedTitles().length, !bucketKey, () => renderWatchedTop());
+    Object.keys(WATCHED_BUCKETS).forEach(key => {
+        const bucket = WATCHED_BUCKETS[key];
+        chip(bucket.chip, bucket.set().size, bucketKey === key, () => renderWatchedBucket(key));
+    });
+    app.appendChild(chips);
 
-    let countFooter = document.createElement("p");
-    countFooter.className = "count-footer";
-    countFooter.textContent = `Всего тайтлов: ${list.length}`;
-    app.appendChild(countFooter);
+    renderTitleListOrEmpty(list, "🎬", "Здесь пока пусто");
+}
 
-    // Тоже верхний экран раздела — "Назад" либо в "Закладки" (если оттуда
-    // и пришли), либо дублировал бы "Домой".
-    renderWatchedNav(cameFromBookmarks ? () => showCompactBookmarksScreen() : null);
+function renderWishlistFolder() {
+    startTransitionLock();
+    resetScreenState();
+    currentCategoryName = "🍿 Будем смотреть";
+    isWishlistScreenOpen = true;
+    setShellSection("wishlist");
+
+    app.innerHTML = "";
+    app.appendChild(buildListsTabs("wishlist"));
+
+    const list = sortTitlesAlphabetically(Array.from(wishlistTitles));
+    app.appendChild(buildListPageHead("🍿 Будем смотреть", list.length));
+    renderTitleListOrEmpty(list, "🍿", "Добавляйте сюда то, что хотите посмотреть, — кнопкой 🔖 на карточке");
 }
 
 // =======================================================
 // 📅 КАЛЕНДАРЬ ПРОСМОТРОВ — отдельный экран (как "Будем смотреть"/"Просмотрено")
 // =======================================================
-// Открывается кнопкой с главной, живёт вне обычной history/openData —
-// поэтому "Назад" здесь не нужен, только "Домой" (см. renderWatchedNav(null)
-// ниже, тот же приём, что и у других верхнеуровневых разделов) — если
-// экран не открыт из "🔖 Закладки" (компактный режим), тогда "Назад" ведёт
-// туда (см. calendarCameFromBookmarks/renderCalendarScreen() ниже).
-function showCalendarScreen(cameFromBookmarks = false) {
+// Раздел верхнего уровня, живёт вне обычной history/openData — "назад" не нужен.
+function showCalendarScreen() {
     startTransitionLock();
-    isChatScreenOpen = false;
-    currentWatchedBucket = null;
-    isWishlistScreenOpen = false;
+    resetScreenState();
     isCalendarScreenOpen = true;
-    if (chatPollInterval) {
-        clearInterval(chatPollInterval);
-        chatPollInterval = null;
-    }
     currentCategoryName = "📅 Календарь просмотров";
-    calendarCameFromBookmarks = cameFromBookmarks;
 
     // Открываем на текущем месяце, если до этого календарь ещё не открывался
     // за эту сессию — а если пользователь уже листал месяцы вперёд/назад,
@@ -6888,10 +5843,12 @@ function showCalendarScreen(cameFromBookmarks = false) {
 }
 
 function renderCalendarScreen() {
+    setShellSection("calendar");
     app.innerHTML = "";
+    app.appendChild(buildListsTabs("calendar"));
 
     let title = document.createElement("h1");
-    setEmojiTitle(title, "📅 Календарь просмотров");
+    setEmojiTitle(title, "📅 Календарь");
     app.appendChild(title);
 
     // Переключатель месяца
@@ -6986,16 +5943,74 @@ function renderCalendarScreen() {
         grid.appendChild(cell);
     }
 
-    app.appendChild(grid);
+    // Сетка месяца слева, список ближайших планов справа (на телефоне — под сеткой)
+    const layout = document.createElement("div");
+    layout.className = "cal-layout";
+    const calMain = document.createElement("div");
+    calMain.className = "cal-main";
+    calMain.append(monthNav, weekDaysRow, grid);
+    layout.append(calMain, buildCalendarAgenda());
+    app.appendChild(layout);
+}
 
-    let hint = document.createElement("p");
-    hint.className = "count-footer";
-    hint.textContent = "Нажмите на выделенный день, чтобы посмотреть, увидеть и изменить план.";
-    app.appendChild(hint);
+// "Ближайшие планы": все будущие дни с тайтлами по порядку, с постерами.
+// Тап по дню — то же окно дня, что и в сетке (перенести/удалить/просмотрено).
+function buildCalendarAgenda() {
+    const section = document.createElement("section");
+    section.className = "cal-agenda";
 
-    // Верхний экран раздела — "Назад" либо в "Закладки" (если оттуда и
-    // пришли), либо вёл бы туда же, куда "Домой".
-    renderWatchedNav(calendarCameFromBookmarks ? () => showCompactBookmarksScreen() : null);
+    const head = document.createElement("h2");
+    head.className = "ui-section-title";
+    head.textContent = "Ближайшие планы";
+    section.appendChild(head);
+
+    const todayKey = todayDateKey();
+    const dates = Object.keys(scheduledByDate).filter(d => d >= todayKey && scheduledByDate[d].length > 0).sort();
+
+    if (dates.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "ui-empty";
+        empty.innerHTML = `<span class="ui-empty-emoji">🗓️</span>`;
+        empty.appendChild(document.createTextNode("Пока ничего не запланировано. Запланировать просмотр можно кнопкой 🔖 на карточке тайтла."));
+        section.appendChild(empty);
+        return section;
+    }
+
+    const tomorrowKey = toDateKey(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    dates.forEach(dateKey => {
+        const date = parseDateKey(dateKey);
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "ui-btn cal-agenda-row" + (dateKey === todayKey ? " cal-agenda-today" : "");
+        row.onclick = () => showDayPlansModal(dateKey);
+
+        const when = dateKey === todayKey ? "Сегодня" : dateKey === tomorrowKey ? "Завтра"
+            : capitalizeFirst(date.toLocaleDateString("ru-RU", { weekday: "short" }));
+        row.innerHTML = `
+            <span class="cal-agenda-date">
+                <span class="cal-agenda-day">${date.getDate()}</span>
+                <span class="cal-agenda-month">${date.toLocaleDateString("ru-RU", { month: "short" }).replace(".", "")}</span>
+            </span>
+            <span class="cal-agenda-body">
+                <span class="cal-agenda-when">${when}</span>
+                <span class="cal-agenda-titles"></span>
+            </span>
+        `;
+        const titlesEl = row.querySelector(".cal-agenda-titles");
+        scheduledByDate[dateKey].forEach(itemText => {
+            const item = document.createElement("span");
+            item.className = "cal-agenda-item";
+            item.innerHTML = `<span class="cal-agenda-poster">🎬</span><span class="cal-agenda-name"></span>`;
+            item.querySelector(".cal-agenda-name").textContent = itemText;
+            titlesEl.appendChild(item);
+            fetchTmdbCardMeta(itemText).then(meta => {
+                if (!meta || !meta.posterUrl || !item.isConnected) return;
+                item.querySelector(".cal-agenda-poster").innerHTML = `<img src="${meta.posterUrl}" alt="" loading="lazy">`;
+            });
+        });
+        section.appendChild(row);
+    });
+    return section;
 }
 
 // Модальное окно одного дня календаря: список запланированных тайтлов и
@@ -7149,77 +6164,79 @@ function showRandomTitleModal(titleText, pool = []) {
     overlay.id = "shakeRandomModal";
     overlay.style.zIndex = "10000";
 
-    overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); isShakeModalOpen = false; } };
-
     const isSecret = titleText.includes("Я Тебя Очень Сильно ЛЮБЛЮ!") || titleText.includes("Бакс Ориджинал") || (currentCategoryName && (currentCategoryName.includes("Секрет") || currentCategoryName.includes("🔒")));
 
     overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center; border: 3px solid #ff4081;">
-            <div style="font-size: 40px;">🎰</div>
-            <h2 id="shakeRandomTitle" style="margin: 15px 0;"></h2>
+        <div class="modal-content pick-modal">
+            <div class="pick-kicker">🎰 Случайный выбор</div>
+            ${!isSecret ? `<div class="pick-poster" id="shakePosterBox"><span>🎬</span></div>` : ""}
+            <h2 class="pick-title" id="shakeRandomTitle"></h2>
+            <div class="pick-meta" id="shakeRandomMeta"></div>
+            <div class="pick-actions">
+                <button type="button" class="ui-btn ui-pill ui-pill-accent pick-main" id="closeShakeBtn">Смотрим!</button>
+                <button type="button" class="ui-btn ui-pill" id="rerollShakeBtn">🔄 Другой</button>
+            </div>
             ${!isSecret ? `
-            <div id="shakePosterBox" style="margin: 0 0 15px; display: none; justify-content: center;"></div>
-            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                <button id="posterShakeBtn" class="btn-pink-style" style="flex:1;">🖼️ Постер</button>
-                <button id="trailerShakeBtn" class="btn-pink-style" style="flex:1;">🎬 Трейлер</button>
-            </div>
-            ` : ``}
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="closeShakeBtn" class="btn-save">Супер, смотрим!</button>
-                <button id="rerollShakeBtn" class="btn-cancel">🔄 Другой фильм</button>
-                <button id="bottomCloseShakeBtn" class="btn-cancel-gray">Закрыть</button>
-            </div>
+            <div class="pick-links">
+                <button type="button" class="ui-btn ui-link" id="detailsShakeBtn">Подробнее</button>
+                <button type="button" class="ui-btn ui-link" id="trailerShakeBtn">Трейлер ↗</button>
+            </div>` : ""}
         </div>
     `;
 
     const titleEl = overlay.querySelector("#shakeRandomTitle");
-    let currentTitle = titleText; // тайтл, который сейчас показан (меняется при "Другой фильм")
-
-    document.body.appendChild(overlay);
-
-    runSlotAnimation(titleEl, pool, titleText, isSecret);
+    const metaEl = overlay.querySelector("#shakeRandomMeta");
+    const posterBox = overlay.querySelector("#shakePosterBox");
+    let currentTitle = titleText; // тайтл, который сейчас показан (меняется при "Другой")
 
     const closeModal = () => { overlay.remove(); isShakeModalOpen = false; };
+    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+    document.body.appendChild(overlay);
 
-    document.getElementById("closeShakeBtn").onclick = closeModal;
-    document.getElementById("bottomCloseShakeBtn").onclick = closeModal;
-    document.getElementById("rerollShakeBtn").onclick = () => {
+    // Постер и жанры подставляются, когда "барабан" остановился
+    const revealMeta = (pick) => {
+        if (isSecret) return;
+        fetchTmdbCardMeta(pick).then(meta => {
+            if (!overlay.isConnected || pick !== currentTitle) return;
+            metaEl.textContent = meta && meta.genreNames ? meta.genreNames : "";
+            posterBox.innerHTML = meta && meta.posterUrl ? `<img src="${meta.posterUrl}" alt="">` : "<span>🎬</span>";
+        });
+    };
+    const spin = (pick, spinPool) => {
+        metaEl.textContent = "";
+        if (posterBox) posterBox.innerHTML = "<span>🎲</span>";
+        runSlotAnimation(titleEl, spinPool, pick, isSecret, () => revealMeta(pick));
+    };
+    spin(titleText, pool);
+
+    overlay.querySelector("#closeShakeBtn").onclick = closeModal;
+    overlay.querySelector("#rerollShakeBtn").onclick = () => {
         const all = pool.length > 0 ? pool : getAllTitlesFromCategory(history[history.length - 1]);
-        const next = all[Math.floor(Math.random() * all.length)];
+        if (all.length === 0) return;
+        currentTitle = all[Math.floor(Math.random() * all.length)];
         vibrate(30);
-        currentTitle = next;
-        // Скрываем постер прошлого тайтла — он больше не актуален после перепрокрутки
-        const posterBox = overlay.querySelector("#shakePosterBox");
-        if (posterBox) { posterBox.style.display = "none"; posterBox.innerHTML = ""; }
-        runSlotAnimation(titleEl, all, next, isSecret);
+        spin(currentTitle, all);
     };
 
     if (!isSecret) {
-        const posterBtn = document.getElementById("posterShakeBtn");
-        const trailerBtn = document.getElementById("trailerShakeBtn");
-        const posterBox = document.getElementById("shakePosterBox");
-
-        posterBtn.onclick = async () => {
-            if (posterBox.style.display === "flex") {
-                posterBox.style.display = "none";
-                return;
-            }
-            posterBox.style.display = "flex";
-            posterBox.innerHTML = `<p style="color: #9686b8; font-size: 13px;">Ищем постер...</p>`;
-            const url = await fetchTmdbPoster(currentTitle);
-            if (!overlay.isConnected) return; // модалку уже закрыли, пока грузился постер
-            if (url) {
-                posterBox.innerHTML = `<img src="${url}" alt="Постер" style="max-width: 160px; border-radius: 12px; box-shadow: 0 6px 18px rgba(180,80,120,0.25);">`;
-            } else {
-                posterBox.innerHTML = `<p style="color: #9686b8; font-size: 13px;">Постер к фильму не найден</p>`;
-            }
-        };
-
-        trailerBtn.onclick = () => {
+        overlay.querySelector("#detailsShakeBtn").onclick = () => { closeModal(); showActionMenu(currentTitle); };
+        overlay.querySelector("#trailerShakeBtn").onclick = () => {
             const query = encodeURIComponent(currentTitle + " трейлер");
             window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
         };
     }
+}
+
+// Все тайтлы обычных категорий (без секретной) — пул для случайного выбора
+function getAllCatalogTitles() {
+    return getOrderedCategoryKeys().normal.reduce((all, key) => all.concat(getAllTitlesFromCategory(dbData[key])), []);
+}
+
+// Тот же выбор, что и при встряхивании телефона, только по всему каталогу
+function showRandomTitleFromCatalog() {
+    const pool = getAllCatalogTitles();
+    if (pool.length === 0) return;
+    showRandomTitleModal(pool[Math.floor(Math.random() * pool.length)], pool);
 }
 
 function onPhoneShake() {
@@ -7231,9 +6248,9 @@ function onPhoneShake() {
     if (now - lastShakeTime < 2000 || isShakeModalOpen) return;
 
     const currentDataBranch = history[history.length - 1];
-    if (!currentDataBranch) return;
-
-    const allTitles = getAllTitlesFromCategory(currentDataBranch);
+    const allTitles = currentDataBranch
+        ? getAllTitlesFromCategory(currentDataBranch)
+        : getAllCatalogTitles();
     if (allTitles.length === 0) return;
 
     lastShakeTime = now;
