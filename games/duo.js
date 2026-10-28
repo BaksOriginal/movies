@@ -54,7 +54,11 @@ function duoSaveRoom(id, room) {
 
 function duoIsHost() { return !!duo.partnerKey && duo.me < duo.partnerKey; }
 function duoPartnerHere() { return duo.partnerOnline && duo.partner && duo.partner.room === duo.roomId && !!duo.roomId; }
-function duoPartnerName() { return (duo.partner && duo.partner.name) || (duo.me === "u1" ? "Asmoday" : "Партнёр"); }
+// Имя партнёра: из presence, а если он не в сети — второе из двух известных имён
+function duoPartnerName() {
+    if (duo.partner && duo.partner.name) return duo.partner.name;
+    return duo.myName === "Myakish" ? "Asmoday" : duo.myName === "Asmoday" ? "Myakish" : "Партнёр";
+}
 function duoOptsKey(room) { return JSON.stringify(room ? room.options : {}); }
 
 // ---------- Канал ----------

@@ -3279,8 +3279,8 @@ body.duo-playing .duo-body > *{ flex: 1; min-height: 0; }
 .bg-chip-piece > span{ width: 100%; height: 100%; border-radius: 50%; }
 .bg-chip-piece.ck-w > span{ background: radial-gradient(circle at 35% 30%, #fff, #ff8cc6); box-shadow: 0 0 8px rgba(255,46,147,0.5); }
 .bg-chip-piece.ck-b > span{ background: radial-gradient(circle at 35% 30%, #5b45a0, #140b2c); box-shadow: inset 0 0 0 2px rgba(46,232,255,0.65); }
-.ck-lobby-art{ display: flex; gap: 14px; justify-content: center; padding: 6px 0; container-type: inline-size; }
-.ck-lobby-art .ck-piece{ position: relative; left: auto; top: auto; width: 58px; height: 58px; transform: none; cursor: default; }
+.ck-lobby-art{ display: flex; gap: 14px; justify-content: center; padding: 6px 0; }
+.ck-lobby-art .ck-piece{ flex: none; position: relative; left: auto; top: auto; width: 58px; height: 58px; transform: none; cursor: default; }
 .ck-lobby-art .ck-piece.is-king > span::after{ font-size: 22px; }
 .ck-lobby-art .ck-piece:nth-child(2){ transform: translateY(-8px); }
 
