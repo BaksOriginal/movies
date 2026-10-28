@@ -81,6 +81,7 @@ function duoInit() {
         .on("broadcast", { event: "act" }, ({ payload }) => duoOnAct(payload))
         .on("broadcast", { event: "hello" }, ({ payload }) => duoOnHello(payload))
         .on("broadcast", { event: "ver" }, ({ payload }) => duoOnVer(payload))
+        .on("broadcast", { event: "react" }, ({ payload }) => duoOnReact(payload))
         .subscribe((status) => {
             if (duo.ch !== channel) return;
             if (status === "SUBSCRIBED") {
@@ -333,6 +334,183 @@ function duoSetReady(v) {
     duoChanged();
 }
 
+// ---------- Реакции: эмодзи и короткие сообщения сопернику ----------
+// Идут тем же broadcast'ом, в базу не пишутся. У получателя эмодзи вылетает
+// из аватарки отправителя, сообщение всплывает облачком под строкой игроков,
+// и то и другое — с тихим звуком. Отправителю показывается приглушённое эхо.
+const DUO_REACT_EMOJI = ["😂", "😍", "😎", "🤔", "😱", "😡", "😭", "😏", "👍", "👏", "🔥", "💀", "❤️", "🤡", "🙏", "🎉"];
+const DUO_REACT_PHRASES = ["Твой ход!", "Ха-ха, попался!", "Хорошо сыграно 👏", "Подожди минутку", "Ну ты даёшь!", "Ещё партию?", "Удачи!", "Сейчас вернусь"];
+const DUO_REACT_MAX_LEN = 80;
+const DUO_REACT_COOLDOWN_MS = 700;
+let duoLastReactAt = 0;
+
+function duoSendReact(kind, value) {
+    if (!duo.roomId) return;
+    const now = Date.now();
+    if (now - duoLastReactAt < DUO_REACT_COOLDOWN_MS) return;
+    duoLastReactAt = now;
+    const text = String(value || "").trim().slice(0, DUO_REACT_MAX_LEN);
+    if (!text) return;
+    if (kind === "emoji" && !DUO_REACT_EMOJI.includes(text)) return;
+    duoSend("react", { game: duo.roomId, kind, value: text });
+    vibrate(8);
+    duoShowReact(kind, text, true);
+}
+
+function duoOnReact(p) {
+    if (!p || p.from === duo.me || p.game !== duo.roomId || !duo.roomId) return;
+    const text = String(p.value || "").slice(0, DUO_REACT_MAX_LEN);
+    if (!text || (p.kind === "emoji" && !DUO_REACT_EMOJI.includes(text))) return;
+    duoShowReact(p.kind === "emoji" ? "emoji" : "msg", text, false);
+    duoReactSound(p.kind);
+    vibrate(15);
+}
+
+// Негромкий звук: эмодзи — короткий «блип», сообщение — мягкий колокольчик
+function duoReactSound(kind) {
+    if (typeof beep !== "function") return;
+    if (kind === "emoji") {
+        beep(740, 70, "sine", 0.05);
+        beep(990, 90, "sine", 0.04, 60);
+    } else {
+        beep(660, 90, "triangle", 0.05);
+        beep(880, 110, "triangle", 0.045, 100);
+        beep(1175, 160, "sine", 0.035, 210);
+    }
+}
+
+function duoReactLayer() {
+    let layer = document.getElementById("duoReactLayer");
+    if (!layer) {
+        layer = document.createElement("div");
+        layer.id = "duoReactLayer";
+        layer.className = "duo-react-layer";
+        document.body.appendChild(layer);
+    }
+    return layer;
+}
+
+function duoShowReact(kind, text, mine) {
+    const layer = duoReactLayer();
+    const avatar = document.querySelector(mine ? ".duo-players .is-me .duo-avatar" : ".duo-players .is-partner .duo-avatar");
+    const bar = document.getElementById("duoPlayers");
+    const ar = avatar ? avatar.getBoundingClientRect() : { left: innerWidth / 2, top: 80, width: 0, height: 0 };
+
+    if (kind === "emoji") {
+        // Крупный эмодзи и маленький «салют» из копий вокруг
+        const cx = ar.left + ar.width / 2, cy = ar.top + ar.height / 2;
+        const big = document.createElement("span");
+        big.className = "duo-react-emoji" + (mine ? " is-mine" : "");
+        big.textContent = text;
+        big.style.left = cx + "px";
+        big.style.top = cy + "px";
+        layer.appendChild(big);
+        setTimeout(() => big.remove(), 2000);
+        if (!mine) {
+            for (let k = 0; k < 6; k++) {
+                const bit = document.createElement("span");
+                bit.className = "duo-react-bit";
+                bit.textContent = text;
+                const ang = (Math.PI * 2 * k) / 6 + Math.random() * 0.6;
+                bit.style.left = cx + "px";
+                bit.style.top = cy + "px";
+                bit.style.setProperty("--dx", Math.cos(ang) * (60 + Math.random() * 40) + "px");
+                bit.style.setProperty("--dy", Math.sin(ang) * (50 + Math.random() * 40) + 70 + "px");
+                bit.style.animationDelay = (80 + k * 25) + "ms";
+                layer.appendChild(bit);
+                setTimeout(() => bit.remove(), 1600);
+            }
+        }
+        return;
+    }
+
+    // Сообщение — облачко под строкой игроков со стороны отправителя
+    let stack = layer.querySelector(mine ? ".duo-react-stack.is-mine" : ".duo-react-stack.is-partner");
+    if (!stack) {
+        stack = document.createElement("div");
+        stack.className = "duo-react-stack " + (mine ? "is-mine" : "is-partner");
+        layer.appendChild(stack);
+    }
+    const br = bar ? bar.getBoundingClientRect() : { left: 12, right: innerWidth - 12, bottom: 70 };
+    stack.style.top = (br.bottom + 8) + "px";
+    stack.style.left = br.left + "px";
+    stack.style.width = (br.right - br.left) + "px";
+    const bubble = document.createElement("div");
+    bubble.className = "duo-react-msg";
+    const who = mine ? duo.myName : duoPartnerName();
+    bubble.innerHTML = `<span class="duo-react-msg-who"></span><span class="duo-react-msg-text"></span>`;
+    bubble.querySelector(".duo-react-msg-who").textContent = who;
+    bubble.querySelector(".duo-react-msg-text").textContent = text;
+    stack.appendChild(bubble);
+    while (stack.children.length > 3) stack.firstElementChild.remove();
+    setTimeout(() => {
+        bubble.classList.add("is-leaving");
+        setTimeout(() => bubble.remove(), 350);
+    }, mine ? 2600 : 4500);
+}
+
+// Панель выбора: эмодзи или сообщение. Открывается под строкой игроков.
+function duoOpenReactPanel(kind) {
+    const existing = document.getElementById("duoReactPanel");
+    if (existing) {
+        const same = existing.dataset.kind === kind;
+        existing.remove();
+        if (same) return;
+    }
+    const bar = document.getElementById("duoPlayers");
+    if (!bar) return;
+    const br = bar.getBoundingClientRect();
+    const panel = document.createElement("div");
+    panel.id = "duoReactPanel";
+    panel.className = "duo-react-panel";
+    panel.dataset.kind = kind;
+    panel.style.top = (br.bottom + 8) + "px";
+    if (kind === "emoji") {
+        panel.innerHTML = `<div class="duo-react-emoji-grid">${DUO_REACT_EMOJI.map(e => `<button type="button" class="ui-btn duo-react-pick" data-v="${e}">${e}</button>`).join("")}</div>`;
+    } else {
+        panel.innerHTML = `
+            <div class="duo-react-phrases">${DUO_REACT_PHRASES.map(t => `<button type="button" class="ui-btn duo-react-phrase"></button>`).join("")}</div>
+            <form class="duo-react-form">
+                <input type="text" class="duo-react-input" maxlength="${DUO_REACT_MAX_LEN}" placeholder="Своя фраза…" autocomplete="off" enterkeyhint="send">
+                <button type="submit" class="ui-btn duo-react-send" aria-label="Отправить">➤</button>
+            </form>
+        `;
+        panel.querySelectorAll(".duo-react-phrase").forEach((b, i) => { b.textContent = DUO_REACT_PHRASES[i]; });
+    }
+    document.body.appendChild(panel);
+
+    const close = () => { panel.remove(); document.removeEventListener("pointerdown", outside, true); };
+    const outside = (e) => {
+        if (panel.contains(e.target) || e.target.closest("#duoEmojiBtn, #duoMsgBtn")) return;
+        close();
+    };
+    setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
+
+    panel.addEventListener("click", (e) => {
+        const pick = e.target.closest(".duo-react-pick");
+        if (pick) { duoSendReact("emoji", pick.dataset.v); close(); return; }
+        const phrase = e.target.closest(".duo-react-phrase");
+        if (phrase) { duoSendReact("msg", phrase.textContent); close(); }
+    });
+    const form = panel.querySelector(".duo-react-form");
+    if (form) {
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const input = form.querySelector(".duo-react-input");
+            if (!input.value.trim()) return;
+            duoSendReact("msg", input.value);
+            close();
+        });
+    }
+}
+
+function duoCloseReactUi() {
+    const panel = document.getElementById("duoReactPanel");
+    if (panel) panel.remove();
+    const layer = document.getElementById("duoReactLayer");
+    if (layer) layer.remove();
+}
+
 // ---------- Экран комнаты ----------
 function openDuoRoom(id) {
     const def = DUO_GAMES[id];
@@ -388,12 +566,23 @@ function openDuoRoom(id) {
                 <span class="duo-player-body"><span class="duo-player-name"></span><span class="duo-player-sub">${!duo.connected ? "соединение…" : here ? (!playing && duo.partner.ready ? "готов(а)" : "в комнате") : !duo.partnerOnline ? "не в сети" : duo.partner && duo.partner.room ? "в другой игре" : "в разделе игр"}</span></span>
                 <span class="duo-avatar">${escapeGameText(pName[0] || "?")}<i class="duo-dot"></i></span>
             </div>
-            ${playing ? `<button type="button" class="ui-btn duo-menu-btn" id="duoMenuBtn" aria-label="Меню партии">⋯</button>` : ""}
+            <div class="duo-quick">
+                <button type="button" class="ui-btn duo-quick-btn" id="duoEmojiBtn" aria-label="Отправить эмодзи" title="Эмодзи">😊</button>
+                <button type="button" class="ui-btn duo-quick-btn" id="duoMsgBtn" aria-label="Отправить сообщение" title="Сообщение">💬</button>
+                ${playing ? `<button type="button" class="ui-btn duo-quick-btn duo-menu-btn" id="duoMenuBtn" aria-label="Меню партии">⋯</button>` : ""}
+            </div>
         `;
         playersEl.querySelector(".is-me .duo-player-name").textContent = duo.myName;
         playersEl.querySelector(".is-partner .duo-player-name").textContent = pName;
         const menuBtn = playersEl.querySelector("#duoMenuBtn");
         if (menuBtn) menuBtn.onclick = showMenu;
+        const canReact = here && duo.connected;
+        ["duoEmojiBtn", "duoMsgBtn"].forEach((btnId, i) => {
+            const btn = playersEl.querySelector("#" + btnId);
+            btn.disabled = !canReact;
+            btn.onclick = () => duoOpenReactPanel(i === 0 ? "emoji" : "msg");
+        });
+        if (!canReact) { const panel = document.getElementById("duoReactPanel"); if (panel) panel.remove(); }
     }
 
     function showMenu() {
@@ -531,6 +720,7 @@ function openDuoRoom(id) {
 
     activeGameCleanup = () => {
         try { sessionStorage.removeItem(DUO_ACTIVE_ROOM_KEY); } catch (e) {}
+        duoCloseReactUi();
         setPlaying(false);
         window.removeEventListener("resize", fitRoom);
         if (window.visualViewport) window.visualViewport.removeEventListener("resize", fitRoom);
