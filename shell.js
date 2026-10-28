@@ -35,6 +35,7 @@ const SHELL_ICONS = {
     logout: '<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="m10 8-4 4 4 4M6 12h10"/>',
     lists: '<path d="M6 3.5h12v17l-6-4.5-6 4.5z"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    studio: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.8 1.7-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5C21 6.3 17 3 12 3z"/><path d="M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01"/>',
     pet: '<path d="M5 20v-8.5a7 7 0 0 1 14 0V20l-2.4-1.6L14.3 20 12 18.4 9.7 20l-2.3-1.6z"/><path d="M8.6 4.6 7.5 2.5M15.4 4.6l1.1-2.1M9.6 11.5h.01M14.4 11.5h.01"/>',
 };
 
@@ -62,6 +63,7 @@ const SHELL_NAV_GROUPS = [
         { id: "pet", label: "Питомец", icon: "pet" },
         { id: "w2g", label: "Совместный просмотр", icon: "w2g" },
         { id: "games", label: "Игры", icon: "games" },
+        { id: "studio", label: "Арт-студия", icon: "studio" },
         { id: "random", label: "Рандомайзер", icon: "random" },
     ] },
     { title: null, secret: true, items: [
@@ -74,14 +76,14 @@ const SHELL_TABS = [
     { id: "catalog", label: "Каталог", icon: "catalog", sections: ["catalog"] },
     { id: "wishlist", label: "Списки", icon: "lists", sections: ["wishlist", "watched", "calendar"] },
     { id: "chat", label: "Чат", icon: "chat", sections: ["chat", "comments"] },
-    { id: "more", label: "Ещё", icon: "more", sections: ["pet", "w2g", "games", "random", "secret", "add", "online"] },
+    { id: "more", label: "Ещё", icon: "more", sections: ["pet", "w2g", "games", "studio", "random", "secret", "add", "online"] },
 ];
 
 const SHELL_LABELS = {
     home: "愛してる", catalog: "Каталог", wishlist: "Будем смотреть", watched: "Просмотрено",
     calendar: "Календарь", chat: "Чат", comments: "Комментарии", w2g: "Совместный просмотр",
     games: "Игры", random: "Рандомайзер", secret: "Секрет", add: "Добавить тайтлы", online: "Онлайн-поиск",
-    search: "Поиск", list: "", pet: "Питомец",
+    search: "Поиск", list: "", pet: "Питомец", studio: "Арт-студия",
 };
 
 const DESKTOP_MEDIA = window.matchMedia("(min-width: 1024px)");
@@ -99,7 +101,7 @@ function isDesktopLayout() {
 }
 
 // opts: {
-//   page: "main" | "games" | "w2g",
+//   page: "main" | "games" | "w2g" | "studio",
 //   onNavigate(id) -> true, если страница обработала пункт сама,
 //   beforeLeave()   -> уборка перед уходом со страницы по ссылке,
 //   categories: [{ key, label, emoji, count }] — обычные категории каталога
@@ -232,6 +234,7 @@ function shellNavigate(id) {
     const base = shellBaseHref();
     if (id === "games") location.href = base + "games/";
     else if (id === "w2g") location.href = base + "w2g/";
+    else if (id === "studio") location.href = base + "studio/";
     else if (id.startsWith("category:")) location.href = base + "#" + encodeURIComponent(id);
     else location.href = base + "#" + id;
 }

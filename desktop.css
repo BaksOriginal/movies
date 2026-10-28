@@ -356,3 +356,29 @@ body[data-section="pet"] .shell-main .container{ max-width: 1240px; }
 .dk-field{ --fw-max: 80px; gap: 10px; }
 .dk-hand .dk-card{ --w: 84px; }
 .dk-hand{ padding-top: 14px; }
+
+/* ---------- Арт-студия ---------- */
+.st-hero{ grid-template-columns: minmax(0, 1fr) 360px; align-items: center; padding: 30px 32px; }
+.st-grid{ grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.st-editor{
+    grid-template-columns: 84px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: "top top" "tools view" "tools props";
+}
+.st-top{ padding: 8px 14px; gap: 6px; }
+.st-title{ font-size: 16px; }
+.st-tools{
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 10px 8px;
+    border-top: 0;
+    border-right: 1px solid var(--border);
+    overflow: auto;
+}
+.st-tool{ min-width: 0; height: 60px; gap: 4px; }
+.st-tool-label{ display: block; }
+.st-props{ padding: 10px 16px; gap: 12px; }
+.st-width{ flex: 0 1 320px; margin-left: auto; }
+.st-quick{ width: 28px; height: 28px; }
+.st-zoom{ right: 16px; bottom: 16px; }

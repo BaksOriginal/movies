@@ -2245,6 +2245,9 @@ async function showHome() {
     search.appendChild(buildSearchBar());
     side.appendChild(search);
 
+    // ---- Совместный просмотр: заметная кнопка сразу под приветствием ----
+    home.appendChild(buildHomeWatchPartyButton());
+
     // ---- Питомец (виджет; полная страница — по тапу) ----
     home.appendChild(buildPetWidget());
 
@@ -2284,6 +2287,22 @@ async function showHome() {
     if (watchedTogether.length > 0) {
         home.appendChild(buildUiSection("Посмотрели вместе", buildPosterRail(watchedTogether.slice(0, 24)), () => renderWatchedBucket("both")));
     }
+}
+
+function buildHomeWatchPartyButton() {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ui-btn home-w2g";
+    btn.innerHTML = `
+        <span class="home-w2g-icon">${shellIcon("w2g")}</span>
+        <span class="home-w2g-text">
+            <span class="home-w2g-title">Совместный просмотр</span>
+            <span class="home-w2g-sub">Одно видео на двоих, синхронно, со звонком и чатом</span>
+        </span>
+        <span class="home-w2g-go">Смотреть вместе</span>
+    `;
+    btn.onclick = () => { vibrate(8); shellNavigate("w2g"); };
+    return btn;
 }
 
 // Карточка "Следующий просмотр" в hero главной: ближайшая дата из календаря,
@@ -2546,7 +2565,7 @@ function navigateFromShell(id) {
         case "add": resetScreenState(); showBatchAddTitlesScreen(); return true;
         case "online": resetScreenState(); showOnlineSearchScreen(); return true;
     }
-    return false; // w2g / games — отдельные страницы
+    return false; // w2g / games / studio — отдельные страницы
 }
 
 // Диплинк с других страниц сайта (../#wishlist, ../#category:...) — оболочка
