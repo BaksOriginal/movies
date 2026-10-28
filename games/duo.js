@@ -378,10 +378,28 @@ function openDuoRoom(id) {
         bodyEl.querySelector("#duoReadyBtn").onclick = () => { vibrate(10); duoSetReady(!duo.ready); };
     }
 
+    // Во время партии страница не скроллится: комната ровно по высоте окна
+    function fitRoom() {
+        if (!root.isConnected) return;
+        if (!document.body.classList.contains("duo-playing")) { root.style.height = ""; return; }
+        window.scrollTo(0, 0);
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        root.style.height = Math.max(420, vh - root.getBoundingClientRect().top - 12) + "px";
+    }
+    function setPlaying(v) {
+        if (document.body.classList.contains("duo-playing") === v) return;
+        document.body.classList.toggle("duo-playing", v);
+        document.documentElement.classList.toggle("duo-playing", v);
+        fitRoom();
+    }
+    window.addEventListener("resize", fitRoom);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", fitRoom);
+
     function render() {
         if (!root.isConnected) return;
         renderPlayers();
         const playing = duo.room.game && !duo.room.game.over;
+        setPlaying(!!playing || mode === "game" || mode === "ending");
         if (playing) {
             if (mode !== "game") {
                 if (gameView && gameView.destroy) gameView.destroy();
@@ -411,6 +429,9 @@ function openDuoRoom(id) {
     };
 
     activeGameCleanup = () => {
+        setPlaying(false);
+        window.removeEventListener("resize", fitRoom);
+        if (window.visualViewport) window.visualViewport.removeEventListener("resize", fitRoom);
         if (gameView && gameView.destroy) gameView.destroy();
         duo.view = null;
         duo.roomId = null;
@@ -435,10 +456,6 @@ function buildDuoSection() {
         <div class="duo-cards" id="duoCards"></div>
     `;
     const cards = section.querySelector("#duoCards");
-    const soon = [
-        { id: "checkers", emoji: "⛀", title: "Шашки", desc: "Русские шашки" },
-        { id: "tictactoe", emoji: "✖️", title: "Крестики-нолики", desc: "Скоро" }
-    ];
 
     function render() {
         if (!section.isConnected && section.parentNode) return;
@@ -469,13 +486,6 @@ function buildDuoSection() {
                 ${waiting ? `<span class="duo-card-badge">Ждёт</span>` : ""}
             `;
             card.onclick = () => openDuoRoom(def.id);
-            cards.appendChild(card);
-        });
-        soon.forEach(g => {
-            if (DUO_GAMES[g.id]) return;
-            const card = document.createElement("div");
-            card.className = "duo-card is-soon";
-            card.innerHTML = `<span class="duo-card-emoji">${g.emoji}</span><span class="duo-card-body"><span class="duo-card-title">${g.title}</span><span class="duo-card-sub">Скоро</span></span>`;
             cards.appendChild(card);
         });
     }

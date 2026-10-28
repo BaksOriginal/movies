@@ -195,6 +195,33 @@ function dkCardHtml(card, extra = "") {
 }
 function dkBackHtml(extra = "") { return `<div class="dk-card dk-back${extra}"><span></span></div>`; }
 
+// Почему ход не проходит — короткое объяснение вместо подсказок заранее
+function dkWhyNot(s, me, pName, intent, card, target) {
+    if (s.attacker !== me && s.defender !== me) return "Сейчас не твой ход";
+    if (intent === "attack") {
+        if (s.attacker !== me) return `Сейчас ходит ${pName}`;
+        if (s.table.length >= dkTableLimit(s)) return s.firstBout ? "В первый отбой — не больше 5 карт" : "На столе уже 6 карт";
+        if (dkUndefended(s) >= s.hands[s.defender].length) return `Больше не подкинуть — у ${pName} не хватит карт`;
+        return "Подкидывать можно только карты того же достоинства, что уже на столе";
+    }
+    if (s.defender !== me) return `Сейчас ходит ${pName}`;
+    if (s.phase === "taking") return "Ты уже берёшь карты";
+    if (intent === "defend") {
+        const pair = s.table[target];
+        if (!pair) return "Положи карту на ту, которую бьёшь";
+        if (pair.d) return "Эта карта уже побита";
+        return `${DK_RANK_LABEL[card[0]]}${DK_SUIT_SYMBOL[dkSuit(card)]} не бьёт ${DK_RANK_LABEL[pair.a[0]]}${DK_SUIT_SYMBOL[dkSuit(pair.a)]} — нужна старше той же масти или козырь`;
+    }
+    if (intent === "transfer") {
+        if (s.mode !== "perevodnoy") return "Положи карту на ту, которую бьёшь";
+        if (s.table.some(p => p.d)) return "Переводить можно только до первой отбитой карты";
+        if (!s.table.every(p => p.a[0] === card[0])) return "Перевести можно только картой того же достоинства";
+        if (s.table.length + 1 > dkTableLimit(s)) return "Больше карт на стол не положить";
+        return `У ${pName} не хватит карт, чтобы отбиться — перевести нельзя`;
+    }
+    return "Так нельзя";
+}
+
 function dkMount(container, ctx) {
     const me = ctx.me;
     container.innerHTML = `
@@ -204,34 +231,190 @@ function dkMount(container, ctx) {
                 <div class="dk-role" id="dkOppRole"></div>
             </div>
             <div class="dk-middle">
-                <div class="dk-deck" id="dkDeck"></div>
+                <div class="dk-side">
+                    <div class="dk-deck" id="dkDeck"></div>
+                    <div class="dk-discard" id="dkDiscard"></div>
+                </div>
                 <div class="dk-field" id="dkField"></div>
-                <div class="dk-discard" id="dkDiscard"></div>
             </div>
             <div class="dk-status" id="dkStatus"></div>
             <div class="dk-actions" id="dkActions"></div>
             <div class="dk-fan dk-hand" id="dkHand"></div>
+            <div class="dk-toast" id="dkToast"></div>
             <div class="dk-wait" id="dkWait" hidden><div class="dk-wait-box"><span class="dk-wait-icon">⏸</span><span id="dkWaitText"></span></div></div>
         </div>
     `;
     const el = (id) => container.querySelector("#" + id);
-    const oppHandEl = el("dkOppHand"), fieldEl = el("dkField"), handEl = el("dkHand");
+    const tableEl = container.querySelector(".dk-table");
+    const oppHandEl = el("dkOppHand"), fieldEl = el("dkField"), handEl = el("dkHand"), middleEl = container.querySelector(".dk-middle");
 
     let S = null;
-    let selected = null;       // выбранная защитником карта, если вариантов несколько
+    let selected = null;       // карта, поднятая тапом (вместо перетаскивания)
     let prevTable = [];
     let prevHand = new Set();
     let prevOppCount = 0;
-    let busy = false;          // ход отправлен, ждём ответ хозяина
+    let pending = null;        // { card, timer } — ход отправлен, ждём ответ хозяина
+    let placedCard = null;     // карта, которую только что положили руками (без «прилёта»)
+    let drag = null;
 
-    function send(action) {
-        busy = true;
-        selected = null;
-        vibrate(8);
-        ctx.act(action);
-        setTimeout(() => { busy = false; }, 1200);
+    // ---------- Ход: проверка и отправка ----------
+    function resolveDrop(card, pairIndex) {
+        const s = S;
+        const pName = ctx.partnerName();
+        if (s.attacker === me) {
+            return dkCanAttackWith(s, card) ? { type: "attack", card } : { error: dkWhyNot(s, me, pName, "attack", card) };
+        }
+        if (s.defender !== me || s.phase !== "attack") return { error: dkWhyNot(s, me, pName, "defend", card, pairIndex) };
+        const undef = s.table.map((p, i) => p.d ? -1 : i).filter(i => i >= 0);
+        if (pairIndex != null && s.table[pairIndex] && !s.table[pairIndex].d) {
+            return dkDefendTargets(s, card).includes(pairIndex) ? { type: "defend", card, target: pairIndex } : { error: dkWhyNot(s, me, pName, "defend", card, pairIndex) };
+        }
+        // Мимо конкретной карты: в переводном — попытка перевода; иначе,
+        // если отбивать нужно одну карту, считаем, что бьём её
+        if (s.mode === "perevodnoy" && s.table.length && !s.table.some(p => p.d) && s.table.every(p => p.a[0] === card[0])) {
+            return dkCanTransfer(s, card) ? { type: "transfer", card } : { error: dkWhyNot(s, me, pName, "transfer", card) };
+        }
+        if (undef.length === 1) {
+            return dkDefendTargets(s, card).includes(undef[0]) ? { type: "defend", card, target: undef[0] } : { error: dkWhyNot(s, me, pName, "defend", card, undef[0]) };
+        }
+        if (!undef.length) return { error: `Всё отбито — ждём, что решит ${pName}` };
+        return { error: s.mode === "perevodnoy" && !s.table.some(p => p.d) ? dkWhyNot(s, me, pName, "transfer", card) : "Положи карту на ту, которую бьёшь" };
     }
 
+    function send(action) {
+        selected = null;
+        vibrate(8);
+        if (action.card) {
+            placedCard = action.card;
+            const c = handEl.querySelector(`.dk-card[data-c="${action.card}"]`);
+            if (c) c.classList.add("is-sending");
+            if (pending) clearTimeout(pending.timer);
+            pending = { card: action.card, timer: setTimeout(() => { pending = null; render(); }, 1500) };
+        }
+        ctx.act(action);
+    }
+
+    let toastTimer = null;
+    function toast(text) {
+        const t = el("dkToast");
+        t.textContent = text;
+        t.classList.remove("is-on");
+        void t.offsetWidth;
+        t.classList.add("is-on");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => t.classList.remove("is-on"), 2600);
+    }
+
+    function reject(cardEl, text) {
+        vibrate([20, 30, 20]);
+        if (cardEl) { cardEl.classList.remove("is-nope"); void cardEl.offsetWidth; cardEl.classList.add("is-nope"); }
+        if (text) toast(text);
+    }
+
+    function tryPlay(card, pairIndex, cardEl) {
+        if (!S || S.over || pending) return false;
+        const res = resolveDrop(card, pairIndex);
+        if (res.error) { reject(cardEl, res.error); return false; }
+        send(res);
+        return true;
+    }
+
+    // ---------- Перетаскивание ----------
+    function dropTargetAt(x, y) {
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) return null;
+        const pair = hit.closest(".dk-field .dk-pair");
+        if (pair) return { pair: +pair.dataset.i };
+        if (hit.closest(".dk-middle") || hit.closest(".dk-opp") || hit.closest(".dk-status")) return { pair: null };
+        return null;
+    }
+
+    function onPointerDown(e) {
+        const cardEl = e.target.closest(".dk-card");
+        if (!cardEl || !S || e.button > 0 || drag) return;
+        drag = { cardEl, card: cardEl.dataset.c, id: e.pointerId, x0: e.clientX, y0: e.clientY, moving: false, ghost: null };
+        try { cardEl.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    function onPointerMove(e) {
+        if (!drag || e.pointerId !== drag.id) return;
+        const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+        if (!drag.moving) {
+            if (Math.hypot(dx, dy) < 7) return;
+            drag.moving = true;
+            const r = drag.cardEl.getBoundingClientRect();
+            const ghost = drag.cardEl.cloneNode(true);
+            ghost.classList.add("dk-ghost");
+            ghost.classList.remove("is-new", "is-selected", "is-nope");
+            ghost.style.setProperty("--w", r.width + "px");
+            ghost.style.left = r.left + "px";
+            ghost.style.top = r.top + "px";
+            document.body.appendChild(ghost);
+            drag.ghost = ghost;
+            drag.offX = drag.x0 - r.left;
+            drag.offY = drag.y0 - r.top;
+            drag.cardEl.classList.add("is-dragging");
+            selected = null;
+            markSelected();
+            tableEl.classList.add("is-dragging");
+        }
+        e.preventDefault();
+        drag.ghost.style.left = (e.clientX - drag.offX) + "px";
+        drag.ghost.style.top = (e.clientY - drag.offY) + "px";
+        const t = dropTargetAt(e.clientX, e.clientY);
+        fieldEl.querySelectorAll(".is-hover").forEach(p => p.classList.remove("is-hover"));
+        middleEl.classList.toggle("is-hover", !!t);
+        if (t && t.pair != null) {
+            const p = fieldEl.querySelector(`.dk-pair[data-i="${t.pair}"]`);
+            if (p) p.classList.add("is-hover");
+        }
+    }
+    function endDrag(e, cancelled) {
+        if (!drag || e.pointerId !== drag.id) return;
+        const d = drag;
+        drag = null;
+        tableEl.classList.remove("is-dragging");
+        middleEl.classList.remove("is-hover");
+        fieldEl.querySelectorAll(".is-hover").forEach(p => p.classList.remove("is-hover"));
+        if (!d.moving) {
+            // Простой тап: поднять / опустить карту (положить — тапом по столу)
+            if (!cancelled) { selected = selected === d.card ? null : d.card; markSelected(); }
+            return;
+        }
+        const t = cancelled ? null : dropTargetAt(e.clientX, e.clientY);
+        const ok = t && tryPlay(d.card, t.pair, d.cardEl);
+        if (ok) {
+            d.ghost.remove();
+            d.cardEl.classList.remove("is-dragging");
+            return;
+        }
+        // Ход не засчитан — карта плавно возвращается в руку
+        const r = d.cardEl.getBoundingClientRect();
+        d.ghost.classList.add("is-returning");
+        d.ghost.style.left = r.left + "px";
+        d.ghost.style.top = r.top + "px";
+        setTimeout(() => { d.ghost.remove(); d.cardEl.classList.remove("is-dragging"); }, 230);
+    }
+    handEl.addEventListener("pointerdown", onPointerDown);
+    handEl.addEventListener("pointermove", onPointerMove);
+    handEl.addEventListener("pointerup", (e) => endDrag(e, false));
+    handEl.addEventListener("pointercancel", (e) => endDrag(e, true));
+    handEl.addEventListener("dragstart", (e) => e.preventDefault());
+
+    function markSelected() {
+        handEl.querySelectorAll(".dk-card").forEach(c => c.classList.toggle("is-selected", c.dataset.c === selected));
+        middleEl.classList.toggle("is-armed", !!selected);
+    }
+
+    // Поднятую тапом карту можно положить тапом по столу или по карте на столе
+    middleEl.addEventListener("click", (e) => {
+        if (!selected || !S) return;
+        const pair = e.target.closest(".dk-field .dk-pair");
+        const cardEl = handEl.querySelector(`.dk-card[data-c="${selected}"]`);
+        tryPlay(selected, pair ? +pair.dataset.i : null, cardEl);
+        markSelected();
+    });
+
+    // ---------- Раскладка ----------
     function layoutFan(box) {
         const cards = box.children;
         const n = cards.length;
@@ -240,34 +423,28 @@ function dkMount(container, ctx) {
         const avail = box.clientWidth;
         const step = n > 1 ? Math.min(w * 0.78, (avail - w) / (n - 1)) : 0;
         box.style.setProperty("--ml", (n > 1 ? step - w : 0) + "px");
-        box.style.setProperty("--fan-w", (w + step * (n - 1)) + "px");
     }
 
-    function onHandClick(e) {
-        const cardEl = e.target.closest(".dk-card");
-        if (!cardEl || !S || busy) return;
-        const card = cardEl.dataset.c;
-        if (!cardEl.classList.contains("is-playable")) { cardEl.classList.remove("is-nope"); void cardEl.offsetWidth; cardEl.classList.add("is-nope"); return; }
-
-        if (S.attacker === me) { send({ type: "attack", card }); return; }
-        if (S.defender === me && S.phase === "attack") {
-            const targets = dkDefendTargets(S, card);
-            const canTr = dkCanTransfer(S, card);
-            if (targets.length === 1 && !canTr) { send({ type: "defend", card, target: targets[0] }); return; }
-            if (targets.length === 0 && canTr) { send({ type: "transfer", card }); return; }
-            selected = selected === card ? null : card;
-            render();
+    // Подбираем размер карт на столе, чтобы все пары влезли без прокрутки
+    function layoutField() {
+        const n = Math.max(1, S ? S.table.length : 1);
+        const W = fieldEl.clientWidth, H = fieldEl.clientHeight;
+        if (!W || !H) return;
+        const maxW = parseFloat(getComputedStyle(fieldEl).getPropertyValue("--fw-max")) || 56;
+        let w = maxW;
+        for (; w > 30; w -= 2) {
+            const pw = w * 1.5 + 6, ph = w * 1.8 + 6;
+            const perRow = Math.max(1, Math.floor(W / pw));
+            if (Math.ceil(n / perRow) * ph <= H) break;
         }
+        fieldEl.style.setProperty("--fw", w + "px");
     }
-    function onFieldClick(e) {
-        if (!S || !selected || busy) return;
-        const tr = e.target.closest(".dk-transfer-slot");
-        if (tr) { send({ type: "transfer", card: selected }); return; }
-        const pair = e.target.closest(".dk-pair.is-target");
-        if (pair) send({ type: "defend", card: selected, target: +pair.dataset.i });
+
+    function layoutAll() {
+        layoutFan(handEl);
+        layoutFan(oppHandEl);
+        layoutField();
     }
-    handEl.addEventListener("click", onHandClick);
-    fieldEl.addEventListener("click", onFieldClick);
 
     function sweep(cardsHtml, cls) {
         const ghost = document.createElement("div");
@@ -279,6 +456,7 @@ function dkMount(container, ctx) {
 
     function render() {
         const s = S;
+        if (!s) return;
         const opp = dkOther(s, me);
         const pName = ctx.partnerName();
         const myHand = dkSortHand(s.hands[me], s.trump);
@@ -287,31 +465,33 @@ function dkMount(container, ctx) {
 
         // Колода и козырь
         el("dkDeck").innerHTML = `
-            ${s.deck.length ? `${dkCardHtml(s.trumpCard, " dk-trump-card")}${s.deck.length > 1 ? dkBackHtml(" dk-deck-top") : ""}` : `<div class="dk-trump-empty dk-s-${s.trump}">${DK_SUIT_SYMBOL[s.trump]}</div>`}
-            <span class="dk-deck-count">${s.deck.length ? s.deck.length : "колода пуста"} · козырь <b>${DK_SUIT_SYMBOL[s.trump]}</b></span>
+            <div class="dk-deck-stack">
+                ${s.deck.length ? `${dkCardHtml(s.trumpCard, " dk-trump-card")}${s.deck.length > 1 ? dkBackHtml(" dk-deck-top") : ""}` : `<div class="dk-trump-empty dk-s-${s.trump}">${DK_SUIT_SYMBOL[s.trump]}</div>`}
+            </div>
+            <span class="dk-deck-count">${s.deck.length ? s.deck.length : "пусто"} · <b class="dk-s-${s.trump}">${DK_SUIT_SYMBOL[s.trump]}</b></span>
         `;
-        el("dkDiscard").innerHTML = s.discard ? `<div class="dk-discard-pile">${dkBackHtml()}${dkBackHtml()}</div><span class="dk-deck-count">бито ${s.discard}</span>` : `<span class="dk-deck-count">бито 0</span>`;
+        el("dkDiscard").innerHTML = `<div class="dk-discard-pile">${s.discard ? dkBackHtml() + dkBackHtml() : ""}</div><span class="dk-deck-count">бито ${s.discard}</span>`;
 
         // Рука соперника (рубашками)
         const oppCount = s.hands[opp].length;
         oppHandEl.innerHTML = Array.from({ length: oppCount }, (_, i) => dkBackHtml(i >= prevOppCount ? " is-new" : "")).join("");
         prevOppCount = oppCount;
-        el("dkOppRole").innerHTML = `<span class="dk-role-name"></span><span class="dk-role-tag ${s.attacker === opp ? "is-attack" : "is-defend"}">${s.attacker === opp ? "ходит" : "отбивается"}</span><span class="dk-role-count">${oppCount} карт</span>`;
+        const oppTag = s.attacker === opp ? (s.phase === "taking" ? "подкидывает" : "ходит") : (s.phase === "taking" ? "берёт" : "отбивается");
+        el("dkOppRole").innerHTML = `<span class="dk-role-name"></span><span class="dk-role-tag ${s.attacker === opp ? "is-attack" : "is-defend"}">${oppTag}</span><span class="dk-role-count">${oppCount} ${dkPlural(oppCount)}</span>`;
         el("dkOppRole").querySelector(".dk-role-name").textContent = pName;
 
         // Стол: пары «атака / защита»
         const seen = new Set();
         prevTable.forEach(p => { seen.add(p.a); if (p.d) seen.add(p.d); });
         const from = s.last && s.last.by === me ? "is-from-me" : "is-from-opp";
-        let targets = [], canTr = false;
-        if (selected) { targets = dkDefendTargets(s, selected); canTr = dkCanTransfer(s, selected); }
+        const anim = (c) => seen.has(c) ? "" : c === placedCard ? " is-placed" : " is-new " + from;
         fieldEl.innerHTML = s.table.map((p, i) => `
-            <div class="dk-pair${targets.includes(i) ? " is-target" : ""}" data-i="${i}">
-                ${dkCardHtml(p.a, seen.has(p.a) ? "" : " is-new " + from)}
-                ${p.d ? dkCardHtml(p.d, " dk-cover" + (seen.has(p.d) ? "" : " is-new " + from)) : ""}
+            <div class="dk-pair${p.d ? " is-covered" : ""}" data-i="${i}">
+                ${dkCardHtml(p.a, anim(p.a))}
+                ${p.d ? dkCardHtml(p.d, " dk-cover" + anim(p.d)) : ""}
             </div>
-        `).join("") + (canTr ? `<div class="dk-pair dk-transfer-slot"><span>↪<br>Перевести</span></div>` : "")
-            + (s.table.length === 0 ? `<div class="dk-field-empty">${iAttack ? "Твой ход — выкладывай карту" : `Ходит ${escapeGameText(pName)}…`}</div>` : "");
+        `).join("") + (s.table.length === 0 ? `<div class="dk-field-empty">${iAttack ? "Твой ход — перетащи карту на стол" : `Ходит ${escapeGameText(pName)}…`}</div>` : "");
+        placedCard = null;
 
         // Стол только что опустел — карты улетают в «бито» или в руку взявшему
         if (prevTable.length && !s.table.length && s.last) {
@@ -322,72 +502,78 @@ function dkMount(container, ctx) {
         prevTable = s.table.map(p => ({ a: p.a, d: p.d }));
 
         // Моя рука
+        if (pending && !myHand.includes(pending.card)) { clearTimeout(pending.timer); pending = null; }
         handEl.innerHTML = myHand.map(c => {
-            let playable = false;
-            if (iAttack) playable = dkCanAttackWith(s, c);
-            else if (iDefend && s.phase === "attack") playable = dkDefendTargets(s, c).length > 0 || dkCanTransfer(s, c);
-            const cls = (playable ? " is-playable" : " is-dim") + (selected === c ? " is-selected" : "") + (prevHand.size && !prevHand.has(c) ? " is-new" : "") + (dkSuit(c) === s.trump ? " is-trump" : "");
+            const cls = (selected === c ? " is-selected" : "") + (prevHand.size && !prevHand.has(c) ? " is-new" : "") + (dkSuit(c) === s.trump ? " is-trump" : "") + (pending && pending.card === c ? " is-sending" : "");
             return dkCardHtml(c, cls);
         }).join("");
         prevHand = new Set(myHand);
+        middleEl.classList.toggle("is-armed", !!selected);
 
-        // Кнопки и подсказка
+        // Кнопки и строка «чей ход» — без подсказок, какой картой ходить
         const acts = [];
         let status = "";
         const undef = dkUndefended(s);
         if (iAttack) {
             if (s.phase === "taking") {
                 acts.push(`<button type="button" class="ui-btn dk-act dk-act-main" data-a="pass">👐 Пусть забирает</button>`);
-                status = `${pName} берёт. Можешь подкинуть ещё или отдать карты.`;
+                status = `${pName} берёт. Подкинь ещё или отдай карты.`;
             } else if (s.table.length && !undef) {
                 acts.push(`<button type="button" class="ui-btn dk-act dk-act-main" data-a="bita">✅ Бита</button>`);
-                status = "Всё отбито. Подкинь ещё или жми «Бита».";
+                status = "Всё отбито. Подкинь ещё или «Бита».";
             } else if (s.table.length) {
                 status = `${pName} отбивается…`;
             } else {
-                status = "Твой ход.";
+                status = "Твой ход";
             }
         } else if (iDefend) {
             if (!s.table.length) {
                 status = `Ходит ${pName}…`;
             } else if (s.phase === "taking") {
-                status = `Ты берёшь — ${pName} может подкинуть ещё.`;
+                status = `Ты берёшь — ${pName} может подкинуть ещё`;
             } else if (undef) {
                 acts.push(`<button type="button" class="ui-btn dk-act dk-act-take" data-a="take">🫴 Беру</button>`);
-                status = selected ? "Выбери, какую карту побить" + (dkCanTransfer(s, selected) ? " или переведи" : "") : (s.mode === "perevodnoy" && !s.table.some(p => p.d) ? "Отбивайся или переводи." : "Отбивайся.");
+                status = s.mode === "perevodnoy" && !s.table.some(p => p.d) ? "Отбивайся или переводи" : "Отбивайся";
             } else {
-                status = `Отбито. ${pName} решает — подкинуть или «Бита».`;
+                status = `Отбито. ${pName} решает — подкинуть или «Бита»`;
             }
         }
-        if (s.last && s.last.by !== me) {
-            const lastText = { transfer: `↪ ${pName} перевёл(а)!` }[s.last.type];
-            if (lastText) status = lastText + " " + status;
-        }
+        if (s.last && s.last.by !== me && s.last.type === "transfer") status = `↪ ${pName} перевёл(а)! ` + status;
         el("dkStatus").textContent = status;
-        el("dkStatus").classList.toggle("is-my-turn", acts.length > 0 || (iAttack && !s.table.length) || (iDefend && undef > 0 && s.phase === "attack"));
+        const myTurn = (iAttack && (s.phase === "taking" || !s.table.length || !undef)) || (iDefend && s.phase === "attack" && undef > 0);
+        el("dkStatus").classList.toggle("is-my-turn", myTurn);
         el("dkActions").innerHTML = acts.join("");
-        el("dkActions").querySelectorAll(".dk-act").forEach(b => { b.onclick = () => { if (!busy) send({ type: b.dataset.a }); }; });
+        el("dkActions").querySelectorAll(".dk-act").forEach(b => { b.onclick = () => { if (!pending) send({ type: b.dataset.a }); }; });
 
-        container.querySelector(".dk-table").classList.toggle("is-trump-" + s.trump, true);
-        requestAnimationFrame(() => { layoutFan(handEl); layoutFan(oppHandEl); });
+        layoutAll();
+        requestAnimationFrame(layoutAll);
     }
 
-    const ro = new ResizeObserver(() => { layoutFan(handEl); layoutFan(oppHandEl); });
-    ro.observe(handEl);
+    const ro = new ResizeObserver(() => { if (S) layoutAll(); });
+    ro.observe(tableEl);
+    ro.observe(fieldEl);
 
     return {
         update(state, info) {
             const changed = !S || JSON.stringify(S) !== JSON.stringify(state);
             S = state;
-            busy = false;
             if (selected && !state.hands[me].includes(selected)) selected = null;
             if (changed) render();
-            const wait = el("dkWait");
-            wait.hidden = !!info.partnerHere || !!state.over;
+            el("dkWait").hidden = !!info.partnerHere || !!state.over;
             el("dkWaitText").textContent = `${ctx.partnerName()} вышел(а) из комнаты — партия на паузе. Продолжите, когда вернётся.`;
         },
-        destroy() { ro.disconnect(); }
+        destroy() {
+            ro.disconnect();
+            document.querySelectorAll(".dk-ghost").forEach(g => g.remove());
+        }
     };
+}
+
+function dkPlural(n) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return "карта";
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return "карты";
+    return "карт";
 }
 
 duoRegister({

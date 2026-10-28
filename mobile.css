@@ -248,3 +248,6 @@ body::after{
     animation: none;
     will-change: auto;
 }
+
+/* Игры вдвоём: во время партии заголовок прячем — всё место под стол */
+body.duo-playing #app > h1{ display: none; }
