@@ -3352,3 +3352,33 @@ body.duo-playing .duo-body > *{ flex: 1; min-height: 0; }
 .wp-call-status-ok{ color: #22d97f; border-color: rgba(34,217,127,0.35); }
 .wp-call-status-wait{ color: var(--gold); border-color: rgba(255,209,92,0.3); }
 .wp-call-status-bad{ color: #ff7a90; border-color: rgba(255,84,112,0.4); }
+
+/* ============================================================
+   СКРОЛЛБАРЫ — тонкие неоновые на всём сайте
+   ------------------------------------------------------------
+   Chrome/Edge/Safari рисуют полосу через ::-webkit-scrollbar (с
+   градиентом и скруглением), Firefox — стандартными свойствами
+   (там только цвет и толщина). Стандартные свойства в Chrome
+   отключают ::-webkit-scrollbar, поэтому они только для Firefox.
+   На телефонах полосы системные и прячутся сами.
+   Там, где полоса скрыта специально (.rail-track, .chip-row и т.п.),
+   она так и остаётся скрытой.
+   ============================================================ */
+::-webkit-scrollbar{ width: 10px; height: 10px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner{ background: transparent; }
+::-webkit-scrollbar-thumb{
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(255,46,147,0.45), rgba(139,59,255,0.45)) padding-box;
+}
+::-webkit-scrollbar-thumb:hover{
+    border-width: 2px;
+    background: linear-gradient(180deg, var(--pink), var(--purple)) padding-box;
+}
+::-webkit-scrollbar-thumb:active{
+    background: linear-gradient(180deg, var(--pink-soft), var(--pink)) padding-box;
+}
+@supports (-moz-appearance: none){
+    *{ scrollbar-width: thin; scrollbar-color: rgba(255,46,147,0.5) transparent; }
+}

@@ -26,8 +26,6 @@ body:not(.shell-on) .shell{ display: block; }
     background: rgba(12,7,22,0.72);
     border-right: 1px solid var(--border);
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
 }
 .shell-brand{
     display: flex;
