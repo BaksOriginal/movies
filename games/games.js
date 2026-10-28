@@ -472,7 +472,8 @@ const GAMES_META = [
     { id: "runner", hue: 95, emoji: "🥦", title: "Бега Брокколи",           desc: "Беги без остановки и перепрыгивай препятствия на пути.",                    leaderboard: true,  start: () => startRunnerGame() },
     { id: "ninja", hue: 350,  emoji: "💣",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
     { id: "rhythm", hue: 305, emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() },
-    { id: "sudoku", hue: 190, emoji: "🔢", title: "Судоку",                  desc: "Классическая головоломка 9×9 с тремя уровнями сложности, заметками и подсказками.", leaderboard: false, tileText: () => sudokuTileText(), start: () => showSudokuMenu() }
+    { id: "sudoku", hue: 190, emoji: "🔢", title: "Судоку",                  desc: "Классическая головоломка 9×9 с тремя уровнями сложности, заметками и подсказками.", leaderboard: false, tileText: () => sudokuTileText(), start: () => showSudokuMenu() },
+    { id: "puzzle", hue: 215, emoji: "🧩", title: "Пазл",                    desc: "Собери любой постер с сайта: 24, 54 или 96 деталей. Можно выбрать фильм или довериться случаю.", leaderboard: false, tileText: () => puzzleTileText(), start: () => showPuzzleMenu() }
 ];
 
 // Экран выбора игры — "карта": шестиугольные точки-уровни, соединённые

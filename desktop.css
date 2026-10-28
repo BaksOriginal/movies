@@ -382,3 +382,12 @@ body[data-section="pet"] .shell-main .container{ max-width: 1240px; }
 .st-width{ flex: 0 1 320px; margin-left: auto; }
 .st-quick{ width: 28px; height: 28px; }
 .st-zoom{ right: 16px; bottom: 16px; }
+
+/* ---------- Морской бой ---------- */
+.bs-area.is-battle{ grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 24px; }
+.bs-side{ min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); justify-items: center; container-type: size; }
+.bs-side .bs-board{ width: min(100cqw, calc(100cqh - 22px)); gap: 2px; padding: 4px; border-radius: 14px; }
+.bs-area.is-place{ grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr) 300px; align-items: center; gap: 24px; }
+.bs-area.is-place .bs-dock{ align-content: center; }
+.bs-area.is-place .bs-fleet{ justify-content: flex-start; }
+.bs-area.is-place .bs-tools{ justify-content: flex-start; }
