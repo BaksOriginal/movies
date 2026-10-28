@@ -2241,6 +2241,8 @@ body.shell-same-screen #app .secret-sub{
     text-align: left;
     transition: border-color .15s ease, transform .15s ease;
 }
+/* На главной питомец стоит последним, после лент постеров */
+.home > .pet-widget:last-child{ margin-top: 28px; }
 .pet-widget:hover{ border-color: rgba(255,127,196,0.45); }
 .pet-widget:active{ transform: scale(.99); }
 .pet-widget.is-frozen{ border-color: rgba(46,232,255,0.4); }
@@ -4165,6 +4167,7 @@ html.st-editing, body.st-editing{ overflow: hidden; overscroll-behavior: none; }
         radial-gradient(120% 160% at 100% 50%, rgba(46,232,255,0.22), transparent 60%),
         #160c27;
     box-shadow: 0 10px 34px rgba(255,46,147,0.18);
+    margin-top: 14px;
     transition: transform .18s ease, box-shadow .18s ease;
 }
 /* Переливающаяся рамка */

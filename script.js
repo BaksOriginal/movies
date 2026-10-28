@@ -2245,12 +2245,6 @@ async function showHome() {
     search.appendChild(buildSearchBar());
     side.appendChild(search);
 
-    // ---- Совместный просмотр: заметная кнопка сразу под приветствием ----
-    home.appendChild(buildHomeWatchPartyButton());
-
-    // ---- Питомец (виджет; полная страница — по тапу) ----
-    home.appendChild(buildPetWidget());
-
     // ---- Категории ----
     if (normal.length > 0) {
         const tiles = document.createElement("div");
@@ -2268,7 +2262,12 @@ async function showHome() {
             btn.onclick = () => openCategory(key);
             tiles.appendChild(btn);
         });
-        home.appendChild(buildUiSection("Каталог", tiles));
+        const catalogSection = buildUiSection("Каталог", tiles);
+        // Совместный просмотр — заметная кнопка под плитками категорий
+        catalogSection.appendChild(buildHomeWatchPartyButton());
+        home.appendChild(catalogSection);
+    } else {
+        home.appendChild(buildHomeWatchPartyButton());
     }
 
     // ---- Ленты постеров ----
@@ -2287,6 +2286,9 @@ async function showHome() {
     if (watchedTogether.length > 0) {
         home.appendChild(buildUiSection("Посмотрели вместе", buildPosterRail(watchedTogether.slice(0, 24)), () => renderWatchedBucket("both")));
     }
+
+    // ---- Питомец (виджет; полная страница — по тапу) — в самом низу ----
+    home.appendChild(buildPetWidget());
 }
 
 function buildHomeWatchPartyButton() {
