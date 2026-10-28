@@ -1123,6 +1123,12 @@ function subscribeToChanges() {
             { event: '*', schema: 'public', table: 'titles' },
             (payload) => { onCatalogRealtimeChange(payload); }
         )
+        // Следим за общим питомцем (см. pet.js)
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'pet' },
+            (payload) => { onPetRealtimeChange(payload); }
+        )
         // Следим за чатом (отдельно от каталога, поиск это не затрагивает)
         .on(
             'postgres_changes',
@@ -2239,6 +2245,9 @@ async function showHome() {
     search.appendChild(buildSearchBar());
     side.appendChild(search);
 
+    // ---- Питомец (виджет; полная страница — по тапу) ----
+    home.appendChild(buildPetWidget());
+
     // ---- Категории ----
     if (normal.length > 0) {
         const tiles = document.createElement("div");
@@ -2528,6 +2537,7 @@ function navigateFromShell(id) {
         case "chat": resetScreenState(); clearNavHistory(); showChatScreen(); return true;
         case "comments": resetScreenState(); clearNavHistory(); showAllCommentsScreen(); return true;
         case "random": showRandomizerModal(); return true;
+        case "pet": resetScreenState(); clearNavHistory(); showPetScreen(); return true;
         case "secret": {
             const { secret } = getOrderedCategoryKeys();
             if (secret.length) openCategory(secret[0]);

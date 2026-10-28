@@ -313,3 +313,50 @@ body[data-section="games"] .shell-main .container{ max-width: 1240px; }
 
 /* Секрет: записки — колонкой комфортной ширины, а не во весь экран */
 body[data-section="secret"] .shell-main .container{ max-width: 980px; }
+
+/* Питомец: комната слева, панель справа */
+body[data-section="pet"] .shell-main .container{ max-width: 1240px; }
+.pet-page{
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+    gap: 28px;
+    align-items: start;
+}
+.pet-scene{ position: sticky; top: 92px; }
+.pet-widget-art{ width: 96px; height: 96px; }
+
+/* Судоку: поле слева, инструменты и цифры (3×3, как на нампаде) справа */
+.sdk-menu{ max-width: 980px; }
+.sdk-levels{ grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.sdk-level{ padding: 22px; }
+.sdk-game{
+    max-width: 960px;
+    display: grid;
+    grid-template-columns: minmax(0, 560px) 300px;
+    justify-content: center;
+    align-items: center;
+    gap: 36px;
+}
+.sdk-cell{ font-size: 30px; }
+.sdk-notes i{ font-size: 12.5px; }
+.sdk-pad{ grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sdk-num{ height: 72px; border-radius: 16px; }
+.sdk-num-digit{ font-size: 30px; }
+.sdk-keys-hint{ display: block; }
+
+/* Игры вдвоём: карточки в ряд, стол крупнее */
+.duo-cards{ grid-template-columns: 2fr 1fr 1fr; gap: 14px; }
+.duo-card:not(.is-soon){ grid-column: auto; }
+.duo-room{ max-width: 900px; }
+.duo-lobby{ padding: 28px 32px; max-width: 620px; width: 100%; justify-self: center; }
+.dk-table{ padding: 14px 24px 16px; gap: 10px; }
+.dk-opp-hand .dk-card{ --w: 46px; }
+.dk-opp-hand{ min-height: 66px; }
+.dk-middle{ grid-template-columns: 110px minmax(0, 1fr); min-height: 230px; }
+.dk-deck .dk-card{ --w: 58px; }
+.dk-field{ min-height: 230px; gap: 12px 10px; }
+.dk-field .dk-card{ --w: 70px; }
+.dk-pair{ width: 92px; height: 120px; }
+.dk-pair > .dk-cover{ left: 18px; top: 20px; }
+.dk-hand .dk-card{ --w: 84px; }
+.dk-hand{ min-height: 136px; padding-top: 14px; }

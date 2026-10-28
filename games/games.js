@@ -79,6 +79,188 @@ function playSound(name) {
     }
 }
 
+// =======================================================
+// НЕОНОВЫЙ СТИЛЬ ИГР — общая палитра и приёмы отрисовки
+// =======================================================
+// Все игры раздела рисуются в одном стиле с сайтом: ночная синтвейв-гамма,
+// светящиеся контуры, розово-фиолетово-голубые акценты.
+// Свечение сделано БЕЗ ctx.shadowBlur: он пересчитывает размытие на каждом
+// кадре и заметно тормозит на телефонах. Вместо этого линия рисуется
+// несколько раз — широкой полупрозрачной подложкой и тонкой яркой серединой.
+const NEON = {
+    void: "#07030f",
+    deep: "#12071f",
+    violet: "#2a0b3d",
+    plum: "#4a1150",
+    pink: "#ff2e93",
+    pinkSoft: "#ff7fc4",
+    purple: "#8b3bff",
+    cyan: "#2ee8ff",
+    gold: "#ffd15c",
+    green: "#39ff9c",
+    red: "#ff4d6d",
+    text: "#f2e9ff",
+};
+
+function neonRgba(hex, alpha) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+// Обводит ТЕКУЩИЙ путь контекста неоновой линией (путь строится до вызова)
+function neonStroke(ctx, color, width = 2) {
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.18;
+    ctx.lineWidth = width * 5;
+    ctx.stroke();
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = width * 2.4;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    ctx.restore();
+}
+
+// Мягкий светящийся ореол вокруг точки
+function neonHalo(ctx, x, y, r, color, alpha = 0.45) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, neonRgba(color, alpha));
+    g.addColorStop(1, neonRgba(color, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+// Детерминированные звёзды (одинаковые на каждом кадре), с мерцанием и параллаксом
+function drawNeonStars(ctx, w, h, t, { count = 40, offsetX = 0, offsetY = 0, seed = 7 } = {}) {
+    let s = seed;
+    const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    for (let i = 0; i < count; i++) {
+        const bx = rand() * w, by = rand() * h, size = rand() < 0.15 ? 2 : 1;
+        const x = ((bx - offsetX) % w + w) % w;
+        const y = ((by + offsetY) % h + h) % h;
+        ctx.globalAlpha = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(t * 2 + i * 1.7));
+        ctx.fillStyle = i % 5 === 0 ? NEON.cyan : i % 7 === 0 ? NEON.pinkSoft : "#ffffff";
+        ctx.fillRect(x, y, size, size);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// Ночное синтвейв-небо: тёмный верх, малиновое зарево у горизонта
+function drawNeonSky(ctx, w, horizonY) {
+    const g = ctx.createLinearGradient(0, 0, 0, horizonY);
+    g.addColorStop(0, NEON.void);
+    g.addColorStop(0.55, NEON.violet);
+    g.addColorStop(1, NEON.plum);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, horizonY);
+}
+
+// Полосатое "ретро-солнце" на горизонте
+function drawNeonSun(ctx, cx, horizonY, r) {
+    // зарево — до обрезки, иначе у него виден квадратный край
+    neonHalo(ctx, cx, horizonY - r * 0.4, r * 1.8, NEON.pink, 0.35);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cx - r - 2, horizonY - r - 2, r * 2 + 4, r + 2);
+    ctx.clip();
+    const g = ctx.createLinearGradient(0, horizonY - r, 0, horizonY);
+    g.addColorStop(0, NEON.gold);
+    g.addColorStop(1, NEON.pink);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, horizonY, r, Math.PI, 0);
+    ctx.fill();
+    // горизонтальные прорези, к низу толще
+    ctx.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < 6; i++) {
+        const y = horizonY - r * 0.5 + i * (r * 0.1);
+        ctx.fillRect(cx - r, y, r * 2, 1 + i * 0.8);
+    }
+    ctx.restore();
+}
+
+// Силуэт ночного города с огоньками окон (параллакс по scroll)
+function drawNeonSkyline(ctx, w, baseY, scroll, { color = NEON.deep, maxH = 60, seed = 3 } = {}) {
+    let s = seed;
+    const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    const blocks = [];
+    let x = 0;
+    while (x < w + 80) {
+        const bw = 16 + rand() * 26, bh = maxH * (0.35 + rand() * 0.65);
+        blocks.push({ x, bw, bh, lit: rand() });
+        x += bw + 2;
+    }
+    const total = x;
+    ctx.fillStyle = color;
+    blocks.forEach(b => {
+        const bx = ((b.x - scroll) % total + total) % total - 40;
+        ctx.fillRect(bx, baseY - b.bh, b.bw, b.bh);
+    });
+    blocks.forEach((b, i) => {
+        const bx = ((b.x - scroll) % total + total) % total - 40;
+        ctx.fillStyle = i % 3 === 0 ? neonRgba(NEON.cyan, 0.55) : neonRgba(NEON.pinkSoft, 0.5);
+        for (let wy = baseY - b.bh + 6; wy < baseY - 4; wy += 8) {
+            for (let wx = bx + 4; wx < bx + b.bw - 4; wx += 6) {
+                if (((wx * 7 + wy * 13 + i) % 5) === 0) ctx.fillRect(wx, wy, 2, 2);
+            }
+        }
+    });
+}
+
+// Перспективная неоновая сетка-пол (как в синтвейве), едет вместе со scroll
+function drawNeonFloor(ctx, w, topY, bottomY, scroll, color = NEON.pink) {
+    const g = ctx.createLinearGradient(0, topY, 0, bottomY);
+    g.addColorStop(0, "#1a0626");
+    g.addColorStop(1, NEON.void);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, topY, w, bottomY - topY);
+
+    const h = bottomY - topY;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, topY, w, h);
+    ctx.clip();
+    ctx.strokeStyle = neonRgba(color, 0.55);
+    ctx.lineWidth = 1;
+    // поперечные линии: к горизонту гуще, бегут к зрителю
+    const phase = (scroll % 40) / 40;
+    for (let i = 0; i < 10; i++) {
+        const k = (i + phase) / 10;
+        const y = topY + h * k * k;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+    }
+    // продольные линии сходятся в точку на горизонте
+    const vx = w / 2, shift = (scroll * 0.6) % 28;
+    for (let x = -w; x <= w * 2; x += 28) {
+        ctx.beginPath();
+        ctx.moveTo(vx + (x - vx - shift) * 0.15, topY);
+        ctx.lineTo(x - shift, bottomY);
+        ctx.stroke();
+    }
+    ctx.restore();
+    // светящаяся кромка горизонта
+    ctx.beginPath();
+    ctx.moveTo(0, topY + 0.5);
+    ctx.lineTo(w, topY + 0.5);
+    neonStroke(ctx, color, 1.5);
+}
+
+// Неоновое сердечко (еда в Змейке и т.п.)
+function neonHeartPath(ctx, x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 0.8);
+    ctx.bezierCurveTo(x - s * 1.2, y - s * 0.1, x - s * 0.6, y - s, x, y - s * 0.35);
+    ctx.bezierCurveTo(x + s * 0.6, y - s, x + s * 1.2, y - s * 0.1, x, y + s * 0.8);
+    ctx.closePath();
+}
+
 // ------------------------- СПРАЙТ ПТИЧКИ ДЛЯ FLAPPY BIRD -------------------------
 // Голова с фото профиля (вырезана, фон убран) — используется как спрайт птички.
 // Лежит файлом img/flappy-head.png (раньше — base64-строкой в коде).
@@ -289,7 +471,8 @@ const GAMES_META = [
     { id: "doodle", hue: 268, emoji: "👾", title: "Doodle Jump",             desc: "Прыгай с платформы на платформу и забирайся как можно выше.",               leaderboard: true,  start: () => startDoodleGame() },
     { id: "runner", hue: 95, emoji: "🥦", title: "Бега Брокколи",           desc: "Беги без остановки и перепрыгивай препятствия на пути.",                    leaderboard: true,  start: () => startRunnerGame() },
     { id: "ninja", hue: 350,  emoji: "💣",  title: "Эмодзи Ниндзя",           desc: "Разрезай летящие эмодзи и не задевай бомбы.",                               leaderboard: true,  start: () => startNinjaGame() },
-    { id: "rhythm", hue: 305, emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() }
+    { id: "rhythm", hue: 305, emoji: "🎵", title: "Ритм-Аркада",             desc: "Лови ноты в такт музыке — выбор треков и свои рекорды внутри.",             leaderboard: false, start: () => showRhythmMenu() },
+    { id: "sudoku", hue: 190, emoji: "🔢", title: "Судоку",                  desc: "Классическая головоломка 9×9 с тремя уровнями сложности, заметками и подсказками.", leaderboard: false, tileText: () => sudokuTileText(), start: () => showSudokuMenu() }
 ];
 
 // Экран выбора игры — "карта": шестиугольные точки-уровни, соединённые
@@ -322,6 +505,11 @@ async function showGamesScreen() {
     if (!container.isConnected) return;
 
     container.innerHTML = "";
+    container.appendChild(buildDuoSection());
+    const soloTitle = document.createElement("h2");
+    soloTitle.className = "duo-section-title games-solo-title";
+    soloTitle.textContent = "Одиночные";
+    container.appendChild(soloTitle);
     const map = document.createElement("div");
     map.className = "games-map";
     map.innerHTML = `
@@ -439,7 +627,7 @@ function initGamesMap(map) {
 
 // Строка рекордов на точке карты: свой рекорд и лидер
 function buildGameTileScore(game) {
-    if (!game.leaderboard) return "Треки и рекорды внутри";
+    if (!game.leaderboard) return game.tileText ? game.tileText() : "Треки и рекорды внутри";
     const rows = (gameScoresCache[game.id] || []).slice().sort((a, b) => b.score - a.score);
     if (rows.length === 0) return "Рекордов пока нет";
     const mine = getMyBest(game.id);
@@ -546,89 +734,77 @@ function startSnakeGame() {
     }
 
     function drawBoard() {
-        // Мягкая шахматная "садовая" клетка вместо плоской заливки
-        for (let gy = 0; gy < GRID; gy++) {
-            for (let gx = 0; gx < GRID; gx++) {
-                ctx.fillStyle = (gx + gy) % 2 === 0 ? "#eef7ee" : "#e3f2e3";
-                ctx.fillRect(gx * CELL, gy * CELL, CELL, CELL);
-            }
+        // Тёмное поле с тонкой светящейся сеткой и мягким свечением по центру
+        ctx.fillStyle = NEON.deep;
+        ctx.fillRect(0, 0, SIZE, SIZE);
+        neonHalo(ctx, SIZE / 2, SIZE / 2, SIZE * 0.75, NEON.purple, 0.18);
+        ctx.strokeStyle = neonRgba(NEON.cyan, 0.07);
+        ctx.lineWidth = 1;
+        for (let i = 1; i < GRID; i++) {
+            ctx.beginPath();
+            ctx.moveTo(i * CELL + 0.5, 0);
+            ctx.lineTo(i * CELL + 0.5, SIZE);
+            ctx.moveTo(0, i * CELL + 0.5);
+            ctx.lineTo(SIZE, i * CELL + 0.5);
+            ctx.stroke();
         }
     }
 
     function drawFood() {
+        // Еда — неоновое сердечко с ореолом
         const cx = food.x * CELL + CELL / 2;
-        const cy = food.y * CELL + CELL / 2 + 1;
-        const r = CELL / 2.6;
-
-        // Яблочко: тело + блик + листик + хвостик
-        ctx.fillStyle = "#e53935";
-        ctx.beginPath();
-        ctx.arc(cx - r * 0.15, cy, r, 0, Math.PI * 2);
+        const cy = food.y * CELL + CELL / 2;
+        neonHalo(ctx, cx, cy, CELL * 1.3, NEON.pink, 0.5);
+        neonHeartPath(ctx, cx, cy, CELL * 0.42);
+        ctx.fillStyle = NEON.pink;
         ctx.fill();
-
-        ctx.fillStyle = "rgba(255,255,255,0.55)";
-        ctx.beginPath();
-        ctx.arc(cx - r * 0.55, cy - r * 0.5, r * 0.28, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = "#6d4c2b";
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - r);
-        ctx.lineTo(cx + 1, cy - r - 3);
-        ctx.stroke();
-
-        ctx.fillStyle = "#4caf50";
-        ctx.beginPath();
-        ctx.ellipse(cx + 3, cy - r - 2, 3.2, 1.8, -0.6, 0, Math.PI * 2);
-        ctx.fill();
+        neonStroke(ctx, NEON.pinkSoft, 1.2);
     }
 
     function drawSnake() {
+        // Тело — светящаяся лента от голубой головы к фиолетовому хвосту
         const n = snake.length;
-        snake.forEach((seg, i) => {
+        const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+        for (let i = n - 1; i >= 0; i--) {
+            const seg = snake[i];
             const t = n > 1 ? i / (n - 1) : 0;
-            // Плавный градиент от тёмно-зелёной головы к светлому кончику хвоста
-            const rCol = Math.round(46 + t * (165 - 46));
-            const gCol = Math.round(125 + t * (214 - 125));
-            const bCol = Math.round(50 + t * (167 - 50));
-            ctx.fillStyle = `rgb(${rCol},${gCol},${bCol})`;
-            roundedRectPath(seg.x * CELL + 1, seg.y * CELL + 1, CELL - 2, CELL - 2, i === 0 ? 6 : 5);
+            const col = `rgb(${lerp(46, 139, t)},${lerp(232, 59, t)},${lerp(255, 255, t)})`;
+            const inset = i === 0 ? 1 : 2 + t * 1.5;
+            roundedRectPath(seg.x * CELL + inset, seg.y * CELL + inset, CELL - inset * 2, CELL - inset * 2, 5);
+            ctx.fillStyle = col;
+            ctx.globalAlpha = 0.3;
             ctx.fill();
-        });
+            ctx.globalAlpha = 1;
+            neonStroke(ctx, col, 1.6);
+        }
 
-        // Мордочка на голове: глаза + маленький раздвоенный язычок по направлению движения
+        // Голова: заливка, глаза и язычок по направлению движения
         const head = snake[0];
         const hx = head.x * CELL + CELL / 2;
         const hy = head.y * CELL + CELL / 2;
+        neonHalo(ctx, hx, hy, CELL * 1.2, NEON.cyan, 0.35);
+        roundedRectPath(head.x * CELL + 1, head.y * CELL + 1, CELL - 2, CELL - 2, 6);
+        ctx.fillStyle = NEON.cyan;
+        ctx.fill();
+
         const ex = dir.y !== 0 ? CELL * 0.22 : 0;
         const ey = dir.x !== 0 ? CELL * 0.22 : 0;
-
-        ctx.fillStyle = "#fff";
+        ctx.fillStyle = NEON.void;
         ctx.beginPath();
-        ctx.arc(hx - ex + dir.x * 2, hy - ey + dir.y * 2, 2.4, 0, Math.PI * 2);
-        ctx.arc(hx + ex + dir.x * 2, hy + ey + dir.y * 2, 2.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#1b3a1b";
-        ctx.beginPath();
-        ctx.arc(hx - ex + dir.x * 3, hy - ey + dir.y * 3, 1.1, 0, Math.PI * 2);
-        ctx.arc(hx + ex + dir.x * 3, hy + ey + dir.y * 3, 1.1, 0, Math.PI * 2);
+        ctx.arc(hx - ex + dir.x * 3, hy - ey + dir.y * 3, 2.1, 0, Math.PI * 2);
+        ctx.arc(hx + ex + dir.x * 3, hy + ey + dir.y * 3, 2.1, 0, Math.PI * 2);
         ctx.fill();
 
         const tipX = hx + dir.x * (CELL / 2 + 5);
         const tipY = hy + dir.y * (CELL / 2 + 5);
-        const baseX = hx + dir.x * (CELL / 2);
-        const baseY = hy + dir.y * (CELL / 2);
-        ctx.strokeStyle = "#c62828";
-        ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.moveTo(baseX, baseY);
+        ctx.moveTo(hx + dir.x * (CELL / 2), hy + dir.y * (CELL / 2));
         ctx.lineTo(tipX, tipY);
         ctx.moveTo(tipX, tipY);
         ctx.lineTo(tipX + dir.y * 2.5, tipY + dir.x * 2.5);
         ctx.moveTo(tipX, tipY);
         ctx.lineTo(tipX - dir.y * 2.5, tipY - dir.x * 2.5);
-        ctx.stroke();
+        neonStroke(ctx, NEON.pink, 1.2);
     }
 
     function draw() {
@@ -783,53 +959,35 @@ function startFlappyGame() {
     }
 
     // ---- Небо с солнцем и облаками ----
+    // ---- Ночной синтвейв-город: звёзды, ретро-солнце, огни небоскрёбов ----
     function drawSky() {
-        const skyGrad = ctx.createLinearGradient(0, 0, 0, H - GROUND_H);
-        skyGrad.addColorStop(0, "#bfe9ff");
-        skyGrad.addColorStop(1, "#eaf8ff");
-        ctx.fillStyle = skyGrad;
-        ctx.fillRect(0, 0, W, H - GROUND_H);
-
-        ctx.fillStyle = "rgba(255, 235, 150, 0.85)";
-        ctx.beginPath();
-        ctx.arc(W - 45, 42, 22, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
-        for (let i = 0; i < 3; i++) {
-            const raw = (i * 140 + 60 - bgOffset * 0.4) % (W + 120);
-            const cx = (raw < 0 ? raw + W + 120 : raw) - 60;
-            const cy = 55 + i * 45;
-            drawCloud(cx, cy);
-        }
+        const horizon = H - GROUND_H;
+        drawNeonSky(ctx, W, horizon);
+        drawNeonStars(ctx, W, horizon * 0.7, bgOffset / 60, { count: 34, offsetX: bgOffset * 0.05 });
+        drawNeonSun(ctx, W * 0.66, horizon - 22, 54);
+        drawNeonSkyline(ctx, W, horizon, bgOffset * 0.25, { color: "#1c0a2c", maxH: 80, seed: 11 });
+        drawNeonSkyline(ctx, W, horizon, bgOffset * 0.5, { color: NEON.void, maxH: 46, seed: 5 });
     }
 
-    function drawCloud(cx, cy) {
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, 18, 11, 0, 0, Math.PI * 2);
-        ctx.ellipse(cx + 14, cy - 5, 14, 10, 0, 0, Math.PI * 2);
-        ctx.ellipse(cx - 14, cy - 3, 13, 9, 0, 0, Math.PI * 2);
-        ctx.fill();
-    }
 
     // ---- Шоколадные батончики вместо труб ----
+    // ---- Шоколадки вместо труб: тёмный шоколад в неоновой обводке ----
     function drawChocolateBar(x, y, w, h, edge) {
         if (h <= 0) return;
         const grad = ctx.createLinearGradient(x, 0, x + w, 0);
-        grad.addColorStop(0, "#4a2f21");
-        grad.addColorStop(0.35, "#7b4b32");
-        grad.addColorStop(0.55, "#8a5738");
-        grad.addColorStop(1, "#5b3a29");
+        grad.addColorStop(0, "#2a1320");
+        grad.addColorStop(0.5, "#4a2335");
+        grad.addColorStop(1, "#2a1320");
         ctx.fillStyle = grad;
         ctx.fillRect(x, y, w, h);
 
-        // канавки-дольки шоколадки
-        ctx.strokeStyle = "rgba(0,0,0,0.28)";
-        ctx.lineWidth = 2;
-        for (let gy = 0; gy < h; gy += 22) {
+        // дольки
+        ctx.strokeStyle = neonRgba(NEON.pinkSoft, 0.22);
+        ctx.lineWidth = 1.5;
+        for (let gy = 22; gy < h; gy += 22) {
             ctx.beginPath();
-            ctx.moveTo(x + 3, y + gy);
-            ctx.lineTo(x + w - 3, y + gy);
+            ctx.moveTo(x + 4, y + (edge === "bottom" ? h - gy : gy));
+            ctx.lineTo(x + w - 4, y + (edge === "bottom" ? h - gy : gy));
             ctx.stroke();
         }
         ctx.beginPath();
@@ -837,71 +995,27 @@ function startFlappyGame() {
         ctx.lineTo(x + w / 2, y + h);
         ctx.stroke();
 
-        // лёгкий блик слева
-        ctx.fillStyle = "rgba(255,255,255,0.12)";
-        ctx.fillRect(x + 2, y, 5, h);
-
-        // неровный "отломанный" край со стороны просвета
+        // контур с "отломанным" зубчатым краем со стороны просвета
         const teeth = 6, amp = 5;
-        ctx.fillStyle = "rgba(0,0,0,0.18)";
         ctx.beginPath();
         if (edge === "bottom") {
-            const baseY = y + h;
-            ctx.moveTo(x, baseY);
-            for (let i = 0; i <= teeth; i++) {
-                ctx.lineTo(x + (w / teeth) * i, baseY - (i % 2 === 0 ? 0 : amp));
-            }
-            ctx.lineTo(x + w, baseY);
+            ctx.moveTo(x, y);
+            ctx.lineTo(x, y + h);
+            for (let i = 0; i <= teeth; i++) ctx.lineTo(x + (w / teeth) * i, y + h - (i % 2 === 0 ? 0 : amp));
+            ctx.lineTo(x + w, y);
         } else {
-            const baseY = y;
-            ctx.moveTo(x, baseY);
-            for (let i = 0; i <= teeth; i++) {
-                ctx.lineTo(x + (w / teeth) * i, baseY + (i % 2 === 0 ? 0 : amp));
-            }
-            ctx.lineTo(x + w, baseY);
+            ctx.moveTo(x, y + h);
+            ctx.lineTo(x, y);
+            for (let i = 0; i <= teeth; i++) ctx.lineTo(x + (w / teeth) * i, y + (i % 2 === 0 ? 0 : amp));
+            ctx.lineTo(x + w, y + h);
         }
-        ctx.closePath();
-        ctx.fill();
+        neonStroke(ctx, NEON.pink, 1.6);
     }
 
     // ---- Цветочное поле вместо земли ----
+    // ---- Неоновая сетка-пол вместо земли ----
     function drawFlowerField() {
-        const gy = H - GROUND_H;
-        const grad = ctx.createLinearGradient(0, gy, 0, H);
-        grad.addColorStop(0, "#8bc34a");
-        grad.addColorStop(1, "#558b2f");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, gy, W, GROUND_H);
-
-        const colors = ["#ffffff", "#ffeb3b", "#ff8fab", "#ba68c8"];
-        const spacing = 26;
-        const scrollX = bgOffset * 0.5;
-        for (let x = -spacing; x < W + spacing * 2; x += spacing) {
-            const raw = (x - scrollX) % (W + spacing);
-            const fx = (raw < 0 ? raw + W + spacing : raw) - spacing / 2;
-            const seed = Math.floor((x + 10000) / spacing);
-            const fy = gy + 9 + (seed % 3) * 7;
-            const color = colors[seed % colors.length];
-
-            ctx.strokeStyle = "#3d7a1f";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(fx, fy + 5);
-            ctx.lineTo(fx, fy + 11);
-            ctx.stroke();
-
-            ctx.fillStyle = color;
-            for (let p = 0; p < 4; p++) {
-                const ang = (Math.PI / 2) * p + 0.4;
-                ctx.beginPath();
-                ctx.arc(fx + Math.cos(ang) * 3, fy + Math.sin(ang) * 3, 2.6, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            ctx.fillStyle = "#ffb300";
-            ctx.beginPath();
-            ctx.arc(fx, fy, 1.8, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        drawNeonFloor(ctx, W, H - GROUND_H, H, bgOffset, NEON.pink);
     }
 
     function draw() {
@@ -914,7 +1028,8 @@ function startFlappyGame() {
 
         drawFlowerField();
 
-        // Птичка — голова с фотографии профиля
+        // Птичка — голова с фотографии профиля, с неоновым ореолом
+        neonHalo(ctx, 50, birdY, 34, NEON.pink, 0.35);
         ctx.save();
         ctx.translate(50, birdY);
         ctx.rotate(Math.max(-0.4, Math.min(0.9, birdV / 600)));
@@ -1215,94 +1330,93 @@ function startDoodleGame() {
     }
 
     // ---- Персонаж-doodler, нарисованный самостоятельно ----
+    // ---- Персонаж: неоновый инопланетянин ----
     function drawDoodler() {
         ctx.save();
         ctx.translate(x, y);
         ctx.scale(facing, 1);
+        neonHalo(ctx, 0, 0, DOODLER_W, NEON.pink, 0.3);
 
-        // усики-антенны
-        ctx.strokeStyle = "#c98fb0";
-        ctx.lineWidth = 2;
+        // усики с огоньками
         ctx.beginPath();
         ctx.moveTo(-6, -DOODLER_H / 2 + 2);
         ctx.lineTo(-10, -DOODLER_H / 2 - 9);
         ctx.moveTo(6, -DOODLER_H / 2 + 2);
         ctx.lineTo(10, -DOODLER_H / 2 - 9);
-        ctx.stroke();
-        ctx.fillStyle = "#ffb6d5";
+        neonStroke(ctx, NEON.pinkSoft, 1.4);
+        ctx.fillStyle = NEON.cyan;
         ctx.beginPath();
         ctx.arc(-10, -DOODLER_H / 2 - 9, 2.6, 0, Math.PI * 2);
         ctx.arc(10, -DOODLER_H / 2 - 9, 2.6, 0, Math.PI * 2);
         ctx.fill();
 
+        // ножки
+        ctx.fillStyle = NEON.pink;
+        ctx.beginPath();
+        ctx.ellipse(-8, DOODLER_H / 2 - 2, 6, 3.5, 0, 0, Math.PI * 2);
+        ctx.ellipse(8, DOODLER_H / 2 - 2, 6, 3.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
         // тело
-        ctx.fillStyle = "#f7a8c4";
         ctx.beginPath();
         ctx.ellipse(0, 0, DOODLER_W / 2, DOODLER_H / 2, 0, 0, Math.PI * 2);
+        const body = ctx.createLinearGradient(0, -DOODLER_H / 2, 0, DOODLER_H / 2);
+        body.addColorStop(0, "#3a1250");
+        body.addColorStop(1, "#1a0828");
+        ctx.fillStyle = body;
         ctx.fill();
+        neonStroke(ctx, NEON.pink, 1.8);
 
-        // ножки
-        ctx.fillStyle = "#e589ac";
+        // глаза-визор
+        ctx.fillStyle = NEON.text;
         ctx.beginPath();
-        ctx.ellipse(-8, DOODLER_H / 2 - 3, 6, 4, 0, 0, Math.PI * 2);
-        ctx.ellipse(8, DOODLER_H / 2 - 3, 6, 4, 0, 0, Math.PI * 2);
+        ctx.arc(6, -4, 5.5, 0, Math.PI * 2);
+        ctx.arc(-4, -6, 4.5, 0, Math.PI * 2);
         ctx.fill();
-
-        // глаза (смотрят по направлению движения)
-        ctx.fillStyle = "#fff";
-        ctx.beginPath();
-        ctx.arc(6, -4, 6, 0, Math.PI * 2);
-        ctx.arc(-4, -6, 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#3a2733";
+        ctx.fillStyle = NEON.cyan;
         ctx.beginPath();
         ctx.arc(8, -4, 2.6, 0, Math.PI * 2);
         ctx.arc(-3, -6, 2.2, 0, Math.PI * 2);
         ctx.fill();
 
         // улыбка
-        ctx.strokeStyle = "#a4436a";
-        ctx.lineWidth = 1.6;
         ctx.beginPath();
-        ctx.arc(2, 3, 5, 0.15 * Math.PI, 0.75 * Math.PI);
-        ctx.stroke();
+        ctx.arc(2, 4, 5, 0.15 * Math.PI, 0.75 * Math.PI);
+        neonStroke(ctx, NEON.pinkSoft, 1.2);
 
         ctx.restore();
     }
 
+    // ---- Платформы — неоновые трубки (двигающиеся — розовые) ----
     function drawPlatform(p) {
-        const grad = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
-        if (p.moving) {
-            grad.addColorStop(0, "#81d4fa");
-            grad.addColorStop(1, "#4fc3f7");
-        } else {
-            grad.addColorStop(0, "#aee571");
-            grad.addColorStop(1, "#7cb342");
-        }
-        ctx.fillStyle = grad;
+        const color = p.moving ? NEON.pink : NEON.cyan;
         roundedRect(p.x, p.y, p.w, p.h, 6);
+        ctx.fillStyle = neonRgba(color, 0.14);
         ctx.fill();
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
-        roundedRect(p.x + 3, p.y + 2, p.w - 6, 3, 2);
-        ctx.fill();
+        neonStroke(ctx, color, 1.8);
+        ctx.fillStyle = neonRgba("#ffffff", 0.55);
+        ctx.fillRect(p.x + 8, p.y + 3, p.w - 16, 1.5);
     }
 
     function drawBackground() {
         const grad = ctx.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, "#dcecff");
-        grad.addColorStop(1, "#f3e9ff");
+        grad.addColorStop(0, NEON.void);
+        grad.addColorStop(1, NEON.violet);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, W, H);
 
-        // лёгкий параллакс-фон из облачков
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        for (let i = 0; i < 5; i++) {
-            const cy = ((i * 130 + scrollTotal * 0.15) % (H + 100)) - 50;
-            const cx = 40 + (i * 61) % (W - 80);
+        // две "орбиты" звёзд с разной скоростью — ощущение подъёма в космос
+        drawNeonStars(ctx, W, H, scrollTotal / 300, { count: 30, offsetY: scrollTotal * 0.08, seed: 13 });
+        drawNeonStars(ctx, W, H, scrollTotal / 200, { count: 18, offsetY: scrollTotal * 0.2, seed: 29 });
+
+        // тонкие вертикальные линии сетки
+        ctx.strokeStyle = neonRgba(NEON.purple, 0.12);
+        ctx.lineWidth = 1;
+        for (let gx = 30; gx < W; gx += 60) {
             ctx.beginPath();
-            ctx.ellipse(cx, cy, 16, 9, 0, 0, Math.PI * 2);
-            ctx.ellipse(cx + 12, cy - 4, 11, 8, 0, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(gx + 0.5, 0);
+            ctx.lineTo(gx + 0.5, H);
+            ctx.stroke();
         }
     }
 
@@ -1311,27 +1425,28 @@ function startDoodleGame() {
         ctx.translate(m.x, m.y);
         if (m.type === 'bat') {
             const flap = Math.sin(m.phase * 10) * 6;
-            ctx.fillStyle = "#5b3a73";
+            neonHalo(ctx, 0, 0, 28, NEON.purple, 0.35);
+            ctx.fillStyle = "#1a0828";
             ctx.beginPath();
             ctx.moveTo(0, 0);
             ctx.quadraticCurveTo(-18, -6 - flap, -22, 4);
             ctx.quadraticCurveTo(-10, 2, 0, 0);
-            ctx.fill();
-            ctx.beginPath();
             ctx.moveTo(0, 0);
             ctx.quadraticCurveTo(18, -6 - flap, 22, 4);
             ctx.quadraticCurveTo(10, 2, 0, 0);
             ctx.fill();
+            neonStroke(ctx, NEON.purple, 1.4);
             ctx.beginPath();
             ctx.ellipse(0, 0, 10, 8, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = "#ff5252";
+            neonStroke(ctx, NEON.purple, 1.4);
+            ctx.fillStyle = NEON.red;
             ctx.beginPath();
-            ctx.arc(-3, -1, 1.6, 0, Math.PI * 2);
-            ctx.arc(3, -1, 1.6, 0, Math.PI * 2);
+            ctx.arc(-3, -1, 1.8, 0, Math.PI * 2);
+            ctx.arc(3, -1, 1.8, 0, Math.PI * 2);
             ctx.fill();
         } else if (m.type === 'ghost') {
-            ctx.fillStyle = "rgba(180, 220, 255, 0.88)";
+            neonHalo(ctx, 0, 0, 26, NEON.cyan, 0.3);
             ctx.beginPath();
             ctx.arc(0, -2, 13, Math.PI, 0, false);
             ctx.lineTo(13, 10);
@@ -1341,31 +1456,33 @@ function startDoodleGame() {
             ctx.lineTo(-8, 10);
             ctx.lineTo(-13, 4);
             ctx.closePath();
+            ctx.fillStyle = neonRgba(NEON.cyan, 0.18);
             ctx.fill();
-            ctx.fillStyle = "#33445a";
+            neonStroke(ctx, NEON.cyan, 1.5);
+            ctx.fillStyle = NEON.text;
             ctx.beginPath();
-            ctx.arc(-5, -3, 2, 0, Math.PI * 2);
-            ctx.arc(5, -3, 2, 0, Math.PI * 2);
+            ctx.arc(-5, -3, 2.2, 0, Math.PI * 2);
+            ctx.arc(5, -3, 2.2, 0, Math.PI * 2);
             ctx.fill();
         } else {
+            neonHalo(ctx, 0, 0, 26, NEON.gold, 0.35);
             ctx.rotate(m.phase * 2);
-            ctx.strokeStyle = "#e64a19";
-            ctx.lineWidth = 3;
+            ctx.beginPath();
             for (let i = 0; i < 8; i++) {
                 const ang = (Math.PI / 4) * i;
-                ctx.beginPath();
                 ctx.moveTo(Math.cos(ang) * 9, Math.sin(ang) * 9);
                 ctx.lineTo(Math.cos(ang) * 15, Math.sin(ang) * 15);
-                ctx.stroke();
             }
-            ctx.fillStyle = "#ff7043";
+            neonStroke(ctx, NEON.gold, 2);
             ctx.beginPath();
             ctx.arc(0, 0, 9, 0, Math.PI * 2);
+            ctx.fillStyle = "#3a1230";
             ctx.fill();
-            ctx.fillStyle = "#3a2733";
+            neonStroke(ctx, NEON.red, 1.6);
+            ctx.fillStyle = NEON.gold;
             ctx.beginPath();
-            ctx.arc(-3, -1, 1.6, 0, Math.PI * 2);
-            ctx.arc(3, -1, 1.6, 0, Math.PI * 2);
+            ctx.arc(-3, -1, 1.7, 0, Math.PI * 2);
+            ctx.arc(3, -1, 1.7, 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.restore();
@@ -1375,7 +1492,7 @@ function startDoodleGame() {
         ctx.save();
         ctx.translate(pu.x, pu.y);
         if (pu.type === 'armor') {
-            ctx.fillStyle = "#42a5f5";
+            neonHalo(ctx, 0, 0, 24, NEON.cyan, 0.4);
             ctx.beginPath();
             ctx.moveTo(0, -10);
             ctx.lineTo(9, -6);
@@ -1384,45 +1501,36 @@ function startDoodleGame() {
             ctx.quadraticCurveTo(-9, 10, -9, 3);
             ctx.lineTo(-9, -6);
             ctx.closePath();
+            ctx.fillStyle = neonRgba(NEON.cyan, 0.2);
             ctx.fill();
-            ctx.strokeStyle = "#e3f2fd";
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.fillStyle = "#e3f2fd";
+            neonStroke(ctx, NEON.cyan, 1.6);
             ctx.beginPath();
-            ctx.moveTo(-3, 0);
-            ctx.lineTo(0, 4);
-            ctx.lineTo(5, -4);
-            ctx.lineTo(3, -4);
-            ctx.lineTo(0, 0);
-            ctx.lineTo(-1, -2);
-            ctx.closePath();
-            ctx.fill();
+            ctx.moveTo(-4, 1);
+            ctx.lineTo(-1, 4);
+            ctx.lineTo(5, -3);
+            neonStroke(ctx, NEON.text, 1.4);
         } else {
-            ctx.fillStyle = "#ef5350";
+            neonHalo(ctx, 0, 0, 24, NEON.pink, 0.4);
             ctx.beginPath();
             ctx.moveTo(0, -13);
             ctx.quadraticCurveTo(7, -2, 6, 8);
             ctx.lineTo(-6, 8);
             ctx.quadraticCurveTo(-7, -2, 0, -13);
             ctx.closePath();
+            ctx.fillStyle = "#3a1230";
             ctx.fill();
-            ctx.fillStyle = "#ffca28";
+            neonStroke(ctx, NEON.pink, 1.6);
             ctx.beginPath();
             ctx.moveTo(-6, 8);
             ctx.lineTo(-9, 13);
             ctx.lineTo(-3, 9);
-            ctx.closePath();
-            ctx.fill();
-            ctx.beginPath();
             ctx.moveTo(6, 8);
             ctx.lineTo(9, 13);
             ctx.lineTo(3, 9);
-            ctx.closePath();
-            ctx.fill();
-            ctx.fillStyle = "#90caf9";
+            neonStroke(ctx, NEON.gold, 1.4);
+            ctx.fillStyle = NEON.cyan;
             ctx.beginPath();
-            ctx.arc(0, -1, 3, 0, Math.PI * 2);
+            ctx.arc(0, -1, 2.8, 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.restore();
@@ -1430,15 +1538,15 @@ function startDoodleGame() {
 
     function drawBullet(b) {
         ctx.save();
-        const grad = ctx.createLinearGradient(b.x, b.y - 8, b.x, b.y + 6);
-        grad.addColorStop(0, "#fff59d");
-        grad.addColorStop(1, "#ff8a65");
-        ctx.fillStyle = grad;
-        roundedRect(b.x - 3, b.y - 8, 6, 14, 3);
+        roundedRect(b.x - 2.5, b.y - 8, 5, 14, 2.5);
+        ctx.fillStyle = NEON.text;
         ctx.fill();
+        neonStroke(ctx, NEON.cyan, 1.4);
         ctx.restore();
     }
 
+    // Щит брони моргает перед истечением — отдельного таймера на экране нет,
+    // сам щит и есть индикатор
     // Щит брони моргает перед истечением — отдельного таймера на экране нет,
     // сам щит и есть индикатор
     function drawArmorShield() {
@@ -1447,13 +1555,11 @@ function startDoodleGame() {
         if (!visible) return;
         ctx.save();
         ctx.translate(x, y);
-        ctx.fillStyle = "rgba(129, 212, 250, 0.18)";
         ctx.beginPath();
         ctx.arc(0, 0, DOODLER_W / 2 + 8, 0, Math.PI * 2);
+        ctx.fillStyle = neonRgba(NEON.cyan, 0.1);
         ctx.fill();
-        ctx.strokeStyle = "rgba(66, 165, 245, 0.9)";
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
+        neonStroke(ctx, NEON.cyan, 1.8);
         ctx.restore();
     }
 
@@ -1461,14 +1567,15 @@ function startDoodleGame() {
         ctx.save();
         ctx.translate(x, y + DOODLER_H / 2);
         const flicker = 8 + Math.random() * 6;
-        ctx.fillStyle = "#ffb300";
+        neonHalo(ctx, 0, flicker / 2 + 6, 22, NEON.pink, 0.45);
+        ctx.fillStyle = NEON.pink;
         ctx.beginPath();
         ctx.moveTo(-6, 0);
         ctx.lineTo(6, 0);
         ctx.lineTo(0, flicker + 10);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = "#ff7043";
+        ctx.fillStyle = NEON.gold;
         ctx.beginPath();
         ctx.moveTo(-3.5, 0);
         ctx.lineTo(3.5, 0);
@@ -1481,11 +1588,9 @@ function startDoodleGame() {
     function drawRocketShell() {
         ctx.save();
         ctx.translate(x, y);
-        ctx.strokeStyle = "rgba(255, 112, 67, 0.85)";
-        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(0, 0, DOODLER_W / 2 + 6, 0, Math.PI * 2);
-        ctx.stroke();
+        neonStroke(ctx, NEON.gold, 1.6);
         ctx.restore();
     }
 
@@ -1809,85 +1914,31 @@ function startRunnerGame() {
     }
 
     // ---- Сумеречное небо: луна, звёзды, силуэты облаков ----
+    // ---- Ночной синтвейв: ретро-солнце, звёзды, огни города на горизонте ----
     function drawSky() {
-        const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-        grad.addColorStop(0, "#4b3a68");
-        grad.addColorStop(0.55, "#a06791");
-        grad.addColorStop(1, "#f6c3d6");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, W, GROUND_Y);
-
-        // луна
-        ctx.fillStyle = "rgba(255, 250, 235, 0.92)";
-        ctx.beginPath();
-        ctx.arc(W - 36, 28, 14, 0, Math.PI * 2);
-        ctx.fill();
-
-        // звёзды
-        ctx.fillStyle = "rgba(255,255,255,0.8)";
-        for (let i = 0; i < 12; i++) {
-            const sx = (i * 53 + 20 - bgOffset * 0.15) % (W + 40);
-            const fx = (sx < 0 ? sx + W + 40 : sx) - 20;
-            const sy = 10 + (i * 37) % 60;
-            const tw = 0.5 + 0.5 * Math.sin(animT * 3 + i);
-            ctx.globalAlpha = 0.4 + 0.5 * tw;
-            ctx.fillRect(fx, sy, 2, 2);
-        }
-        ctx.globalAlpha = 1;
-
-        // силуэты холмов на горизонте
-        ctx.fillStyle = "rgba(60, 40, 70, 0.55)";
-        for (let i = 0; i < 3; i++) {
-            const raw = (i * 130 + 40 - bgOffset * 0.3) % (W + 160);
-            const hx = (raw < 0 ? raw + W + 160 : raw) - 80;
-            ctx.beginPath();
-            ctx.ellipse(hx, GROUND_Y + 6, 90, 26, 0, Math.PI, 0, true);
-            ctx.fill();
-        }
+        drawNeonSky(ctx, W, GROUND_Y);
+        drawNeonStars(ctx, W, GROUND_Y * 0.6, animT, { count: 22, offsetX: bgOffset * 0.05, seed: 17 });
+        drawNeonSun(ctx, W - 70, GROUND_Y, 38);
+        drawNeonSkyline(ctx, W, GROUND_Y, bgOffset * 0.3, { color: "#1c0a2c", maxH: 34, seed: 21 });
     }
 
     // ---- Дорожка-земля со скроллящейся текстурой ----
+    // ---- Неоновая сетка-дорога ----
     function drawGround() {
-        const grad = ctx.createLinearGradient(0, GROUND_Y, 0, H);
-        grad.addColorStop(0, "#7a5c46");
-        grad.addColorStop(1, "#4f3a2c");
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-
-        ctx.strokeStyle = "rgba(255,255,255,0.15)";
-        ctx.lineWidth = 2;
-        const spacing = 34;
-        const scrollX = bgOffset % spacing;
-        for (let x = -scrollX; x < W; x += spacing) {
-            ctx.beginPath();
-            ctx.moveTo(x, GROUND_Y + 3);
-            ctx.lineTo(x + 16, GROUND_Y + 3);
-            ctx.stroke();
-        }
-
-        // травинки у кромки
-        ctx.strokeStyle = "#8bc34a";
-        ctx.lineWidth = 1.5;
-        const gspacing = 22;
-        const gscroll = bgOffset % gspacing;
-        for (let x = -gscroll; x < W; x += gspacing) {
-            const seed = Math.floor((x + bgOffset) / gspacing);
-            const h2 = 4 + (seed % 3) * 2;
-            ctx.beginPath();
-            ctx.moveTo(x, GROUND_Y);
-            ctx.lineTo(x - 2, GROUND_Y - h2);
-            ctx.moveTo(x, GROUND_Y);
-            ctx.lineTo(x + 2, GROUND_Y - h2 + 1);
-            ctx.stroke();
-        }
+        drawNeonFloor(ctx, W, GROUND_Y, H, bgOffset, NEON.cyan);
     }
 
     // ---- Брокколи-препятствие ----
+    // ---- Брокколи-препятствие в неоновом контуре ----
     function drawBroccoli(o) {
         const cx = o.x + o.w / 2;
         const stemW = o.w * 0.34;
-        ctx.fillStyle = "#c8d98a";
-        ctx.fillRect(cx - stemW / 2, GROUND_Y - o.h * 0.4, stemW, o.h * 0.4);
+        neonHalo(ctx, cx, GROUND_Y - o.h / 2, o.h, NEON.green, 0.25);
+        ctx.beginPath();
+        ctx.rect(cx - stemW / 2, GROUND_Y - o.h * 0.4, stemW, o.h * 0.4);
+        ctx.fillStyle = "#0d2a1c";
+        ctx.fill();
+        neonStroke(ctx, NEON.green, 1.2);
 
         const florR = o.w * 0.32;
         const centers = [
@@ -1897,44 +1948,42 @@ function startRunnerGame() {
             [cx - o.w * 0.12, GROUND_Y - o.h + florR * 0.3],
             [cx + o.w * 0.12, GROUND_Y - o.h + florR * 0.3]
         ];
-        ctx.fillStyle = "#2e7d32";
+        ctx.beginPath();
         centers.forEach(c => {
-            ctx.beginPath();
+            ctx.moveTo(c[0] + florR, c[1]);
             ctx.arc(c[0], c[1], florR, 0, Math.PI * 2);
-            ctx.fill();
         });
-        ctx.fillStyle = "rgba(255,255,255,0.18)";
-        centers.forEach(c => {
-            ctx.beginPath();
-            ctx.arc(c[0] - florR * 0.3, c[1] - florR * 0.3, florR * 0.4, 0, Math.PI * 2);
-            ctx.fill();
-        });
+        ctx.fillStyle = "#0d2a1c";
+        ctx.fill();
+        neonStroke(ctx, NEON.green, 1.4);
     }
 
+    // ---- Летучая мышь-препятствие ----
     // ---- Летучая мышь-препятствие ----
     function drawBat(o) {
         const cx = o.x + o.w / 2, cy = o.top + o.h / 2;
         const flap = Math.sin(animT * 11 + o.phase) * 7;
+        neonHalo(ctx, cx, cy, 26, NEON.purple, 0.35);
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.fillStyle = "#241a33";
+        ctx.fillStyle = "#1a0828";
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.quadraticCurveTo(-16, -6 - flap, -20, 3);
         ctx.quadraticCurveTo(-9, 1, 0, 0);
-        ctx.fill();
-        ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.quadraticCurveTo(16, -6 - flap, 20, 3);
         ctx.quadraticCurveTo(9, 1, 0, 0);
         ctx.fill();
+        neonStroke(ctx, NEON.purple, 1.3);
         ctx.beginPath();
         ctx.ellipse(0, 0, 9, 7, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "#ff5252";
+        neonStroke(ctx, NEON.purple, 1.3);
+        ctx.fillStyle = NEON.red;
         ctx.beginPath();
-        ctx.arc(-3, -1, 1.4, 0, Math.PI * 2);
-        ctx.arc(3, -1, 1.4, 0, Math.PI * 2);
+        ctx.arc(-3, -1, 1.6, 0, Math.PI * 2);
+        ctx.arc(3, -1, 1.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
@@ -1949,12 +1998,11 @@ function startRunnerGame() {
     }
 
     function drawDust() {
-        dustParticles.forEach(p => {
+        // вместо пыли — неоновые искры из-под ног
+        dustParticles.forEach((p, i) => {
             const a = 1 - p.age / 0.5;
-            ctx.fillStyle = `rgba(230, 220, 210, ${a * 0.5})`;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y - p.age * 12, 3 + p.age * 6, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillStyle = neonRgba(i % 2 ? NEON.pink : NEON.cyan, a * 0.8);
+            ctx.fillRect(p.x, p.y - p.age * 14, 2 + p.age * 3, 2 + p.age * 3);
         });
     }
 
@@ -1964,6 +2012,12 @@ function startRunnerGame() {
         const w = box.w, h = box.bottom - box.top;
         const cx = CHAR_X, cy = box.bottom;
         ctx.save();
+        // неоновое пятно-тень под ногами
+        ctx.save();
+        ctx.translate(cx, GROUND_Y);
+        ctx.scale(1, 0.3);
+        neonHalo(ctx, 0, 0, w * 0.7, NEON.pink, 0.45);
+        ctx.restore();
         ctx.translate(cx, cy);
         const airborne = footY < GROUND_Y - 0.5;
         const tilt = airborne ? Math.max(-0.18, Math.min(0.28, vy / 900)) : 0;
@@ -2228,39 +2282,44 @@ function startNinjaGame() {
                 o.sliced = true;
                 if (o.isBomb) {
                     playSound("bomb");
-                    spawnParticles(o.x, o.y, "#444");
+                    spawnParticles(o.x, o.y, NEON.red);
                     endGame();
                 } else {
                     playSound("slice");
                     score++;
                     scoreEl.textContent = String(score);
-                    spawnParticles(o.x, o.y, "#ff6fa5");
+                    spawnParticles(o.x, o.y, NEON.pinkSoft);
                 }
             }
         });
     }
 
     function draw() {
-        // Фон — мягкое ночное небо в тон стилю сайта
+        // Фон — ночное небо с неоновым горизонтом внизу
+        const t = performance.now() / 1000;
         const grad = ctx.createLinearGradient(0, 0, 0, H);
-        grad.addColorStop(0, "#2b1f3d");
-        grad.addColorStop(1, "#553459");
+        grad.addColorStop(0, NEON.void);
+        grad.addColorStop(0.7, NEON.violet);
+        grad.addColorStop(1, NEON.plum);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, W, H);
+        drawNeonStars(ctx, W, H * 0.8, t, { count: 40, seed: 41 });
+        drawNeonFloor(ctx, W, H - 70, H, t * 60, NEON.purple);
 
-        // След от пальца/мыши
+        // След от пальца/мыши — неоновый "клинок" от голубого к розовому
         if (trail.length > 1) {
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
             for (let i = 1; i < trail.length; i++) {
                 const p0 = trail[i - 1], p1 = trail[i];
                 const alpha = i / trail.length;
-                ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.9})`;
-                ctx.lineWidth = 4 * alpha + 1;
+                const color = alpha > 0.6 ? NEON.pinkSoft : NEON.cyan;
                 ctx.beginPath();
                 ctx.moveTo(p0.x, p0.y);
                 ctx.lineTo(p1.x, p1.y);
-                ctx.stroke();
+                ctx.globalAlpha = alpha;
+                neonStroke(ctx, color, 2.2 * alpha + 0.8);
+                ctx.globalAlpha = 1;
             }
         }
 
@@ -2270,6 +2329,7 @@ function startNinjaGame() {
         ctx.font = `${FONT_SIZE}px sans-serif`;
         objects.forEach(o => {
             if (o.sliced) return;
+            neonHalo(ctx, o.x, o.y, OBJ_R * 1.8, o.emoji === BOMB_EMOJI ? NEON.red : NEON.pink, 0.4);
             ctx.save();
             ctx.translate(o.x, o.y);
             ctx.rotate(o.rot);
@@ -2660,7 +2720,53 @@ function showRhythmGameOverModal(score, isRecord, onRestart, onMenu) {
     overlay.querySelector("#rhythmGameOverMenu").onclick = () => { overlay.remove(); onMenu(); };
 }
 
-// ------------------------- САМА ИГРА -------------------------
+// ------------------------- САМА ИГРА: НЕОНОВЫЕ ПЛИТКИ -------------------------
+// Жанр "плиток под музыку": по четырём дорожкам падают высокие неоновые
+// плитки — каждую нужно нажать самому, когда она подходит к линии внизу.
+// Длинные плитки нужно не просто нажать, а удерживать до конца.
+// Тап по пустому месту дорожки и пропущенная плитка стоят жизни.
+// Ноты те же, что строит buildBeatmapFromAudioBuffer (по битам самого трека);
+// здесь они раскладываются по дорожкам так, чтобы плитки не наезжали друг на
+// друга, и часть одиночных нот на длинных паузах становится "удержанием".
+// Отрисовка — один canvas, без DOM-элементов на каждую плитку.
+
+const RT_LANE_COLORS = [NEON.pink, NEON.purple, NEON.cyan, NEON.pinkSoft];
+const RT_KEYS = ["D", "F", "J", "K"];
+const RT_LOOKAHEAD = 1.25;   // сек трека от появления плитки сверху до линии
+const RT_LINE_RATIO = 0.84;  // линия удара — на этой доле высоты арены
+const RT_TILE_RATIO = 0.17;  // высота обычной плитки — доля высоты арены
+const RT_WINDOW = { perfect: 0.06, great: 0.12, late: 0.2, early: 0.45 };
+
+// Раскладывает ноты по дорожкам и превращает часть нот в длинные (удержание)
+function layoutRhythmTiles(notes, seedKey) {
+    const rng = mulberry32(hashStringToSeed(seedKey + ":tiles"));
+    const tileTime = RT_LOOKAHEAD * RT_TILE_RATIO / RT_LINE_RATIO; // сколько секунд занимает плитка
+    const laneFreeAt = [0, 0, 0, 0];
+    const out = [];
+    let prevLane = -1;
+    let lastTime = -Infinity;
+    // Биты, идущие чаще чем раз в ~0,22 с, пальцами на телефоне уже не
+    // успеть — оставляем первую ноту из такой "дроби"
+    const playable = notes.filter(n => {
+        if (n.time - lastTime < 0.22) return false;
+        lastTime = n.time;
+        return true;
+    });
+    playable.forEach((n, i) => {
+        const next = playable[i + 1];
+        const gap = next ? next.time - n.time : 1;
+        const hold = gap >= 0.5 && rng() < 0.6 ? Math.min(1.4, gap - 0.28) : 0;
+        // свободные дорожки, не повторяя предыдущую, — "лесенка" как у пианино
+        const free = [0, 1, 2, 3].filter(l => laneFreeAt[l] <= n.time - 0.02 && l !== prevLane);
+        if (!free.length) return; // плитке негде упасть — пропускаем ноту, чем рисовать наложение
+        const lane = free[Math.floor(rng() * free.length)];
+        laneFreeAt[lane] = n.time + hold + tileTime + 0.04;
+        prevLane = lane;
+        out.push({ time: n.time, end: n.time + hold, hold: hold > 0, lane, hit: false, missed: false, holding: false, done: false, judge: null, flash: 0 });
+    });
+    return out;
+}
+
 async function startRhythmLevel(track) {
     if (activeGameCleanup) { activeGameCleanup(); activeGameCleanup = null; }
     setGamesNav(true);
@@ -2686,122 +2792,94 @@ async function startRhythmLevel(track) {
         const statusEl = wrap.querySelector("#rhythmStatus");
         if (statusEl) statusEl.textContent = "Анализируем биты...";
 
-        const ctx = getGameAudioCtx();
-        audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        const ctxAudio = getGameAudioCtx();
+        audioBuffer = await ctxAudio.decodeAudioData(arrayBuffer.slice(0));
         chart = buildBeatmapFromAudioBuffer(audioBuffer, track.key);
     } catch (e) {
         console.error("Ошибка загрузки/анализа трека:", e);
         if (wrap.isConnected) {
-            wrap.innerHTML = `<p style="text-align:center;color:#9686b8;">Не удалось загрузить трек 😔<br>Проверьте, что файл лежит в папке rhythm_game.</p>
-                <button class="btn-action-cancel" id="rhythmBackErr" style="margin-top:12px;">⬅ Назад</button>`;
+            wrap.innerHTML = `<div class="ui-empty">Не удалось загрузить трек 😔</div>
+                <button type="button" class="ui-btn ui-pill" id="rhythmBackErr">⬅ К трекам</button>`;
             wrap.querySelector("#rhythmBackErr").onclick = () => showRhythmMenu();
         }
         return;
     }
     if (!wrap.isConnected) return; // пока грузили — успели уйти с экрана
 
-    if (!chart.notes.length) {
-        wrap.innerHTML = `<p style="text-align:center;color:#9686b8;">Не получилось найти чёткий ритм в этом треке 😕<br>Попробуйте другой трек.</p>
-            <button class="btn-action-cancel" id="rhythmBackNoNotes" style="margin-top:12px;">⬅ Назад</button>`;
+    const tiles = layoutRhythmTiles(chart.notes, track.key);
+    if (!tiles.length) {
+        wrap.innerHTML = `<div class="ui-empty">Не получилось найти чёткий ритм в этом треке 😕</div>
+            <button type="button" class="ui-btn ui-pill" id="rhythmBackNoNotes">⬅ К трекам</button>`;
         wrap.querySelector("#rhythmBackNoNotes").onclick = () => showRhythmMenu();
         return;
     }
 
-    const LANE_KEYS = ["A", "F", "J", "K"];
     wrap.innerHTML = `
-        <div class="rhythm-topbar">
-            <div class="rhythm-stat">Счёт: <span id="rhythmScore">0</span></div>
-            <div class="rhythm-speed-chip" id="rhythmSpeedChip">x1</div>
-            <div class="rhythm-stat rhythm-lives" id="rhythmLives"></div>
+        <div class="rt-hud">
+            <div class="rt-progress"><div class="rt-progress-fill" id="rtProgress"></div>
+                <span class="rt-star" style="left:33%">♥</span><span class="rt-star" style="left:66%">♥</span><span class="rt-star" style="left:99%">♥</span>
+            </div>
+            <div class="rt-hud-row">
+                <span class="rt-lives" id="rtLives"></span>
+                <span class="rt-score" id="rtScore">0</span>
+                <span class="rt-speed" id="rtSpeed">x1</span>
+            </div>
         </div>
-        <div class="rhythm-combo-wrap"><div class="rhythm-combo" id="rhythmCombo"></div></div>
-        <div class="rhythm-arena" id="rhythmArena">
-            ${LANE_KEYS.map((k, i) => `<div class="rhythm-lane" data-lane="${i}"><div class="rhythm-hitline"></div><div class="rhythm-key-hint">${k}</div></div>`).join("")}
-            <div class="rhythm-judgement" id="rhythmJudgement"></div>
+        <div class="rhythm-arena rt-arena" id="rhythmArena">
+            <canvas class="rt-canvas" id="rtCanvas"></canvas>
             <div class="rhythm-countdown" id="rhythmCountdown"></div>
         </div>
+        <div class="rt-keys">${RT_KEYS.map(k => `<span>${k}</span>`).join("")}</div>
     `;
-    // Кликабельного ряда кнопок под ареной нет — игра заточена под телефон, и
-    // попадание по ноте происходит тапом прямо по самому тайлу (см. tryHitTile
-    // ниже), а не по фиксированной кнопке снизу. LANE_KEYS используется для
-    // физической клавиатуры (десктоп, см. keyHandler) — подсказка с буквой
-    // (.rhythm-key-hint) в верстке выше показывается только на ПК, см. CSS.
 
     const arena = wrap.querySelector("#rhythmArena");
-    const laneEls = Array.from(wrap.querySelectorAll(".rhythm-lane"));
-    const scoreEl = wrap.querySelector("#rhythmScore");
-    const comboEl = wrap.querySelector("#rhythmCombo");
-    const speedChipEl = wrap.querySelector("#rhythmSpeedChip");
-    const livesEl = wrap.querySelector("#rhythmLives");
-    const judgementEl = wrap.querySelector("#rhythmJudgement");
+    const canvas = wrap.querySelector("#rtCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = wrap.querySelector("#rtScore");
+    const livesEl = wrap.querySelector("#rtLives");
+    const speedEl = wrap.querySelector("#rtSpeed");
+    const progressEl = wrap.querySelector("#rtProgress");
+    const starEls = Array.from(wrap.querySelectorAll(".rt-star"));
     const countdownEl = wrap.querySelector("#rhythmCountdown");
 
     const audio = new Audio();
     audio.src = objectUrl;
     audio.preload = "auto";
 
-    const LOOKAHEAD = 1.1;      // сек (в шкале трека) — за сколько до удара тайл появляется сверху
-    const WINDOW_PERFECT = 0.055;
-
-    // Реальные размеры тайла зависят от ширины дорожки (в CSS задан aspect-ratio
-    // 1/3 — длина тайла всегда в 3 раза больше его ширины), поэтому меряем их
-    // один раз здесь, через невидимый тайл-зонд, сразу как только арена появилась
-    // в вёрстке. От этого зависит: (1) на сколько тайл прячем над ареной перед
-    // стартом, (2) сколько px он должен пройти, чтобы к моменту note.time его
-    // центр совпал с центром линии удара, (3) насколько широкое окно тайминга
-    // дать тапу — чем длиннее тайл (или шире экран), тем дольше он физически
-    // находится рядом с линией, и тап по нему должен засчитываться всё это время
-    // (иначе с длинными тайлами тапы по их верхней/нижней части не считывались бы).
-    const rhythmProbe = document.createElement("div");
-    rhythmProbe.className = "rhythm-tile";
-    rhythmProbe.style.visibility = "hidden";
-    rhythmProbe.style.top = "0px";
-    laneEls[0].appendChild(rhythmProbe);
-    const TILE_HEIGHT_PX = rhythmProbe.offsetHeight || 46;
-    rhythmProbe.remove();
-
-    const rhythmHitline = laneEls[0].querySelector(".rhythm-hitline");
-    const rhythmLaneHeight = laneEls[0].clientHeight;
-    const TILE_HITLINE_TOP = rhythmHitline ? rhythmHitline.offsetTop : rhythmLaneHeight - 46;
-    const TILE_HITLINE_HEIGHT = rhythmHitline ? rhythmHitline.offsetHeight : 3;
-    const TILE_TRAVEL_PX = TILE_HITLINE_TOP + TILE_HITLINE_HEIGHT / 2 + TILE_HEIGHT_PX / 2;
-    const TILE_SPEED_PX_PER_SEC = TILE_TRAVEL_PX / LOOKAHEAD;
-
-    // Половина времени, которое тайл физически проводит рядом с линией удара
-    // (пока хотя бы часть его длины перекрывает линию), плюс небольшой запас —
-    // само окно, за пределами которого нота считается пропущенной. Зажато
-    // снизу и сверху, чтобы не стать ни слишком жёстким, ни тривиально лёгким.
-    const MISS_CUTOFF = Math.min(0.4, Math.max(0.16, (TILE_HEIGHT_PX / 2) / TILE_SPEED_PX_PER_SEC + 0.07));
-
-    // Минимальный зазор по времени между двумя нотами на ОДНОЙ дорожке, при
-    // котором их тайлы ещё не наезжают друг на друга визуально — используется
-    // при спавне (см. resolveLaneForNote), чтобы разводить слишком тесные
-    // ноты по соседним дорожкам вместо наложения.
-    const MIN_LANE_GAP_SEC = TILE_HEIGHT_PX / TILE_SPEED_PX_PER_SEC;
+    // ---- Размеры арены (canvas подстраивается под CSS-размер и плотность экрана) ----
+    let W = 0, H = 0, lineY = 0, tileH = 0, laneW = 0, pxPerSec = 0;
+    function resize() {
+        const rect = arena.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = rect.width;
+        H = rect.height;
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        lineY = H * RT_LINE_RATIO;
+        tileH = H * RT_TILE_RATIO;
+        laneW = W / 4;
+        pxPerSec = lineY / RT_LOOKAHEAD;
+    }
+    resize();
+    const resizeObserver = new ResizeObserver(() => requestAnimationFrame(() => {
+        resize();
+        if (paused) draw(getPlaybackTime());
+    }));
+    resizeObserver.observe(arena);
 
     const START_LIVES = 3;
+    let score = 0, combo = 0, lives = START_LIVES, tierIndex = 0;
+    let gameOver = false, paused = true, rafId = null;
+    const lanePress = [0, 0, 0, 0];      // подсветка нажатой дорожки (затухает)
+    const laneError = [0, 0, 0, 0];      // красная вспышка ошибки
+    const holdsByPointer = new Map();    // pointerId/клавиша -> длинная плитка, которую держат
+    let effects = [];                    // кольца и искры от попаданий
+    let judgement = null;                // { text, color, age }
+    let shake = 0;
 
-    let score = 0, combo = 0;
-    let lives = START_LIVES;
-    let tierIndex = 0;
-    let gameOver = false;
-    let paused = true;
-    let rafId = null;
-    let activeTiles = []; // { note, el }
-    let spawnCursor = 0;
-
-    // --- Плавные игровые часы ---
-    // audio.currentTime на многих мобильных браузерах обновляется рывками
-    // (не каждый кадр, а раз в ~150-250мс), в то время как позиция тайла на
-    // экране тоже считается от него же в loop() — а тап (pointerdown) в
-    // tryHitTile прилетает АСИНХРОННО, между кадрами rAF, и в момент тапа
-    // audio.currentTime мог быть "устаревшим" на десятки мс относительно
-    // того, что игрок реально видел на экране. Именно это ощущалось как
-    // "не засчитывает тап по ноте, хотя явно попал" и "приходится тапать
-    // дважды". Чтобы у тапа всегда было точное и монотонно растущее время,
-    // синхронизируем опорную точку (audio.currentTime + performance.now())
-    // на каждом кадре, а между кадрами интерполируем через performance.now()
-    // — он всегда точный и не "прыгает" пачками, в отличие от currentTime.
+    // ---- Часы трека: audio.currentTime обновляется рывками, поэтому между
+    // его обновлениями время досчитывается по performance.now() ----
     let clockAnchorAudioTime = 0;
     let clockAnchorPerf = performance.now();
     function syncClock() {
@@ -2810,37 +2888,377 @@ async function startRhythmLevel(track) {
     }
     function getPlaybackTime() {
         if (paused || gameOver) return clockAnchorAudioTime;
-        const elapsedSec = (performance.now() - clockAnchorPerf) / 1000;
-        return clockAnchorAudioTime + elapsedSec * audio.playbackRate;
+        return clockAnchorAudioTime + (performance.now() - clockAnchorPerf) / 1000 * audio.playbackRate;
     }
 
-    function renderLives() {
+    function renderHud() {
         livesEl.textContent = "❤️".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, START_LIVES - lives));
-    }
-    function renderSpeedChip() {
         const v = RHYTHM_SPEED_TIERS[tierIndex];
-        speedChipEl.textContent = "x" + (Number.isInteger(v) ? v.toFixed(0) : v.toString());
+        speedEl.textContent = "x" + (Number.isInteger(v) ? v.toFixed(0) : v);
+        scoreEl.textContent = score;
     }
-    renderLives();
-    renderSpeedChip();
+    renderHud();
 
-    function showJudgement(text, cls) {
-        judgementEl.textContent = text;
-        judgementEl.className = "rhythm-judgement " + cls;
-        void judgementEl.offsetWidth; // форсируем reflow, чтобы анимация перезапускалась при частых попаданиях
-        judgementEl.classList.add("rhythm-judgement-anim");
+    function showJudgement(text, color) {
+        judgement = { text, color, age: 0 };
     }
-    function popCombo() {
-        comboEl.textContent = combo > 0 ? combo + "x" : "";
-        comboEl.classList.remove("rhythm-combo-pop");
-        void comboEl.offsetWidth;
-        comboEl.classList.add("rhythm-combo-pop");
+
+    function spawnBurst(lane, color) {
+        const cx = lane * laneW + laneW / 2;
+        effects.push({ type: "ring", x: cx, y: lineY, age: 0, color });
+        for (let i = 0; i < 10; i++) {
+            const a = Math.random() * Math.PI * 2, sp = 80 + Math.random() * 160;
+            effects.push({ type: "spark", x: cx, y: lineY, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, age: 0, color });
+        }
     }
-    function resetChartState() {
-        chart.notes.forEach(n => { n.hit = false; n.missed = false; });
-        activeTiles.forEach(t => t.el.remove());
-        activeTiles = [];
-        spawnCursor = 0;
+
+    // ---- Подсчёт очков: точность + множитель за серию (как и раньше, до x4) ----
+    function addScore(base) {
+        const multiplier = Math.min(4, 1 + Math.floor(combo / 10));
+        score += base * multiplier;
+        scoreEl.textContent = score;
+    }
+
+    function loseLife(lane, text) {
+        combo = 0;
+        lives--;
+        laneError[lane] = 1;
+        shake = 1;
+        vibrate(60);
+        showJudgement(text, NEON.red);
+        renderHud();
+        if (lives <= 0) endGame();
+    }
+
+    function hitTile(tile, diff, key) {
+        tile.hit = true;
+        tile.flash = 1;
+        combo++;
+        let base, text, color;
+        if (diff <= RT_WINDOW.perfect) { base = 300; text = "ИДЕАЛЬНО"; color = NEON.gold; }
+        else if (diff <= RT_WINDOW.great) { base = 200; text = "ОТЛИЧНО"; color = NEON.cyan; }
+        else { base = 100; text = "ХОРОШО"; color = NEON.pinkSoft; }
+        tile.judge = color;
+        addScore(base);
+        showJudgement(text, color);
+        spawnBurst(tile.lane, color);
+        vibrate(8);
+        if (tile.hold) {
+            tile.holding = true;
+            holdsByPointer.set(key, tile);
+        } else {
+            tile.done = true;
+        }
+    }
+
+    // Длинная плитка: бонус за удержание пропорционален тому, сколько продержали
+    function releaseHold(key) {
+        const tile = holdsByPointer.get(key);
+        if (!tile) return;
+        holdsByPointer.delete(key);
+        if (tile.done) return;
+        tile.holding = false;
+        tile.done = true;
+        const t = getPlaybackTime();
+        const part = Math.max(0, Math.min(1, (t - tile.time) / Math.max(0.01, tile.end - tile.time)));
+        addScore(Math.round(200 * part));
+        if (part >= 0.9) {
+            showJudgement("УДЕРЖАНО", NEON.gold);
+            spawnBurst(tile.lane, NEON.gold);
+        }
+    }
+
+    // Нажатие на дорожку. y — где именно нажали (для тапа пальцем/мышью):
+    // если палец прямо на плитке, она засчитывается даже рано, как в жанре
+    // принято; иначе — ближайшая по времени плитка дорожки в окне точности.
+    function pressLane(lane, key, y = null) {
+        if (gameOver || paused) return;
+        lanePress[lane] = 1;
+        const t = getPlaybackTime();
+        let best = null, bestDiff = Infinity;
+        for (const tile of tiles) {
+            if (tile.lane !== lane || tile.hit || tile.missed) continue;
+            const dt = tile.time - t; // >0 — плитка ещё не дошла до линии
+            if (dt > RT_LOOKAHEAD) break;
+            const bottom = lineY - dt * pxPerSec;
+            const top = bottom - tileH - (tile.end - tile.time) * pxPerSec;
+            const underFinger = y !== null && y >= top - 12 && y <= bottom + 12;
+            const inWindow = dt <= RT_WINDOW.early && dt >= -RT_WINDOW.late;
+            if ((underFinger || inWindow) && Math.abs(dt) < bestDiff) {
+                best = tile;
+                bestDiff = Math.abs(dt);
+            }
+        }
+        if (best) hitTile(best, bestDiff, key);
+        else loseLife(lane, "МИМО");
+    }
+
+    // ---- Ввод: мультитач по дорожкам и клавиши D F J K ----
+    function laneFromEvent(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        return { lane: Math.max(0, Math.min(3, Math.floor(x / (rect.width / 4)))), y: e.clientY - rect.top };
+    }
+    function onPointerDown(e) {
+        e.preventDefault();
+        const { lane, y } = laneFromEvent(e);
+        pressLane(lane, "p" + e.pointerId, y);
+    }
+    function onPointerUp(e) {
+        releaseHold("p" + e.pointerId);
+    }
+    canvas.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+
+    const keysDown = new Set();
+    function keyDown(e) {
+        const lane = RT_KEYS.indexOf(e.key.toUpperCase());
+        if (lane === -1 || keysDown.has(lane)) return;
+        keysDown.add(lane);
+        pressLane(lane, "k" + lane);
+    }
+    function keyUp(e) {
+        const lane = RT_KEYS.indexOf(e.key.toUpperCase());
+        if (lane === -1) return;
+        keysDown.delete(lane);
+        releaseHold("k" + lane);
+    }
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+
+    // ---- Отрисовка ----
+    function tileRect(tile, t) {
+        const bottom = lineY - (tile.time - t) * pxPerSec;
+        const height = tileH + (tile.end - tile.time) * pxPerSec;
+        return { x: tile.lane * laneW + 4, y: bottom - height, w: laneW - 8, h: height, bottom };
+    }
+
+    function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+    }
+
+    function drawTile(tile, t) {
+        const r = tileRect(tile, t);
+        const color = tile.missed ? NEON.red : RT_LANE_COLORS[tile.lane];
+        if (r.y > H || r.bottom < -10) return;
+
+        // уже нажатая обычная плитка — вспышка и растворение
+        if (tile.hit && !tile.hold) {
+            if (tile.flash <= 0) return;
+            ctx.globalAlpha = tile.flash;
+            roundRect(r.x, r.y, r.w, r.h, 10);
+            ctx.fillStyle = neonRgba(tile.judge || color, 0.55);
+            ctx.fill();
+            neonStroke(ctx, NEON.text, 1.5);
+            ctx.globalAlpha = 1;
+            return;
+        }
+
+        roundRect(r.x, r.y, r.w, r.h, 10);
+        const g = ctx.createLinearGradient(0, r.y, 0, r.bottom);
+        g.addColorStop(0, "#160822");
+        g.addColorStop(1, tile.missed ? "#3a0d18" : "#2a0f3e");
+        ctx.fillStyle = g;
+        ctx.fill();
+        neonStroke(ctx, color, 2);
+
+        // блик и "клавиша" внизу плитки
+        ctx.fillStyle = neonRgba("#ffffff", 0.08);
+        ctx.fillRect(r.x + 6, r.y + 6, r.w - 12, 3);
+        ctx.fillStyle = neonRgba(color, 0.55);
+        ctx.fillRect(r.x + 10, r.bottom - 12, r.w - 20, 4);
+
+        if (tile.hold) {
+            // дорожка удержания по центру, заполняется пока держат
+            const cx = r.x + r.w / 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, r.y + 14);
+            ctx.lineTo(cx, r.bottom - 20);
+            ctx.strokeStyle = neonRgba(color, 0.35);
+            ctx.lineWidth = 6;
+            ctx.lineCap = "round";
+            ctx.stroke();
+            // часть плитки, уже ушедшая за линию, — "проигранная", светится золотом
+            if ((tile.holding || tile.done) && r.bottom - 20 > lineY) {
+                ctx.beginPath();
+                ctx.moveTo(cx, r.bottom - 20);
+                ctx.lineTo(cx, Math.max(r.y + 14, lineY));
+                neonStroke(ctx, NEON.gold, 3);
+            }
+        }
+    }
+
+    function draw(t) {
+        ctx.save();
+        if (shake > 0) ctx.translate((Math.random() - 0.5) * 8 * shake, (Math.random() - 0.5) * 6 * shake);
+
+        // фон и дорожки
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, NEON.void);
+        bg.addColorStop(1, "#1a0626");
+        ctx.fillStyle = bg;
+        ctx.fillRect(-10, -10, W + 20, H + 20);
+        for (let l = 0; l < 4; l++) {
+            const x = l * laneW;
+            if (lanePress[l] > 0) {
+                const g = ctx.createLinearGradient(0, 0, 0, H);
+                g.addColorStop(0, neonRgba(RT_LANE_COLORS[l], 0));
+                g.addColorStop(1, neonRgba(RT_LANE_COLORS[l], 0.22 * lanePress[l]));
+                ctx.fillStyle = g;
+                ctx.fillRect(x, 0, laneW, H);
+            }
+            if (laneError[l] > 0) {
+                ctx.fillStyle = neonRgba(NEON.red, 0.28 * laneError[l]);
+                ctx.fillRect(x, 0, laneW, H);
+            }
+            if (l > 0) {
+                ctx.fillStyle = neonRgba(NEON.purple, 0.22);
+                ctx.fillRect(x - 0.5, 0, 1, H);
+            }
+        }
+
+        // большая полупрозрачная серия на фоне
+        if (combo >= 5) {
+            ctx.fillStyle = neonRgba(NEON.text, 0.08);
+            ctx.font = `800 ${Math.round(H * 0.12)}px Manrope, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(String(combo), W / 2, H * 0.3);
+        }
+
+        // плитки
+        for (const tile of tiles) {
+            if (tile.time - t > RT_LOOKAHEAD + 0.1) break;
+            if (tile.end - t < -1) continue;
+            drawTile(tile, t);
+        }
+
+        // линия удара
+        ctx.beginPath();
+        ctx.moveTo(0, lineY);
+        ctx.lineTo(W, lineY);
+        neonStroke(ctx, NEON.pinkSoft, 1.5);
+
+        // кольца и искры
+        effects.forEach(e => {
+            const k = 1 - e.age / (e.type === "ring" ? 0.35 : 0.5);
+            if (k <= 0) return;
+            ctx.globalAlpha = k;
+            if (e.type === "ring") {
+                ctx.beginPath();
+                ctx.ellipse(e.x, e.y, laneW * (0.22 + (1 - k) * 0.22), 8 + (1 - k) * 10, 0, 0, Math.PI * 2);
+                neonStroke(ctx, e.color, 1.5);
+            } else {
+                ctx.fillStyle = e.color;
+                ctx.fillRect(e.x, e.y, 3, 3);
+            }
+            ctx.globalAlpha = 1;
+        });
+
+        // оценка попадания
+        if (judgement && judgement.age < 0.6) {
+            const k = judgement.age / 0.6;
+            ctx.globalAlpha = 1 - k;
+            ctx.fillStyle = judgement.color;
+            ctx.font = `800 ${Math.round(Math.min(W * 0.08, 26) * (1 + (1 - k) * 0.15))}px Manrope, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(judgement.text, W / 2, lineY - H * 0.18 - k * 14);
+            ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+    }
+
+    // ---- Игровой цикл ----
+    let lastFrame = performance.now();
+    function loop(now) {
+        if (gameOver || paused) return;
+        const dt = Math.min(0.05, (now - lastFrame) / 1000);
+        lastFrame = now;
+        syncClock();
+        const t = clockAnchorAudioTime;
+
+        for (const tile of tiles) {
+            if (tile.time - t > RT_LOOKAHEAD) break;
+            // пропущенная плитка
+            if (!tile.hit && !tile.missed && t - tile.time > RT_WINDOW.late) {
+                tile.missed = true;
+                loseLife(tile.lane, "ПРОПУСК");
+                if (gameOver) return;
+            }
+            // длинную плитку додержали до конца — засчитываем сами
+            if (tile.holding && t >= tile.end) {
+                for (const [key, held] of holdsByPointer) if (held === tile) releaseHold(key);
+            }
+            if (tile.flash > 0) tile.flash = Math.max(0, tile.flash - dt * 5);
+        }
+        for (let l = 0; l < 4; l++) {
+            lanePress[l] = Math.max(0, lanePress[l] - dt * 4);
+            laneError[l] = Math.max(0, laneError[l] - dt * 3);
+        }
+        shake = Math.max(0, shake - dt * 6);
+        effects.forEach(e => {
+            e.age += dt;
+            if (e.type === "spark") { e.x += e.vx * dt; e.y += e.vy * dt; e.vy += 400 * dt; }
+        });
+        effects = effects.filter(e => e.age < 0.5);
+        if (judgement) judgement.age += dt;
+
+        // прогресс трека и "сердечки" на 33/66/100%
+        const progress = Math.min(1, t / chart.duration);
+        progressEl.style.width = (progress * 100) + "%";
+        starEls.forEach((el, i) => el.classList.toggle("rt-star-on", progress >= [0.33, 0.66, 0.99][i]));
+
+        draw(t);
+
+        if (t >= chart.duration - 0.05) {
+            if (!gameOver) advanceSpeedTierAndLoop();
+            return;
+        }
+        rafId = requestAnimationFrame(loop);
+    }
+
+    function startPlaying() {
+        paused = false;
+        audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
+        audio.play().catch(() => {});
+        syncClock();
+        lastFrame = performance.now();
+        rafId = requestAnimationFrame(loop);
+    }
+
+    // Трек кончился — следующий круг быстрее (как и раньше)
+    function advanceSpeedTierAndLoop() {
+        paused = true;
+        cancelAnimationFrame(rafId);
+        audio.pause();
+        holdsByPointer.clear();
+        tiles.forEach(tile => Object.assign(tile, { hit: false, missed: false, holding: false, done: false, judge: null, flash: 0 }));
+        if (tierIndex < RHYTHM_SPEED_TIERS.length - 1) tierIndex++;
+        renderHud();
+
+        let count = 3;
+        countdownEl.textContent = "🔥 Быстрее! " + count;
+        countdownEl.classList.add("rhythm-countdown-show");
+        const iv = setInterval(() => {
+            count--;
+            if (gameOver) { clearInterval(iv); return; }
+            if (count <= 0) {
+                clearInterval(iv);
+                countdownEl.classList.remove("rhythm-countdown-show");
+                audio.currentTime = 0;
+                startPlaying();
+            } else {
+                countdownEl.textContent = "🔥 Быстрее! " + count;
+            }
+        }, 1000);
     }
 
     function endGame() {
@@ -2850,224 +3268,39 @@ async function startRhythmLevel(track) {
         cancelAnimationFrame(rafId);
         audio.pause();
         playSound("gameover");
+        draw(getPlaybackTime());
         saveRhythmScore(track.key, score).then(isRecord => {
             showRhythmGameOverModal(score, isRecord, () => startRhythmLevel(track), () => showRhythmMenu());
         });
     }
 
-    function registerMiss(note) {
-        if (note.hit || note.missed) return;
-        note.missed = true;
-        combo = 0;
-        popCombo();
-        lives--;
-        renderLives();
-        showJudgement("МИМО", "rhythm-judge-miss");
-        if (lives <= 0) endGame();
-    }
-
-    // Трек доиграл целиком — небольшая пауза, затем разгон и повтор той же карты нот
-    function advanceSpeedTierAndLoop() {
+    // Свернули вкладку — пауза, при возврате "Играть" продолжит с того же места
+    function onVisibility() {
+        if (!document.hidden || paused || gameOver) return;
         paused = true;
         cancelAnimationFrame(rafId);
+        syncClock();
         audio.pause();
-        resetChartState();
-
-        if (tierIndex < RHYTHM_SPEED_TIERS.length - 1) tierIndex++;
-        renderSpeedChip();
-
-        let count = 2;
-        countdownEl.textContent = "🔥 Ускорение! " + count;
-        countdownEl.classList.add("rhythm-countdown-show");
-        const iv = setInterval(() => {
-            count--;
-            if (count <= 0) {
-                clearInterval(iv);
-                countdownEl.classList.remove("rhythm-countdown-show");
-                audio.currentTime = 0;
-                audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
-                audio.play().catch(() => {});
-                paused = false;
-                syncClock();
-                rafId = requestAnimationFrame(loop);
-            } else {
-                countdownEl.textContent = "🔥 Ускорение! " + count;
-            }
-        }, 1000);
+        holdsByPointer.forEach((tile, key) => releaseHold(key));
+        showPlayOverlay(arena, startPlaying);
     }
+    document.addEventListener("visibilitychange", onVisibility);
 
-    // Если на дорожке note.lane уже есть активный (не пойманный/пропущенный)
-    // тайл, который выйдет слишком близко по времени — тайлы наложатся друг
-    // на друга визуально, и более ранний окажется под более поздним, не
-    // ловя тапы. Разводим такую ноту на ближайшую свободную дорожку.
-    function resolveLaneForNote(note) {
-        const hasConflict = (lane) => activeTiles.some(a =>
-            a.note.lane === lane && !a.note.hit && !a.note.missed &&
-            Math.abs(a.note.time - note.time) < MIN_LANE_GAP_SEC
-        );
-        if (!hasConflict(note.lane)) return note.lane;
-        for (let offset = 1; offset < RHYTHM_LANES; offset++) {
-            const candidate = (note.lane + offset) % RHYTHM_LANES;
-            if (!hasConflict(candidate)) return candidate;
-        }
-        return note.lane; // все дорожки заняты — очень редкий случай, оставляем как есть
-    }
-
-    function loop() {
-        if (gameOver || paused) return;
-        syncClock();
-        const t = clockAnchorAudioTime;
-
-        while (spawnCursor < chart.notes.length && chart.notes[spawnCursor].time - t <= LOOKAHEAD) {
-            const note = chart.notes[spawnCursor];
-            note.lane = resolveLaneForNote(note);
-            const el = document.createElement("div");
-            el.className = "rhythm-tile";
-            el.style.top = (-TILE_HEIGHT_PX) + "px"; // прячем тайл целиком над ареной перед стартом
-            // Попадание — прямым тапом/кликом по самому тайлу (мобильная игра,
-            // без отдельных кнопок внизу). pointerdown, а не click — заметно
-            // меньше задержка на тач-экранах. Тап именно по тайлу — точное
-            // попадание "по линии" (больше очков, см. tryHitTile/registerHit).
-            el.addEventListener("pointerdown", (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                tryHitTile(note, el, true);
-            });
-            laneEls[note.lane].appendChild(el);
-            activeTiles.push({ note, el });
-            spawnCursor++;
-        }
-
-        for (let i = activeTiles.length - 1; i >= 0; i--) {
-            const { note, el } = activeTiles[i];
-            const progress = 1 - (note.time - t) / LOOKAHEAD;
-            const y = progress * TILE_TRAVEL_PX;
-            el.style.transform = `translateY(${y}px)`;
-
-            if (!note.hit && !note.missed && (t - note.time) > MISS_CUTOFF) {
-                registerMiss(note);
-            }
-            if (note.hit || note.missed) {
-                el.remove();
-                activeTiles.splice(i, 1);
-            }
-        }
-
-        if (t >= chart.duration - 0.05) {
-            chart.notes.forEach(n => registerMiss(n)); // всё, что не успели ударить — в промах
-            if (!gameOver) advanceSpeedTierAndLoop();
-            return;
-        }
-
-        rafId = requestAnimationFrame(loop);
-    }
-
-    // Попадание засчитывается двумя способами: тап прямо по тайлу-ноте
-    // (onLine=true — точный тап "по линии", вешается на каждый тайл при
-    // спавне в loop() выше) и тап в любом другом месте экрана (onLine=false,
-    // см. handleAnywhereTap ниже) — тот тоже засчитывается, но приносит
-    // меньше очков, чем точное попадание по тайлу.
-    function registerHit(note, diff, onLine) {
-        note.hit = true;
-        combo++;
-        const multiplier = Math.min(4, 1 + Math.floor(combo / 10));
-        let base, judgeText, judgeCls;
-        if (onLine) {
-            const isPerfect = diff <= WINDOW_PERFECT;
-            base = isPerfect ? 300 : 100;
-            judgeText = isPerfect ? "ИДЕАЛЬНО" : "ХОРОШО";
-            judgeCls = isPerfect ? "rhythm-judge-perfect" : "rhythm-judge-good";
-        } else {
-            base = 60;
-            judgeText = "ЕСТЬ";
-            judgeCls = "rhythm-judge-anywhere";
-        }
-        score += base * multiplier;
-        scoreEl.textContent = score;
-        popCombo();
-        showJudgement(judgeText, judgeCls);
-    }
-
-    function tryHitTile(note, el, onLine) {
-        if (gameOver || paused) return;
-        if (note.hit || note.missed) return;
-        const diff = Math.abs(getPlaybackTime() - note.time);
-        if (diff > MISS_CUTOFF) return; // тайл ещё далеко от такта — тап без эффекта
-
-        registerHit(note, diff, onLine);
-
-        // Убираем тайл из общего цикла отрисовки сразу (иначе loop() тут же
-        // удалит его как "note.hit" за один кадр), но даём короткому
-        // transition (см. CSS .rhythm-tile) доиграть "поп" ровно с той
-        // позиции, где тайл был в момент тапа — без прыжка.
-        const idx = activeTiles.findIndex(a => a.note === note);
-        if (idx !== -1) activeTiles.splice(idx, 1);
-        el.classList.add("rhythm-tile-hit");
-        el.style.transform = (el.style.transform || "") + " scale(1.4)";
-        el.style.opacity = "0";
-        setTimeout(() => el.remove(), 180);
-    }
-
-    // Ближайшая по времени активная (ещё не пойманная и не пропущенная) нота —
-    // среди ВСЕХ дорожек. Используется тапами в любом месте экрана.
-    function findNearestActiveNote() {
-        const t = getPlaybackTime();
-        let best = null, bestDiff = Infinity;
-        for (const entry of activeTiles) {
-            if (entry.note.hit || entry.note.missed) continue;
-            const diff = Math.abs(t - entry.note.time);
-            if (diff <= MISS_CUTOFF && diff < bestDiff) { bestDiff = diff; best = entry; }
-        }
-        return best;
-    }
-
-    // Тап в любом месте экрана (не по самому тайлу) — засчитывается по
-    // ближайшей активной ноте, чтобы не нужно было точно попадать по тайлу.
-    // Срабатывает только если тап не был уже обработан самим тайлом — у его
-    // обработчика стоит e.stopPropagation(), так что до сюда он не доходит.
-    function handleAnywhereTap() {
-        if (gameOver || paused) return;
-        const entry = findNearestActiveNote();
-        if (!entry) return; // рядом ничего не звучит — тап просто без эффекта
-        tryHitTile(entry.note, entry.el, false);
-    }
-    wrap.addEventListener("pointerdown", handleAnywhereTap);
-
-    // Резервный способ — физическая клавиатура (для тестирования на десктопе).
-    // Бьёт по ближайшей по времени ноте в соответствующей дорожке.
-    function tryHitLane(lane) {
-        if (gameOver || paused) return;
-        const t = getPlaybackTime();
-        let bestNote = null, bestDiff = Infinity;
-        for (const note of chart.notes) {
-            if (note.hit || note.missed || note.lane !== lane) continue;
-            const diff = Math.abs(t - note.time);
-            if (diff <= MISS_CUTOFF && diff < bestDiff) { bestNote = note; bestDiff = diff; }
-        }
-        if (!bestNote) return; // мимо такта — без штрафа, просто ничего не происходит
-        registerHit(bestNote, bestDiff, true);
-    }
-
-    function keyHandler(e) {
-        const idx = LANE_KEYS.indexOf(e.key.toUpperCase());
-        if (idx !== -1) tryHitLane(idx);
-    }
-    window.addEventListener("keydown", keyHandler);
-
-    showPlayOverlay(arena, () => {
-        paused = false;
-        audio.playbackRate = RHYTHM_SPEED_TIERS[tierIndex];
-        audio.play().catch(() => {});
-        syncClock();
-        rafId = requestAnimationFrame(loop);
-    });
+    draw(0);
+    showPlayOverlay(arena, startPlaying);
 
     activeGameCleanup = () => {
         gameOver = true;
         paused = true;
         cancelAnimationFrame(rafId);
         audio.pause();
-        window.removeEventListener("keydown", keyHandler);
+        resizeObserver.disconnect();
+        canvas.removeEventListener("pointerdown", onPointerDown);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("pointercancel", onPointerUp);
+        window.removeEventListener("keydown", keyDown);
+        window.removeEventListener("keyup", keyUp);
+        document.removeEventListener("visibilitychange", onVisibility);
         if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
 }
