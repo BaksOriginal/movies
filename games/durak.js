@@ -532,7 +532,7 @@ function dkMount(container, ctx) {
             } else if (s.phase === "taking") {
                 status = `Ты берёшь — ${pName} может подкинуть ещё`;
             } else if (undef) {
-                acts.push(`<button type="button" class="ui-btn dk-act dk-act-take" data-a="take">🫴 Беру</button>`);
+                acts.push(`<button type="button" class="ui-btn dk-act dk-act-take" data-a="take">🤲 Беру</button>`);
                 status = s.mode === "perevodnoy" && !s.table.some(p => p.d) ? "Отбивайся или переводи" : "Отбивайся";
             } else {
                 status = `Отбито. ${pName} решает — подкинуть или «Бита»`;

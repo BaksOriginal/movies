@@ -238,6 +238,44 @@ function applyChatRealtimeChange(messages, payload, limit) {
     return null;
 }
 
+// Приводит DOM-список пузырей чата к массиву messages (он уже отсортирован
+// по времени), не пересоздавая отрисованные пузыри. Новые пузыри встают на
+// своё место по порядку, а не всегда в конец: раньше старое сообщение,
+// вернувшееся в окно «последних N» после перезагрузки списка, дописывалось
+// в самый низ чата и выглядело как только что пришедшее.
+// Возвращает true, если новые сообщения появились внизу (тогда стоит
+// прокрутить к ним).
+function syncChatBubbles(box, messages, createBubble, updateBubble) {
+    const rendered = new Map();
+    box.querySelectorAll("[data-msg-id]").forEach(el => rendered.set(el.dataset.msgId, el));
+    const ids = new Set(messages.map(m => String(m.id)));
+    rendered.forEach((el, id) => {
+        if (!ids.has(id)) { el.remove(); rendered.delete(id); }
+    });
+
+    let lastRenderedIdx = -1;
+    messages.forEach((m, i) => { if (rendered.has(String(m.id))) lastRenderedIdx = i; });
+
+    let prev = null;
+    let addedAtBottom = false;
+    messages.forEach((msg, i) => {
+        let el = rendered.get(String(msg.id));
+        if (el) {
+            updateBubble(el, msg);
+        } else {
+            el = createBubble(msg);
+            if (i > lastRenderedIdx) addedAtBottom = true;
+        }
+        // Ставим пузырь сразу после предыдущего (для уже стоящих на месте — ничего не меняется)
+        if (prev ? prev.nextElementSibling !== el : box.firstElementChild !== el) {
+            if (prev) prev.after(el);
+            else box.prepend(el);
+        }
+        prev = el;
+    });
+    return addedAtBottom;
+}
+
 // Обрезает текст цитаты ответа для превью
 function buildReplyPreviewText(msg) {
     if (isStickerMessage(msg.message)) return "🖼️ Стикер";

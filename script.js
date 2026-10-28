@@ -4628,28 +4628,9 @@ function renderChatMessages() {
 
     const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
 
-    // Собираем уже отрисованные элементы по id
-    const renderedEls = new Map();
-    box.querySelectorAll("[data-msg-id]").forEach(el => renderedEls.set(el.dataset.msgId, el));
-    const currentIds = new Set(chatMessages.map(m => String(m.id)));
-
-    // Удаляем из DOM сообщения, которых больше нет в данных (удалили)
-    renderedEls.forEach((el, id) => {
-        if (!currentIds.has(id)) el.remove();
-    });
-
-    // Добавляем новые сообщения и обновляем текст уже существующих (если отредактировали)
-    let addedNew = false;
-    chatMessages.forEach(msg => {
-        const idStr = String(msg.id);
-        const existingEl = renderedEls.get(idStr);
-        if (!existingEl) {
-            box.appendChild(createChatBubble(msg));
-            addedNew = true;
-        } else {
-            updateChatBubbleContent(existingEl, msg);
-        }
-    });
+    // Добавляем новые сообщения на их место, убираем удалённые и обновляем
+    // текст отредактированных (см. syncChatBubbles в core.js)
+    const addedNew = syncChatBubbles(box, chatMessages, createChatBubble, updateChatBubbleContent);
 
     // Прокручиваем вниз только если появились новые сообщения и пользователь
     // и так был у нижнего края (чтобы не сбивать чтение старых сообщений)
@@ -4732,10 +4713,12 @@ async function showChatScreen() {
 
         clearChatReplyTarget();
 
-        // Показываем сообщение сразу же, не дожидаясь realtime-события
+        // Показываем сообщение сразу же, не дожидаясь realtime-события.
+        // Realtime может прийти раньше ответа на insert — тогда сообщение уже
+        // в списке; раньше его добавляли второй раз, и обрезка до 150 вместо
+        // дубля выкидывала старое сообщение (оно потом «возвращалось»).
         if (data) {
-            chatMessages.push(data);
-            if (chatMessages.length > 150) chatMessages.shift();
+            chatMessages = applyChatRealtimeChange(chatMessages, { eventType: "INSERT", new: data }, 150) || chatMessages;
             renderChatMessages();
         }
     };

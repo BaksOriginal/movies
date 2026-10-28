@@ -1934,25 +1934,7 @@ function renderWatchPartyChatMessages() {
 
     const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
 
-    const renderedEls = new Map();
-    box.querySelectorAll("[data-msg-id]").forEach(el => renderedEls.set(el.dataset.msgId, el));
-    const currentIds = new Set(watchPartyChatMessages.map(m => String(m.id)));
-
-    renderedEls.forEach((el, id) => {
-        if (!currentIds.has(id)) el.remove();
-    });
-
-    let addedNew = false;
-    watchPartyChatMessages.forEach(msg => {
-        const idStr = String(msg.id);
-        const existingEl = renderedEls.get(idStr);
-        if (!existingEl) {
-            box.appendChild(createWPChatBubble(msg));
-            addedNew = true;
-        } else {
-            updateWPChatBubbleContent(existingEl, msg);
-        }
-    });
+    const addedNew = syncChatBubbles(box, watchPartyChatMessages, createWPChatBubble, updateWPChatBubbleContent);
 
     if (addedNew && wasNearBottom) {
         box.scrollTop = box.scrollHeight;
@@ -2162,9 +2144,9 @@ async function showWatchPartyScreen() {
 
         clearWPChatReplyTarget();
 
+        // Без дублей: realtime мог успеть добавить это сообщение раньше
         if (data) {
-            watchPartyChatMessages.push(data);
-            if (watchPartyChatMessages.length > 100) watchPartyChatMessages.shift();
+            watchPartyChatMessages = applyChatRealtimeChange(watchPartyChatMessages, { eventType: "INSERT", new: data }, 100) || watchPartyChatMessages;
             renderWatchPartyChatMessages();
         }
     };
