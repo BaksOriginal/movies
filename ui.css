@@ -1486,9 +1486,9 @@ body.shell-on .container > .navigation{ display: none; }
     stroke-width: 3;
     stroke-linecap: round;
     stroke-dasharray: 1 13;
-    animation: gamesTrailMarch 1.4s linear infinite;
+    /* Без анимации: бегущие по дорожке точки перерисовывали весь SVG
+       каждый кадр и заметно тормозили телефоны */
 }
-@keyframes gamesTrailMarch{ to{ stroke-dashoffset: -28; } }
 
 .games-map-flag{
     position: absolute;
@@ -4288,7 +4288,8 @@ html.st-editing, body.st-editing{ overflow: hidden; overscroll-behavior: none; }
 }
 .bs-board.is-enemy.is-my-turn .bs-cell:not(.is-miss):not(.is-hit){ cursor: crosshair; }
 .bs-board.is-enemy.is-my-turn .bs-cell:not(.is-miss):not(.is-hit):hover{ background: rgba(255,46,147,0.28); }
-.bs-board.is-editable .bs-cell{ cursor: pointer; }
+.bs-board.is-editable{ touch-action: none; }
+.bs-board.is-editable .bs-cell.is-ship{ cursor: grab; }
 
 /* Корабли: соседние клетки сливаются в один корпус */
 .bs-cell.is-ship{
@@ -4366,7 +4367,34 @@ html.st-editing, body.st-editing{ overflow: hidden; overscroll-behavior: none; }
 }
 .bs-dock-ship.is-selected{ border-color: var(--pink); background: rgba(255,46,147,0.18); box-shadow: 0 0 14px rgba(255,46,147,0.3); }
 .bs-dock-ship.is-done{ opacity: .45; }
+.bs-dock-ship:not(:disabled):not(.is-done){ cursor: grab; touch-action: none; }
 .bs-dock-ship:disabled{ cursor: default; }
+/* Корабль, который тащат: едет за пальцем, держится за клетку --off */
+.bs-float{
+    position: fixed;
+    left: 0; top: 0;
+    z-index: 1200;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+    margin-left: calc(var(--cs) * -0.5 - (var(--cs) + 2px) * var(--off));
+    margin-top: calc(var(--cs) * -0.5);
+    opacity: .9;
+    filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55));
+}
+.bs-float.is-v{
+    flex-direction: column;
+    margin-left: calc(var(--cs) * -0.5);
+    margin-top: calc(var(--cs) * -0.5 - (var(--cs) + 2px) * var(--off));
+}
+.bs-float i{
+    width: var(--cs); height: var(--cs);
+    border-radius: 5px;
+    background: linear-gradient(180deg, #b9cbe8, #7d93ba);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+}
+/* Над полем сам корабль прячется — там видна его тень на клетках */
+.bs-float.is-over{ opacity: 0; }
 .bs-dock-hull{ display: flex; gap: 2px; }
 .bs-dock-hull i{ width: 11px; height: 11px; border-radius: 3px; background: linear-gradient(180deg, #9fb4d6, #6d83aa); }
 .bs-dock-count{ color: var(--text-dim); min-width: 18px; }

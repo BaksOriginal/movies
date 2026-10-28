@@ -197,9 +197,8 @@ function bsMount(container, ctx) {
     let pendingShot = -1;
     // Ручная расстановка — только у себя, пока не нажали «В бой»
     let draft = null;       // [{l, r, c, d} | {l, r: null}]
-    let selected = -1;      // индекс корабля в draft, который сейчас «в руке»
-    let dir = "h";
-    let hover = -1;
+    let dir = "h";          // как встанет корабль, вытащенный из запаса
+    let drag = null;        // корабль, который сейчас тащат (см. startDrag)
 
     let toastTimer = null;
     function toast(text) {
@@ -236,6 +235,8 @@ function bsMount(container, ctx) {
     }
 
     // ---------- Расстановка ----------
+    // Корабль тащится пальцем или мышью — с поля или из запаса под полем.
+    // Короткое касание корабля на поле поворачивает его на 90° на месте.
     function buildPlace() {
         area.className = "bs-area is-place";
         area.innerHTML = `
@@ -244,36 +245,44 @@ function bsMount(container, ctx) {
                 <div class="bs-fleet" id="bsFleet"></div>
                 <div class="bs-tools">
                     <button type="button" class="ui-btn ui-pill" id="bsRandom">🎲 Случайно</button>
-                    <button type="button" class="ui-btn ui-pill" id="bsRotate">↻ Повернуть</button>
+                    <button type="button" class="ui-btn ui-pill" id="bsRotate">↻ Горизонтально</button>
                     <button type="button" class="ui-btn ui-pill" id="bsClear">Убрать все</button>
                     <button type="button" class="ui-btn ui-pill ui-pill-accent" id="bsReady">В бой!</button>
                 </div>
             </div>
         `;
         const board = el("bsMine");
-        board.addEventListener("click", (e) => {
+        board.addEventListener("pointerdown", (e) => {
+            if (S.ships[me] || drag) return;
             const cell = e.target.closest(".bs-cell");
-            if (cell) onPlaceTap(+cell.dataset.i);
+            if (!cell) return;
+            const i = +cell.dataset.i;
+            const k = draft.findIndex(s => s.r != null && bsCells(S.size, s).includes(i));
+            if (k < 0) return;
+            e.preventDefault();
+            startDrag(e, k, bsCells(S.size, draft[k]).indexOf(i), "board");
         });
-        board.addEventListener("pointermove", (e) => {
-            if (e.pointerType !== "mouse") return;
-            const cell = e.target.closest(".bs-cell");
-            const i = cell ? +cell.dataset.i : -1;
-            if (i !== hover) { hover = i; renderPlace(); }
+        el("bsFleet").addEventListener("pointerdown", (e) => {
+            if (S.ships[me] || drag) return;
+            const b = e.target.closest("[data-l]");
+            if (!b) return;
+            const l = +b.dataset.l;
+            const k = draft.findIndex(s => s.l === l && s.r == null);
+            if (k < 0) { toast("Все такие корабли уже на поле"); return; }
+            e.preventDefault();
+            draft[k].d = dir;
+            startDrag(e, k, 0, "dock");
         });
-        board.addEventListener("pointerleave", () => { hover = -1; renderPlace(); });
         el("bsRandom").onclick = () => {
             const fleet = bsRandomFleet(S.size, S.fleet);
-            if (fleet) { draft = fleet; selected = -1; vibrate(8); renderPlace(); }
+            if (fleet) { draft = fleet; vibrate(8); renderPlace(); }
         };
         el("bsRotate").onclick = () => {
             dir = dir === "h" ? "v" : "h";
-            if (selected < 0) toast(dir === "h" ? "Корабли будут вставать по горизонтали" : "Корабли будут вставать по вертикали");
             renderPlace();
         };
         el("bsClear").onclick = () => {
             draft = draft.map(s => ({ l: s.l, r: null, c: null, d: s.d }));
-            selected = draft.length ? 0 : -1;
             renderPlace();
         };
         el("bsReady").onclick = () => {
@@ -284,46 +293,122 @@ function bsMount(container, ctx) {
             // экран тут же перестраивается в бой, и кнопки больше нет
             ctx.act({ type: "place", ships: draft.map(s => ({ r: s.r, c: s.c, d: s.d, l: s.l })) });
         };
-        el("bsFleet").addEventListener("click", (e) => {
-            const b = e.target.closest("[data-l]");
-            if (!b) return;
-            const l = +b.dataset.l;
-            const k = draft.findIndex((s, idx) => s.l === l && s.r == null && idx !== selected);
-            const cur = selected >= 0 && draft[selected].l === l;
-            if (k < 0 && !cur) { toast("Все такие корабли уже стоят — нажми на корабль на поле, чтобы переставить"); return; }
-            selected = cur ? -1 : k;
-            renderPlace();
-        });
         builtFor = "place:" + S.size;
     }
 
-    function onPlaceTap(i) {
-        const size = S.size;
-        if (selected < 0) {
-            // Взять стоящий корабль в руку
-            const k = draft.findIndex(s => s.r != null && bsCells(size, s).includes(i));
-            if (k < 0) {
-                const free = draft.findIndex(s => s.r == null);
-                if (free < 0) { toast("Нажми на корабль, чтобы переставить его"); return; }
-                selected = free;
-            } else {
-                dir = draft[k].d;
-                draft[k] = { l: draft[k].l, r: null, c: null, d: draft[k].d };
-                selected = k;
-                vibrate(6);
-                renderPlace();
-                return;
-            }
+    // Клетка поля под точкой экрана (или -1, если мимо поля)
+    function cellAt(x, y) {
+        const board = el("bsMine");
+        if (!board) return -1;
+        const r = board.getBoundingClientRect();
+        const pad = 4, n = S.size;
+        const cs = (r.width - pad * 2) / n;
+        const col = Math.floor((x - r.left - pad) / cs), row = Math.floor((y - r.top - pad) / cs);
+        return col < 0 || row < 0 || col >= n || row >= n ? -1 : row * n + col;
+    }
+
+    // Куда встанет корабль, если отпустить его над клеткой i (держа за сегмент off)
+    function dropTarget(i) {
+        if (!drag || i < 0) return null;
+        const n = S.size, src = drag.ship;
+        const s = { l: src.l, d: src.d, r: Math.floor(i / n), c: i % n };
+        if (s.d === "h") s.c = Math.max(0, Math.min(n - s.l, s.c - drag.off));
+        else s.r = Math.max(0, Math.min(n - s.l, s.r - drag.off));
+        return s;
+    }
+
+    function startDrag(e, k, off, from) {
+        const src = draft[k];
+        drag = {
+            k, off, from,
+            ship: { l: src.l, d: src.d },
+            orig: from === "board" ? { ...src } : null,
+            sx: e.clientX, sy: e.clientY,
+            moved: false,
+            target: null,
+            float: null,
+        };
+        // Пока корабль в руке, на поле его нет — иначе он мешал бы сам себе
+        draft[k] = { l: src.l, r: null, c: null, d: src.d };
+        window.addEventListener("pointermove", onDragMove);
+        window.addEventListener("pointerup", onDragEnd);
+        window.addEventListener("pointercancel", onDragEnd);
+        if (from === "dock") showFloat(e);
+        renderPlace();
+    }
+
+    // Корабль, который едет за пальцем
+    function showFloat(e) {
+        if (drag.float) return;
+        const board = el("bsMine");
+        const cs = board ? (board.getBoundingClientRect().width - 8) / S.size : 28;
+        const f = document.createElement("div");
+        f.className = "bs-float is-" + drag.ship.d;
+        f.style.setProperty("--cs", cs + "px");
+        f.style.setProperty("--off", drag.off);
+        f.innerHTML = "<i></i>".repeat(drag.ship.l);
+        document.body.appendChild(f);
+        drag.float = f;
+        moveFloat(e);
+    }
+    function moveFloat(e) {
+        if (drag && drag.float) drag.float.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+    }
+
+    function onDragMove(e) {
+        if (!drag) return;
+        if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6) {
+            drag.moved = true;
+            showFloat(e);
         }
-        const s = { l: draft[selected].l, r: Math.floor(i / size), c: i % size, d: dir };
-        // Если корабль не влезает от этой клетки — сдвигаем его внутрь поля
-        if (s.d === "h") s.c = Math.min(s.c, size - s.l);
-        else s.r = Math.min(s.r, size - s.l);
-        const others = draft.filter((p, idx) => idx !== selected && p.r != null);
-        if (!bsFits(size, others, s)) { toast("Корабли не должны касаться друг друга — даже углами"); return; }
-        draft[selected] = s;
-        vibrate(8);
-        selected = draft.findIndex(p => p.r == null);
+        if (!drag.moved) return;
+        moveFloat(e);
+        const t = dropTarget(cellAt(e.clientX, e.clientY));
+        const key = t ? `${t.r}:${t.c}` : "";
+        if (key !== (drag.target ? `${drag.target.r}:${drag.target.c}` : "")) {
+            drag.target = t;
+            renderPlace();
+        }
+        if (drag.float) drag.float.classList.toggle("is-over", !!t);
+    }
+
+    function onDragEnd(e) {
+        if (!drag) return;
+        const d = drag;
+        // Куда отпустили — считаем, пока drag ещё не сброшен
+        const t = d.moved && e.type !== "pointercancel" ? dropTarget(cellAt(e.clientX, e.clientY)) : null;
+        drag = null;
+        window.removeEventListener("pointermove", onDragMove);
+        window.removeEventListener("pointerup", onDragEnd);
+        window.removeEventListener("pointercancel", onDragEnd);
+        if (d.float) d.float.remove();
+        const size = S.size;
+        const others = () => draft.filter((p, idx) => idx !== d.k && p.r != null);
+
+        if (!d.moved) {
+            if (d.from === "board") {
+                // Касание — поворот на 90° вокруг той клетки, за которую взяли
+                const pivot = bsCells(size, d.orig)[d.off];
+                const pr = Math.floor(pivot / size), pc = pivot % size;
+                const s = { l: d.orig.l, d: d.orig.d === "h" ? "v" : "h", r: pr, c: pc };
+                if (s.d === "h") s.c = Math.max(0, Math.min(size - s.l, pc - d.off));
+                else s.r = Math.max(0, Math.min(size - s.l, pr - d.off));
+                if (s.l > 1 && bsFits(size, others(), s)) { draft[d.k] = s; vibrate(6); }
+                else {
+                    draft[d.k] = d.orig;
+                    if (s.l > 1) toast("Повернуть не получится — мешают соседние корабли");
+                }
+            } else toast("Перетащи корабль на поле");
+            renderPlace();
+            return;
+        }
+        if (t && bsFits(size, others(), t)) {
+            draft[d.k] = t;
+            vibrate(8);
+        } else {
+            if (t) toast("Корабли не должны касаться друг друга — даже углами");
+            if (d.orig) draft[d.k] = d.orig;   // с поля — вернуть на место, из запаса — обратно в запас
+        }
         renderPlace();
     }
 
@@ -333,13 +418,11 @@ function bsMount(container, ctx) {
         const mineReady = !!S.ships[me];
         const ships = mineReady ? S.ships[me] : draft;
         const shipCls = shipCellClasses(size, ships);
-        // Призрак корабля под курсором (мышь) — зелёный, если встанет, красный — если нет
+        // Тень корабля под пальцем: зелёная — встанет, красная — нет
         let ghost = null, ghostOk = false;
-        if (!mineReady && selected >= 0 && hover >= 0) {
-            const s = { l: draft[selected].l, r: Math.floor(hover / size), c: hover % size, d: dir };
-            if (s.d === "h") s.c = Math.min(s.c, size - s.l); else s.r = Math.min(s.r, size - s.l);
-            ghost = new Set(bsCells(size, s) || []);
-            ghostOk = bsFits(size, draft.filter((p, idx) => idx !== selected && p.r != null), s);
+        if (!mineReady && drag && drag.target) {
+            ghost = new Set(bsCells(size, drag.target) || []);
+            ghostOk = bsFits(size, draft.filter((p, idx) => idx !== drag.k && p.r != null), drag.target);
         }
         const board = el("bsMine");
         board.classList.toggle("is-editable", !mineReady);
@@ -349,18 +432,15 @@ function bsMount(container, ctx) {
             if (ghost && ghost.has(i)) cls += ghostOk ? " is-ghost" : " is-ghost is-bad";
             if (c.className !== cls) c.className = cls;
         });
-        const fleetEl = el("bsFleet");
         const groups = {};
         draft.forEach((s, idx) => {
-            const g = groups[s.l] || (groups[s.l] = { total: 0, left: 0, sel: false });
-            g.total++;
-            if (s.r == null) g.left++;
-            if (idx === selected) g.sel = true;
+            const g = groups[s.l] || (groups[s.l] = { left: 0 });
+            if (s.r == null && !(drag && drag.k === idx)) g.left++;
         });
-        fleetEl.innerHTML = Object.keys(groups).sort((a, b) => b - a).map(l => {
+        el("bsFleet").innerHTML = Object.keys(groups).sort((a, b) => b - a).map(l => {
             const g = groups[l];
-            return `<button type="button" class="ui-btn bs-dock-ship${g.sel ? " is-selected" : ""}${g.left ? "" : " is-done"}" data-l="${l}" ${mineReady ? "disabled" : ""}>
-                <span class="bs-dock-hull" style="--l:${l}">${"<i></i>".repeat(+l)}</span>
+            return `<button type="button" class="ui-btn bs-dock-ship${g.left ? "" : " is-done"}" data-l="${l}" ${mineReady ? "disabled" : ""} title="Перетащи на поле">
+                <span class="bs-dock-hull">${"<i></i>".repeat(+l)}</span>
                 <span class="bs-dock-count">${g.left ? `×${g.left}` : "✓"}</span>
             </button>`;
         }).join("");
@@ -479,7 +559,6 @@ function bsMount(container, ctx) {
             if (S.phase === "place") {
                 if (!draft || draft.length !== S.fleet.length) {
                     draft = bsRandomFleet(S.size, S.fleet) || S.fleet.map(l => ({ l, r: null, c: null, d: "h" }));
-                    selected = -1;
                 }
                 buildPlace();
             } else buildBattle();
@@ -494,7 +573,7 @@ function bsMount(container, ctx) {
             const mine = !!S.ships[me], theirs = !!S.ships[opp];
             el("bsStatus").textContent = mine
                 ? `Ждём, пока ${ctx.partnerName()} расставит флот…`
-                : theirs ? `${ctx.partnerName()} уже готов(а) — расставь корабли и жми «В бой!»` : "Расставь корабли: нажми на корабль, чтобы переставить его";
+                : theirs ? `${ctx.partnerName()} уже готов(а) — расставь корабли и жми «В бой!»` : "Перетаскивай корабли на поле, нажми на корабль — повернётся";
             el("bsStatus").classList.toggle("is-my-turn", !mine);
         } else {
             renderBattle(prev && prev.phase === "battle" ? prev : null);
@@ -510,7 +589,16 @@ function bsMount(container, ctx) {
             el("bsWait").hidden = !!info.partnerHere || !!state.over;
             el("bsWaitText").textContent = `${ctx.partnerName()} вышел(а) из комнаты — партия на паузе. Продолжите, когда вернётся.`;
         },
-        destroy() {}
+        destroy() {
+            // Партия закончилась или комната закрылась прямо во время перетаскивания
+            if (drag) {
+                if (drag.float) drag.float.remove();
+                window.removeEventListener("pointermove", onDragMove);
+                window.removeEventListener("pointerup", onDragEnd);
+                window.removeEventListener("pointercancel", onDragEnd);
+                drag = null;
+            }
+        }
     };
 }
 
