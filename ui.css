@@ -3333,3 +3333,22 @@ body.duo-playing .duo-body > *{ flex: 1; min-height: 0; }
 .ttt-lobby-art span{ width: 56px; height: 56px; display: grid; place-items: center; border-radius: 16px; background: #130a24; border: 1px solid var(--border); }
 .ttt-lobby-art span:nth-child(2){ transform: translateY(-8px); }
 .ttt-lobby-art svg{ width: 70%; height: 70%; fill: none; stroke-width: 11; stroke-linecap: round; }
+
+/* Совместный просмотр: подпись о состоянии звонка */
+.wp-call-status{
+    margin: 2px auto 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 12.5px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-align: center;
+    color: var(--text-dim);
+    max-width: 100%;
+}
+.wp-call-status[hidden]{ display: none; }
+.wp-call-status-ok{ color: #22d97f; border-color: rgba(34,217,127,0.35); }
+.wp-call-status-wait{ color: var(--gold); border-color: rgba(255,209,92,0.3); }
+.wp-call-status-bad{ color: #ff7a90; border-color: rgba(255,84,112,0.4); }

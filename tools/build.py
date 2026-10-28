@@ -29,7 +29,7 @@ import rjsmin
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "_site")
-SKIP_DIRS = {".github", "tools", "_site", ".git", "node_modules", "__pycache__"}
+SKIP_DIRS = {".github", "tools", "supabase", "_site", ".git", "node_modules", "__pycache__"}
 
 
 def copy_site():

@@ -544,6 +544,12 @@ async function showGamesScreen() {
     container.appendChild(map);
     initGamesMap(map);
 
+    // Страницу перезагрузили, пока мы были в комнате игры вдвоём (мобильный
+    // браузер так делает после переключения приложений) — возвращаемся туда
+    let activeDuoRoom = null;
+    try { activeDuoRoom = sessionStorage.getItem(DUO_ACTIVE_ROOM_KEY); } catch (e) {}
+    if (activeDuoRoom && DUO_GAMES[activeDuoRoom]) { openDuoRoom(activeDuoRoom); return; }
+
     // Диплинк на конкретную игру с автозапуском: games/?play=snake
     const params = new URLSearchParams(location.search);
     const play = params.get("play");

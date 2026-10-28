@@ -53,27 +53,57 @@ let watchPartyChatPollInterval = null; // Подстраховка на случ
 // "perfect negotiation" (см. MDN), чтобы при одновременном включении камеры/
 // микрофона с обеих сторон не было конфликта офферов: роль "вежливого" пира
 // детерминированно определяется сравнением user id (см. isWatchPartyPolitePeer).
-const WATCH_PARTY_RTC_CONFIG = {
-    iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        // TURN нужен, когда прямое P2P-соединение невозможно (типичный случай —
-        // мобильный интернет: оператор прячет телефон за жёстким NAT, и один
-        // только STUN тут не помогает, ICE-кандидаты не сходятся, поэтому
-        // разрешения на микро/камеру запрашиваются успешно, но медиапоток до
-        // партнёра не долетает). Ниже — бесплатный публичный TURN (Open Relay
-        // Project / Metered) в качестве запасного пути. Он не бесконечный и не
-        // приватный (трафик идёт через чужой сервер третьей стороны, хоть и
-        // зашифрован) — для постоянного использования лучше завести свой TURN,
-        // например на metered.ca, Xirsys или Cloudflare Calls (у всех есть
-        // бесплатный тариф), и подставить свои учётные данные сюда.
-        { urls: "stun:stun.relay.metered.ca:80" },
-        { urls: "turn:global.relay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-        { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
-        { urls: "turn:global.relay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-        { urls: "turn:global.relay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
-    ]
-};
+// STUN (узнать свой внешний адрес) — бесплатно и без ключей. TURN
+// (ретранслятор) нужен, когда прямое соединение невозможно — типичный
+// случай мобильного интернета, где оператор прячет телефон за жёстким NAT:
+// разрешения на микро/камеру выдаются, а видео и звук до партнёра не
+// доходят. Учётные данные TURN временные, их выдаёт Supabase Edge Function
+// turn-credentials (supabase/functions/turn-credentials) от Cloudflare.
+// Старый общий логин openrelayproject у Metered больше не работает (сервер
+// отвечает "400 TURN allocate error"), поэтому его здесь нет.
+const WATCH_PARTY_STUN = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
+let watchPartyTurnServers = [];
+let watchPartyTurnExpires = 0;
+let watchPartyTurnLoading = null;
+let watchPartyTurnError = null; // почему не удалось получить TURN (для подписи в звонке)
+
+function getWatchPartyRtcConfig() {
+    return { iceServers: WATCH_PARTY_STUN.concat(watchPartyTurnServers) };
+}
+
+// Загружает (или обновляет перед истечением) учётные данные ретранслятора.
+// Если соединение уже создано — подставляет их и перезапускает ICE, чтобы
+// звонок, не сумевший соединиться напрямую, попробовал через ретранслятор.
+function loadWatchPartyTurn() {
+    if (watchPartyTurnServers.length && Date.now() < watchPartyTurnExpires - 10 * 60 * 1000) return Promise.resolve();
+    if (watchPartyTurnLoading) return watchPartyTurnLoading;
+    watchPartyTurnLoading = (async () => {
+        try {
+            if (!db.functions) throw new Error("нет db.functions");
+            const { data, error } = await db.functions.invoke("turn-credentials");
+            if (error) throw error;
+            if (!data || !Array.isArray(data.iceServers)) throw new Error("пустой ответ");
+            // Браузеры не ходят на порт 53 — такие адреса только тратят время
+            watchPartyTurnServers = data.iceServers
+                .map(srv => Object.assign({}, srv, { urls: [].concat(srv.urls).filter(u => !/:53(\?|$)/.test(u)) }))
+                .filter(srv => srv.urls.length);
+            watchPartyTurnExpires = Date.now() + (data.ttl || 86400) * 1000;
+            watchPartyTurnError = null;
+            const pc = watchPartyPeerConnection;
+            if (pc) {
+                try { pc.setConfiguration(getWatchPartyRtcConfig()); } catch (e) {}
+                if (pc.connectionState !== "connected") { try { pc.restartIce(); } catch (e) {} }
+            }
+        } catch (err) {
+            watchPartyTurnError = (err && err.message) || "неизвестная ошибка";
+            console.warn("Ретранслятор (TURN) недоступен, звонок пойдёт только напрямую:", err);
+        } finally {
+            watchPartyTurnLoading = null;
+            renderWatchPartyCallStatus();
+        }
+    })();
+    return watchPartyTurnLoading;
+}
 let watchPartyPeerConnection = null; // RTCPeerConnection, создаётся лениво при первом включении микро/камеры
 let watchPartyLocalStream = null; // Наши локальные треки (микрофон/камера), включённые прямо сейчас
 let watchPartyRemoteStream = null; // Треки, приезжающие от партнёра
@@ -86,6 +116,12 @@ let watchPartyIgnoreOffer = false; // Флаг "perfect negotiation" — это�
 let watchPartyPartnerId = null; // id партнёра — вычисляется из Presence, нужен для роли "вежливого" пира
 let watchPartyPartnerMediaState = { mic: false, cam: false }; // Последнее известное состояние микро/камеры партнёра
 let watchPartyCallAudioCtx = null; // Отдельный AudioContext для звука оповещения о включении/выключении микро/камеры
+let watchPartyPendingIce = []; // ICE-кандидаты, пришедшие раньше описания соединения (offer/answer)
+let watchPartyIceRestarts = 0; // сколько раз подряд перезапускали ICE без успеха
+let watchPartyDisconnectTimer = null;
+let watchPartyCallWatchdog = null; // периодическая проверка, что звонок действительно соединился
+let watchPartyNotConnectedSince = 0;
+let watchPartyOfferSentAt = 0;
 let youtubeAPIReadyPromise = null; // Кэш промиса загрузки YouTube IFrame API (грузим один раз)
 let hlsJsReadyPromise = null; // Кэш промиса загрузки hls.js (грузим один раз, только если реально нужен m3u8)
 
@@ -761,6 +797,7 @@ function leaveWatchPartyScreen() {
     if (watchPartyHeartbeat) { clearInterval(watchPartyHeartbeat); watchPartyHeartbeat = null; }
     if (watchPartyLeaveTimer) { clearTimeout(watchPartyLeaveTimer); watchPartyLeaveTimer = null; }
     if (watchPartyChatPollInterval) { clearInterval(watchPartyChatPollInterval); watchPartyChatPollInterval = null; }
+    if (watchPartyCallWatchdog) { clearInterval(watchPartyCallWatchdog); watchPartyCallWatchdog = null; }
     if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
     cleanupWatchPartyCall(); // важно: до закрытия канала, чтобы партнёр успел получить "bye"
     if (watchPartyChannel) {
@@ -873,9 +910,10 @@ function ensureWatchPartyPeerConnection() {
     if (watchPartyPeerConnection) return watchPartyPeerConnection;
     if (!currentUser) return null;
 
-    const pc = new RTCPeerConnection(WATCH_PARTY_RTC_CONFIG);
+    const pc = new RTCPeerConnection(getWatchPartyRtcConfig());
     watchPartyPeerConnection = pc;
     watchPartyRemoteStream = new MediaStream();
+    watchPartyNotConnectedSince = Date.now();
 
     pc.ontrack = (e) => {
         watchPartyRemoteStream.addTrack(e.track);
@@ -891,13 +929,14 @@ function ensureWatchPartyPeerConnection() {
     };
 
     // Срабатывает сам, когда меняется набор треков (добавили/убрали
-    // микро/камеру) — именно здесь и формируется оффер по паттерну
-    // "perfect negotiation".
+    // микро/камеру) или перезапускается ICE — именно здесь и формируется
+    // оффер по паттерну "perfect negotiation".
     pc.onnegotiationneeded = async () => {
         try {
             watchPartyMakingOffer = true;
             await pc.setLocalDescription();
-            broadcastWatchPartyRTC("desc", { description: pc.localDescription });
+            watchPartyOfferSentAt = Date.now();
+            broadcastWatchPartyRTC("desc", { description: pc.localDescription.toJSON() });
         } catch (err) {
             console.error("Ошибка согласования звонка совместного просмотра:", err);
         } finally {
@@ -905,17 +944,91 @@ function ensureWatchPartyPeerConnection() {
         }
     };
 
-    pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") {
-            // Соединение развалилось (обычно из-за сети) — закрываем и,
-            // если у нас всё ещё включены микро/камера, пробуем пересобрать.
-            const shouldRetry = watchPartyMicOn || watchPartyCamOn;
-            closeWatchPartyPeerConnectionOnly();
-            if (shouldRetry && watchPartyPartnerOnline) ensureWatchPartyPeerConnection();
-        }
-    };
+    pc.onconnectionstatechange = () => handleWatchPartyConnectionState(pc);
+    pc.oniceconnectionstatechange = () => handleWatchPartyConnectionState(pc);
 
+    // Соединение пересобирается (обрыв, партнёр перезашёл) — раньше в новое
+    // соединение не попадали уже включённые микрофон и камера: кнопки горели,
+    // а передавать было нечего. Возвращаем свои треки сразу.
+    if (watchPartyLocalStream) {
+        watchPartyLocalStream.getTracks().forEach(t => addWatchPartyTrack(pc, t));
+    }
+    renderWatchPartyCallStatus();
     return pc;
+}
+
+// addTrack без дублей: один и тот же трек дважды в соединение не добавить
+function addWatchPartyTrack(pc, track) {
+    if (pc.getSenders().some(sender => sender.track === track)) return;
+    pc.addTrack(track, watchPartyLocalStream);
+}
+
+function handleWatchPartyConnectionState(pc) {
+    if (pc !== watchPartyPeerConnection) return;
+    const state = pc.connectionState || pc.iceConnectionState;
+    if (state === "connected" || pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+        watchPartyIceRestarts = 0;
+        watchPartyNotConnectedSince = 0;
+        clearTimeout(watchPartyDisconnectTimer);
+    } else {
+        if (!watchPartyNotConnectedSince) watchPartyNotConnectedSince = Date.now();
+        if (state === "disconnected") {
+            // Короткий провал сети (смена вышки, Wi-Fi ↔ мобильный) часто
+            // восстанавливается сам — даём пару секунд, потом перезапускаем ICE
+            clearTimeout(watchPartyDisconnectTimer);
+            watchPartyDisconnectTimer = setTimeout(() => {
+                if (pc === watchPartyPeerConnection && pc.connectionState === "disconnected") restartWatchPartyIce();
+            }, 3000);
+        } else if (state === "failed") {
+            restartWatchPartyIce();
+        }
+    }
+    renderWatchPartyCallStatus();
+}
+
+// Перезапуск ICE: заново ищем путь между устройствами (с ретранслятором, если
+// он уже загружен). После нескольких неудач — пересобираем соединение целиком.
+function restartWatchPartyIce() {
+    const pc = watchPartyPeerConnection;
+    if (!pc) return;
+    watchPartyNotConnectedSince = Date.now();
+    if (++watchPartyIceRestarts > 3) {
+        watchPartyIceRestarts = 0;
+        closeWatchPartyPeerConnectionOnly(true);
+        if ((watchPartyMicOn || watchPartyCamOn) && watchPartyPartnerOnline) ensureWatchPartyPeerConnection();
+        return;
+    }
+    loadWatchPartyTurn().finally(() => {
+        if (pc !== watchPartyPeerConnection) return;
+        try { pc.restartIce(); } catch (e) {}
+    });
+}
+
+// Раз в несколько секунд: сообщения сигналинга идут через Realtime «по
+// возможности» и могут потеряться — тогда звонок зависал в «соединяемся»
+// навсегда. Если соединение долго не устанавливается, повторяем согласование,
+// а своё состояние микро/камеры периодически напоминаем партнёру.
+function runWatchPartyCallWatchdog() {
+    if (!isWatchPartyScreenOpen || !watchPartyPartnerOnline) return;
+    const wantCall = watchPartyMicOn || watchPartyCamOn;
+    if (wantCall) broadcastWatchPartyRTC("media-state", { mic: watchPartyMicOn, cam: watchPartyCamOn });
+    let pc = watchPartyPeerConnection;
+    if (wantCall && !pc) pc = ensureWatchPartyPeerConnection();
+    if (!pc || !wantCall) { renderWatchPartyCallStatus(); return; }
+
+    // Ответ на наш оффер так и не пришёл — повторяем тот же оффер (после сбора
+    // кандидатов он уже содержит их все, так что хватит одного дошедшего
+    // сообщения). Если не помогает долго — откатываемся и согласуем заново.
+    if (pc.signalingState === "have-local-offer" && pc.localDescription) {
+        if (Date.now() - watchPartyOfferSentAt > 25000) {
+            pc.setLocalDescription({ type: "rollback" }).then(() => restartWatchPartyIce()).catch(() => {});
+        } else {
+            broadcastWatchPartyRTC("desc", { description: pc.localDescription.toJSON() });
+        }
+    } else if (watchPartyNotConnectedSince && Date.now() - watchPartyNotConnectedSince > 12000) {
+        restartWatchPartyIce();
+    }
+    renderWatchPartyCallStatus();
 }
 
 // Обработчик входящих сигналов от партнёра (offer/answer/ICE/статус
@@ -939,8 +1052,12 @@ async function handleWatchPartyRTCSignal(payload) {
             await pc.setRemoteDescription(description);
             if (description.type === "offer") {
                 await pc.setLocalDescription();
-                broadcastWatchPartyRTC("desc", { description: pc.localDescription });
+                broadcastWatchPartyRTC("desc", { description: pc.localDescription.toJSON() });
             }
+            // Кандидаты, пришедшие раньше описания, раньше просто терялись
+            const pending = watchPartyPendingIce;
+            watchPartyPendingIce = [];
+            for (const c of pending) { try { await pc.addIceCandidate(c); } catch (e) {} }
         } catch (err) {
             console.error("Ошибка обработки offer/answer звонка совместного просмотра:", err);
         }
@@ -949,7 +1066,11 @@ async function handleWatchPartyRTCSignal(payload) {
 
     if (payload.type === "ice") {
         const pc = watchPartyPeerConnection;
-        if (!pc) return;
+        if (!pc || !pc.remoteDescription) {
+            watchPartyPendingIce.push(payload.candidate);
+            if (watchPartyPendingIce.length > 60) watchPartyPendingIce.shift();
+            return;
+        }
         try {
             await pc.addIceCandidate(payload.candidate);
         } catch (err) {
@@ -1037,7 +1158,7 @@ function playWatchPartyToggleSound(turnedOn) {
 // Закрывает только RTCPeerConnection и остатки удалённого потока — наши
 // собственные локальные треки (и кнопки mic/cam) не трогает, чтобы при
 // возврате партнёра можно было тихо пересобрать соединение.
-function closeWatchPartyPeerConnectionOnly() {
+function closeWatchPartyPeerConnectionOnly(keepPartnerState) {
     if (watchPartyPeerConnection) {
         try { watchPartyPeerConnection.close(); } catch (e) {}
         watchPartyPeerConnection = null;
@@ -1045,8 +1166,12 @@ function closeWatchPartyPeerConnectionOnly() {
     watchPartyRemoteStream = null;
     watchPartyMakingOffer = false;
     watchPartyIgnoreOffer = false;
-    watchPartyPartnerMediaState = { mic: false, cam: false };
+    watchPartyPendingIce = [];
+    watchPartyNotConnectedSince = 0;
+    clearTimeout(watchPartyDisconnectTimer);
+    if (!keepPartnerState) watchPartyPartnerMediaState = { mic: false, cam: false };
     updateWatchPartyRemoteMedia();
+    renderWatchPartyCallStatus();
 }
 
 // Полная остановка звонка (наши треки тоже глушим) — вызывается при выходе
@@ -1120,8 +1245,9 @@ async function toggleWatchPartyMic() {
         const track = stream.getAudioTracks()[0];
         if (!watchPartyLocalStream) watchPartyLocalStream = new MediaStream();
         watchPartyLocalStream.addTrack(track);
+        loadWatchPartyTurn();
         const pc = ensureWatchPartyPeerConnection();
-        if (pc) pc.addTrack(track, watchPartyLocalStream);
+        if (pc) addWatchPartyTrack(pc, track);
         watchPartyMicOn = true;
         renderWatchPartyCallControls();
         broadcastWatchPartyRTC("media-state", { mic: watchPartyMicOn, cam: watchPartyCamOn });
@@ -1164,8 +1290,9 @@ async function toggleWatchPartyCam() {
         const track = stream.getVideoTracks()[0];
         if (!watchPartyLocalStream) watchPartyLocalStream = new MediaStream();
         watchPartyLocalStream.addTrack(track);
+        loadWatchPartyTurn();
         const pc = ensureWatchPartyPeerConnection();
-        if (pc) pc.addTrack(track, watchPartyLocalStream);
+        if (pc) addWatchPartyTrack(pc, track);
         watchPartyCamOn = true;
         renderWatchPartyCallControls();
         updateWatchPartyLocalPreview();
@@ -1197,7 +1324,7 @@ async function switchWatchPartyCamera() {
         if (watchPartyPeerConnection) {
             const sender = watchPartyPeerConnection.getSenders().find(s => s.track && s.track.kind === "video");
             if (sender) await sender.replaceTrack(newTrack);
-            else watchPartyPeerConnection.addTrack(newTrack, watchPartyLocalStream);
+            else addWatchPartyTrack(watchPartyPeerConnection, newTrack);
         }
         updateWatchPartyLocalPreview();
     } catch (err) {
@@ -1279,6 +1406,57 @@ function updateWatchPartyRemoteMedia() {
     if (badge) badge.style.display = showAudioOnly ? "flex" : "none";
 }
 
+// Подпись под кнопками звонка: соединяемся / напрямую / через ретранслятор /
+// не удалось — чтобы было видно, на каком шаге звонок застрял
+function renderWatchPartyCallStatus() {
+    const el = document.getElementById("wpCallStatus");
+    if (!el) return;
+    const pc = watchPartyPeerConnection;
+    const active = watchPartyMicOn || watchPartyCamOn || watchPartyPartnerMediaState.mic || watchPartyPartnerMediaState.cam;
+    let text = "", cls = "";
+    if (!active) {
+        text = "";
+    } else if (!watchPartyPartnerOnline) {
+        text = "Партнёр не в совместном просмотре";
+        cls = "wp-call-status-wait";
+    } else if (!pc) {
+        text = "⏳ Ждём партнёра на связи…";
+        cls = "wp-call-status-wait";
+    } else {
+        const st = pc.connectionState || pc.iceConnectionState;
+        if (st === "connected") {
+            text = "🟢 На связи";
+            cls = "wp-call-status-ok";
+            // Через ретранслятор или напрямую — видно в статистике соединения
+            pc.getStats().then(stats => {
+                let pair = null;
+                stats.forEach(r => { if (r.type === "candidate-pair" && r.state === "succeeded" && (r.nominated || r.selected)) pair = r; });
+                const local = pair && stats.get(pair.localCandidateId);
+                const remote = pair && stats.get(pair.remoteCandidateId);
+                const relayed = (local && local.candidateType === "relay") || (remote && remote.candidateType === "relay");
+                if (pc === watchPartyPeerConnection && (pc.connectionState === "connected")) {
+                    el.textContent = relayed ? "🟢 На связи через ретранслятор" : "🟢 На связи напрямую";
+                }
+            }).catch(() => {});
+        } else if (st === "disconnected") {
+            text = "🟡 Связь прервалась — восстанавливаем…";
+            cls = "wp-call-status-wait";
+        } else if (st === "failed") {
+            text = "🔴 Не удалось соединиться — пробуем снова…";
+            cls = "wp-call-status-bad";
+        } else {
+            text = "⏳ Соединяемся…";
+            cls = "wp-call-status-wait";
+        }
+        if (st !== "connected" && !watchPartyTurnServers.length && watchPartyTurnError && watchPartyNotConnectedSince && Date.now() - watchPartyNotConnectedSince > 10000) {
+            text += " Ретранслятор не настроен — на мобильном интернете звонок может не пройти.";
+        }
+    }
+    el.textContent = text;
+    el.className = "wp-call-status " + cls;
+    el.hidden = !text;
+}
+
 function renderWatchPartyCallControls() {
     const micBtn = document.getElementById("wpMicBtn");
     if (micBtn) {
@@ -1294,6 +1472,7 @@ function renderWatchPartyCallControls() {
     }
     updateWatchPartyLocalPreview();
     updateWatchPartyRemoteMedia();
+    renderWatchPartyCallStatus();
 }
 
 // ---------- Свайп между страницами "Чат" / "Аудио-видео" ----------
@@ -2051,6 +2230,12 @@ async function showWatchPartyScreen() {
 
     callPage.appendChild(callButtonsRow);
 
+    let callStatus = document.createElement("div");
+    callStatus.id = "wpCallStatus";
+    callStatus.className = "wp-call-status";
+    callStatus.hidden = true;
+    callPage.appendChild(callStatus);
+
     let callPreviews = document.createElement("div");
     callPreviews.className = "wp-call-previews wp-call-previews-lg";
 
@@ -2143,6 +2328,9 @@ async function showWatchPartyScreen() {
 
     initWatchPartyChannel();
     renderWPStatusBar();
+    loadWatchPartyTurn();
+    if (watchPartyCallWatchdog) clearInterval(watchPartyCallWatchdog);
+    watchPartyCallWatchdog = setInterval(runWatchPartyCallWatchdog, 4000);
 
     await loadWatchPartyChatMessages();
     renderWatchPartyChatMessages();

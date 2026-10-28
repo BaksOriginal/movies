@@ -16,6 +16,9 @@
 // applyAction, mount }) — см. durak.js.
 
 const DUO_LEAVE_GRACE_MS = 2500;
+const DUO_HEARTBEAT_MS = 4000;      // как часто сверяем версии комнаты с партнёром
+const DUO_RECONNECT_MS = 2000;      // пауза перед переподключением канала
+const DUO_ACTIVE_ROOM_KEY = "duoActiveRoom";
 const DUO_GAMES = {};
 
 const duo = {
@@ -29,6 +32,9 @@ const duo = {
     roomId: null,           // в какой игре я сейчас (null — не в комнате)
     ready: false,
     room: null,             // { version, options, game, gameNo, series }
+    synced: false,          // получили ли уже снимок комнаты от партнёра после входа
+    connected: false,       // канал Realtime подписан и работает
+    reconnectTimer: null,
     view: null,             // активный экран комнаты (см. openDuoRoom)
     listeners: new Set()    // кто хочет знать об изменениях presence (карта игр)
 };
@@ -74,10 +80,60 @@ function duoInit() {
         .on("broadcast", { event: "room" }, ({ payload }) => duoOnRoom(payload))
         .on("broadcast", { event: "act" }, ({ payload }) => duoOnAct(payload))
         .on("broadcast", { event: "hello" }, ({ payload }) => duoOnHello(payload))
+        .on("broadcast", { event: "ver" }, ({ payload }) => duoOnVer(payload))
         .subscribe((status) => {
             if (duo.ch !== channel) return;
-            if (status === "SUBSCRIBED") duoTrack();
+            if (status === "SUBSCRIBED") {
+                duo.connected = true;
+                duoTrack();
+                // После (пере)подключения сразу просим у партнёра свежий снимок
+                if (duo.roomId) duoSend("hello", { game: duo.roomId });
+                duoChanged();
+            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                // На мобильном интернете канал рвётся при смене сети и сворачивании
+                // браузера — поднимаем его заново, а не остаёмся «не в сети» навсегда
+                duo.connected = false;
+                duoChanged();
+                duoScheduleReconnect();
+            }
         });
+    duoInstallGlobalHooks();
+}
+
+function duoScheduleReconnect() {
+    if (duo.reconnectTimer) return;
+    duo.reconnectTimer = setTimeout(() => {
+        duo.reconnectTimer = null;
+        duoReconnect();
+    }, DUO_RECONNECT_MS);
+}
+
+function duoReconnect() {
+    const old = duo.ch;
+    duo.ch = null;
+    duo.connected = false;
+    if (old) { try { db.removeChannel(old); } catch (e) {} }
+    duoInit();
+}
+
+// Один раз на страницу: возврат во вкладку, появление сети, сверка версий
+let duoHooksInstalled = false;
+function duoInstallGlobalHooks() {
+    if (duoHooksInstalled) return;
+    duoHooksInstalled = true;
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden || !duo.ch) return;
+        if (duo.ch.state && duo.ch.state !== "joined") { duoReconnect(); return; }
+        duoTrack();
+        if (duo.roomId) duoSend("hello", { game: duo.roomId });
+    });
+    window.addEventListener("online", () => { if (duo.ch) duoReconnect(); });
+    // Сообщения Realtime доставляются «по возможности»: если снимок или ход
+    // потерялся, без этой сверки игроки могли навсегда разойтись в состоянии
+    setInterval(() => {
+        if (!duo.ch || !duo.roomId || !duo.room || !duoPartnerHere()) return;
+        duoSend("ver", { game: duo.roomId, version: duo.room.version });
+    }, DUO_HEARTBEAT_MS);
 }
 
 function duoTrack() {
@@ -105,7 +161,10 @@ function duoOnPresence() {
     for (const k in state) {
         if (k === duo.me || !state[k] || !state[k].length) continue;
         key = k;
-        data = state[k][state[k].length - 1];
+        // Партнёр может быть открыт в нескольких вкладках: берём ту, что в
+        // моей комнате, иначе — самую свежую
+        const entries = state[k].slice().sort((a, b) => (a.at || 0) - (b.at || 0));
+        data = entries.filter(e => duo.roomId && e.room === duo.roomId).pop() || entries[entries.length - 1];
     }
     const wasHere = duoPartnerHere();
     if (key) {
@@ -143,28 +202,42 @@ function duoOnRoom(p) {
     const mine = duo.room;
     const theirs = p.room;
     const fromHost = p.from < duo.me;
+    const firstSync = !duo.synced;
+    duo.synced = true;
     if (theirs.version > mine.version || (theirs.version === mine.version && fromHost && JSON.stringify(theirs) !== JSON.stringify(mine))) {
-        duoAdoptRoom(theirs);
+        duoAdoptRoom(theirs, firstSync);
     } else if (theirs.version < mine.version) {
         // У партнёра старая версия (например, он играл с другого устройства) — отдаём свою
         duoSend("room", { game: duo.roomId, room: duo.room });
     }
+    duoMaybeStart();
 }
 
 function duoOnHello(p) {
-    if (!p || p.game !== duo.roomId) return;
+    if (!p || p.from === duo.me || p.game !== duo.roomId || !duo.room) return;
     duoSend("room", { game: duo.roomId, room: duo.room });
 }
 
-function duoAdoptRoom(room) {
+// Сверка версий: у кого старее — просит снимок, у кого новее — отправляет
+function duoOnVer(p) {
+    if (!p || p.from === duo.me || p.game !== duo.roomId || !duo.room) return;
+    if (p.version > duo.room.version) duoSend("hello", { game: duo.roomId });
+    else if (p.version < duo.room.version) duoSend("room", { game: duo.roomId, room: duo.room });
+}
+
+function duoAdoptRoom(room, fromSync) {
     const prev = duo.room;
     duo.room = room;
     duoSaveRoom(duo.roomId, room);
-    // Началась новая партия или поменялись настройки — «Готов» сбрасывается
-    if (duo.ready && (room.gameNo !== prev.gameNo || duoOptsKey(room) !== duoOptsKey(prev))) {
-        duo.ready = false;
-        duoTrack();
-    }
+    const newGame = room.gameNo !== prev.gameNo && room.game && !room.game.over;
+    const optsChanged = duoOptsKey(room) !== duoOptsKey(prev);
+    // «Готов» сбрасывается, когда началась партия или кто-то поменял настройки.
+    // Первая сверка после входа в комнату (fromSync) готовность не трогает:
+    // раньше «Готов», нажатый до прихода снимка от партнёра, тут же слетал.
+    if (duo.ready && (newGame || (optsChanged && !fromSync))) duo.ready = false;
+    // presence должен знать актуальные настройки и номер партии — по ним
+    // хозяин решает, можно ли начинать
+    if (newGame || optsChanged || room.gameNo !== prev.gameNo) duoTrack();
     if (duo.view) duo.view.onRoom(prev, room);
     duoChanged();
 }
@@ -179,12 +252,31 @@ function duoCommit(mutate) {
     return true;
 }
 
-// Действие игрока: хозяин применяет сам, гость отправляет хозяину
+// Действие игрока: хозяин применяет сам, гость отправляет хозяину.
+// Ход гостя переотправляется, пока не придёт новая версия комнаты: сообщение
+// могло потеряться. Дубль уже применённого хода хозяин просто отбросит —
+// по правилам он становится невозможным (карты нет в руке, клетка занята…).
+let duoPendingAct = null;
 function duoAction(action) {
     if (!duo.roomId) return;
     if (!duoPartnerHere()) return;
-    if (duoIsHost()) duoApply(duo.me, action);
-    else duoSend("act", { game: duo.roomId, action });
+    if (duoIsHost()) { duoApply(duo.me, action); return; }
+    if (duoPendingAct) clearInterval(duoPendingAct.timer);
+    const base = duo.room.version, roomId = duo.roomId;
+    let tries = 0;
+    const send = () => duoSend("act", { game: roomId, action });
+    send();
+    const entry = {};
+    entry.timer = setInterval(() => {
+        if (!duo.room || duo.roomId !== roomId || duo.room.version > base || ++tries > 6) {
+            clearInterval(entry.timer);
+            if (duoPendingAct === entry) duoPendingAct = null;
+            return;
+        }
+        send();
+        duoSend("hello", { game: roomId });
+    }, 1500);
+    duoPendingAct = entry;
 }
 
 function duoOnAct(p) {
@@ -251,9 +343,13 @@ function openDuoRoom(id) {
 
     duo.roomId = id;
     duo.ready = false;
+    duo.synced = false;
     duo.room = duoLoadRoom(id);
     duoTrack();
     duoSend("hello", { game: id });
+    // Если мобильный браузер перезагрузит страницу (часто бывает после
+    // переключения на другое приложение), вернёмся прямо в эту комнату
+    try { sessionStorage.setItem(DUO_ACTIVE_ROOM_KEY, id); } catch (e) {}
 
     app.innerHTML = "";
     const title = document.createElement("h1");
@@ -289,7 +385,7 @@ function openDuoRoom(id) {
             </div>
             <div class="duo-score"><b>${myScore}</b><i>:</i><b>${pScore}</b></div>
             <div class="duo-player is-partner${here ? " is-online" : ""}">
-                <span class="duo-player-body"><span class="duo-player-name"></span><span class="duo-player-sub">${here ? (!playing && duo.partner.ready ? "готов(а)" : "в комнате") : !duo.partnerOnline ? "не в сети" : duo.partner && duo.partner.room ? "в другой игре" : "в разделе игр"}</span></span>
+                <span class="duo-player-body"><span class="duo-player-name"></span><span class="duo-player-sub">${!duo.connected ? "соединение…" : here ? (!playing && duo.partner.ready ? "готов(а)" : "в комнате") : !duo.partnerOnline ? "не в сети" : duo.partner && duo.partner.room ? "в другой игре" : "в разделе игр"}</span></span>
                 <span class="duo-avatar">${escapeGameText(pName[0] || "?")}<i class="duo-dot"></i></span>
             </div>
             ${playing ? `<button type="button" class="ui-btn duo-menu-btn" id="duoMenuBtn" aria-label="Меню партии">⋯</button>` : ""}
@@ -352,7 +448,8 @@ function openDuoRoom(id) {
 
         const pReady = here && duo.partner.ready && duo.partner.optsKey === duoOptsKey(room);
         let status;
-        if (!duo.partnerOnline) status = `💤 ${escapeGameText(pName)} сейчас не в сети. Как только зайдёт в эту игру — можно начинать.`;
+        if (!duo.connected) status = "📡 Подключаемся к серверу…";
+        else if (!duo.partnerOnline) status = `💤 ${escapeGameText(pName)} сейчас не в сети. Как только зайдёт в эту игру — можно начинать.`;
         else if (!here) status = `👀 ${escapeGameText(pName)} в разделе игр, но не в этой комнате. Позови!`;
         else if (duo.ready && pReady) status = "Раздаём…";
         else if (duo.ready) status = `Ждём, пока ${escapeGameText(pName)} нажмёт «Готов»`;
@@ -433,6 +530,7 @@ function openDuoRoom(id) {
     };
 
     activeGameCleanup = () => {
+        try { sessionStorage.removeItem(DUO_ACTIVE_ROOM_KEY); } catch (e) {}
         setPlaying(false);
         window.removeEventListener("resize", fitRoom);
         if (window.visualViewport) window.visualViewport.removeEventListener("resize", fitRoom);
