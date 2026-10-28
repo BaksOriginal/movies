@@ -485,6 +485,7 @@ function openShellMoreSheet() {
     tile("pet", "Питомец", shellIcon("pet"));
     tile("w2g", "Совместный просмотр", shellIcon("w2g"));
     tile("games", "Игры", shellIcon("games"));
+    tile("studio", "Арт-студия", shellIcon("studio"));
     tile("random", "Рандомайзер", shellIcon("random"));
     tile("comments", "Комментарии", shellIcon("comments"));
     tile("add", "Добавить тайтлы", shellIcon("add"));
