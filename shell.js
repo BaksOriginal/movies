@@ -206,8 +206,21 @@ function shellBaseHref() {
     return shell.opts && shell.opts.page !== "main" ? "../" : "./";
 }
 
+// Пункт меню ведёт на экран, который и так открыт?
+function isCurrentShellScreen(id) {
+    if (id.startsWith("category:")) return shell.section === "catalog" && shell.subKey === id.slice("category:".length);
+    return id === shell.section;
+}
+
 function shellNavigate(id) {
     closeShellMoreSheet();
+    // Повторный тап по текущему разделу — как в приложениях: ничего не
+    // перезагружаем, просто прокручиваем наверх. Если же внутри раздела
+    // ушли вглубь (есть "назад"), тап возвращает к его началу.
+    if (isCurrentShellScreen(id) && (!shell.els.back || shell.els.back.hidden)) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+    }
     const opts = shell.opts || {};
     if (opts.onNavigate && opts.onNavigate(id) === true) return;
 

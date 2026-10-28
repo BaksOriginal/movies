@@ -38,6 +38,9 @@ let watchPartyLeaveTimer = null; // Отложенная проверка "па�
 // после исчерпания лимита останавливаемся и явно показываем ошибку вместо
 // того, чтобы продолжать долбиться в стену.
 let watchPartyReconnectAttempts = 0;
+// Канал совместного просмотра реально подписан — тогда сообщения чата и так
+// приходят мгновенно, и опрос базы нужен лишь изредка, для подстраховки
+let watchPartyRealtimeOk = false;
 const WP_MAX_RECONNECT_ATTEMPTS = 5;
 let watchPartyChatMessages = []; // Сообщения чата совместного просмотра (своя таблица watch_party_messages)
 let watchPartyChatReplyTarget = null; // Сообщение, на которое сейчас отвечаем в чате совместного просмотра
@@ -715,6 +718,7 @@ function initWatchPartyChannel() {
             // закрытого канала, реагировать на него не нужно.
             if (watchPartyChannel !== channel) return;
 
+            watchPartyRealtimeOk = status === "SUBSCRIBED";
             if (status === "SUBSCRIBED") {
                 watchPartyReconnectAttempts = 0; // подключение реально удалось — счётчик неудач обнуляем
                 await trackWPPresence();
@@ -1386,7 +1390,9 @@ async function onWatchPartyChatRealtimeChange(payload) {
         playWatchPartyBellSound();
     }
 
-    await loadWatchPartyChatMessages();
+    const applied = applyChatRealtimeChange(watchPartyChatMessages, payload, 100);
+    if (applied) watchPartyChatMessages = applied;
+    else await loadWatchPartyChatMessages();
     if (isWatchPartyScreenOpen) {
         renderWatchPartyChatMessages();
     }
@@ -2146,8 +2152,12 @@ async function showWatchPartyScreen() {
     // realtime по каким-то причинам не сработал, а тут "подъехало" новое
     // чужое сообщение — звук всё равно должен прозвучать.
     if (watchPartyChatPollInterval) clearInterval(watchPartyChatPollInterval);
+    // Пока канал жив — сверяемся раз в 30 секунд, если отвалился — каждые 4
+    let lastWPChatPoll = Date.now();
     watchPartyChatPollInterval = setInterval(async () => {
         if (!isWatchPartyScreenOpen || document.hidden) return;
+        if (watchPartyRealtimeOk && Date.now() - lastWPChatPoll < 30000) return;
+        lastWPChatPoll = Date.now();
 
         const prevLastId = watchPartyChatMessages.length
             ? watchPartyChatMessages[watchPartyChatMessages.length - 1].id

@@ -239,3 +239,12 @@ body.shell-typing .add-bar{ bottom: 10px; }
 }
 .ts-actions{ grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .ts-action{ font-size: 11.5px; min-height: 68px; }
+
+/* Производительность на телефоне: два огромных размытых пятна фона
+   (blur 60px на весь экран) постоянно анимировались — это ощутимая
+   нагрузка на видеочип телефона. На телефоне пятна стоят на месте. */
+body::before,
+body::after{
+    animation: none;
+    will-change: auto;
+}

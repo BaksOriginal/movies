@@ -740,7 +740,18 @@ function buildResult(raw, kind, genres) {
     const date = isTv ? raw.first_air_date : raw.release_date;
     const year = date ? parseInt(date.slice(0, 4), 10) : null;
     const genreNames = (raw.genre_ids || []).map(id => genres[id]).filter(Boolean);
-    const item = { title, year, genreNames, posterPath: raw.poster_path, type: search.type };
+    const overview = raw.overview || "";
+    const item = {
+        title, year, genreNames, posterPath: raw.poster_path, type: search.type,
+        // Сохраняются вместе с тайтлом — сайту не придётся искать постер заново
+        tmdbFields: {
+            tmdb_id: raw.id,
+            tmdb_type: kind,
+            poster_path: raw.poster_path || null,
+            tmdb_genres: genreNames.slice(0, 3).join(", ") || null,
+            overview: overview.length > 140 ? overview.slice(0, 140) + "…" : overview
+        }
+    };
 
     const el = document.createElement("div");
     el.className = "result";
@@ -823,7 +834,8 @@ function openAddSheet(item, onAdded) {
         const row = {
             title: overlay.querySelector(".rTitle").value.trim(),
             year: parseInt(overlay.querySelector(".rYear").value, 10),
-            ...readCategoryFields(fields)
+            ...readCategoryFields(fields),
+            ...item.tmdbFields
         };
         if (!row.title || !row.year || !row.genre) {
             toast("Заполните название, год и жанр", "err");

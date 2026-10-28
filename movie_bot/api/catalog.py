@@ -66,6 +66,9 @@ TMDB_ALLOWED_PARAMS = {
 }
 
 TITLE_FIELDS = ("title", "year", "category", "genre", "franchise")
+# Необязательные TMDB-данные (постер/жанры/описание) — мини-апп присылает их
+# при добавлении из онлайн-поиска, чтобы сайту не пришлось искать их заново
+TITLE_META_FIELDS = ("tmdb_id", "tmdb_type", "poster_path", "tmdb_genres", "overview")
 SECRET_MARKERS = ("Секрет", "🔒", "❤️")
 
 
@@ -127,6 +130,7 @@ def clean_rows(rows: list) -> list | None:
         if not isinstance(row, dict):
             return None
         item = {key: row.get(key) for key in TITLE_FIELDS}
+        item.update({key: row[key] for key in TITLE_META_FIELDS if row.get(key) is not None})
         if not item["title"] or not item["year"] or not item["category"] or not item["genre"]:
             return None
         if any(marker in str(item["category"]) for marker in SECRET_MARKERS):
@@ -143,6 +147,11 @@ def insert_titles(rows: list) -> None:
         json=rows,
         timeout=10,
     )
+    # Столбцов TMDB в таблице ещё нет — сохраняем тайтлы без этих данных
+    # (сайт сам найдёт постер при первом показе)
+    if resp.status_code == 400 and any(key in rows[0] for key in TITLE_META_FIELDS):
+        bare = [{key: row.get(key) for key in TITLE_FIELDS} for row in rows]
+        resp = requests.post(f"{SUPABASE_URL}/rest/v1/titles", headers=REST_HEADERS, json=bare, timeout=10)
     resp.raise_for_status()
 
 

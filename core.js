@@ -217,6 +217,27 @@ function canModifyChatMessage(msg) {
     return (Date.now() - createdTime) < CHAT_EDIT_WINDOW_MS;
 }
 
+// Применяет realtime-событие чата прямо к списку сообщений в памяти, без
+// повторного скачивания последних N сообщений из базы (раньше на каждое
+// событие уходил запрос на 100-150 строк). Возвращает новый список или
+// null, если событие не удалось разобрать — тогда стоит перезагрузить чат.
+function applyChatRealtimeChange(messages, payload, limit) {
+    if (!payload || !payload.eventType) return null;
+    if (payload.eventType === "INSERT" && payload.new && payload.new.id != null) {
+        if (messages.some(m => m.id === payload.new.id)) return messages;
+        const next = [...messages, payload.new]
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        return next.slice(-limit);
+    }
+    if (payload.eventType === "UPDATE" && payload.new && payload.new.id != null) {
+        return messages.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m);
+    }
+    if (payload.eventType === "DELETE" && payload.old && payload.old.id != null) {
+        return messages.filter(m => m.id !== payload.old.id);
+    }
+    return null;
+}
+
 // Обрезает текст цитаты ответа для превью
 function buildReplyPreviewText(msg) {
     if (isStickerMessage(msg.message)) return "🖼️ Стикер";
@@ -324,6 +345,8 @@ function initHeartsBackground() {
     const MAX_FLOATING_EMOJIS = 10;
 
     function spawnHeart() {
+        // Вкладка свёрнута — сердечки никто не видит, а таймеры и DOM крутились бы зря
+        if (document.hidden) return;
         if (container.childElementCount >= MAX_FLOATING_EMOJIS) return;
 
         const heart = document.createElement('div');
