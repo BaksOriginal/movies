@@ -2,8 +2,10 @@
 tools/build.py — сборка сайта для выгрузки на GitHub Pages.
 
 Что делает:
-  1. Копирует сайт в папку _site/ (без movie_bot — он живёт на Vercel,
-     и без служебных .github/ и tools/).
+  1. Копирует сайт в папку _site/ (без служебных .github/ и tools/).
+     movie_bot копируется тоже: Vercel берёт его прямо из репозитория, но
+     мини-апп (movie_bot/webapp/index.html) может открываться и по адресу
+     GitHub Pages — смотря что указано в WEBAPP_URL бота.
   2. Сжимает все .js и .css: убирает комментарии и лишние пробелы
      (rjsmin/rcssmin — только безопасное удаление, имена не меняются).
      В исходниках комментариев много, так что файлы худеют почти вдвое.
@@ -27,7 +29,7 @@ import rjsmin
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "_site")
-SKIP_DIRS = {"movie_bot", ".github", "tools", "_site", ".git", "node_modules", "__pycache__"}
+SKIP_DIRS = {".github", "tools", "_site", ".git", "node_modules", "__pycache__"}
 
 
 def copy_site():
