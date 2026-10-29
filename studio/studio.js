@@ -259,7 +259,10 @@ function stOpLine(op) {
 function stParseLine(line) {
     if (typeof line !== "string") return null;
     const a = line.split(" ");
-    if (a[0] === "x") return /^[0-9a-z]{6}$/.test(a[1] || "") ? { tomb: a[1] } : null;
+    // Отмена — ровно два поля. Смотреть только на «x» в начале нельзя:
+    // номер команды 33 в 36-ричной записи — тоже «x», и такая команда
+    // принималась за отмену самой себя (а счётчик застревал на 33)
+    if (a.length === 2) return a[0] === "x" && /^[0-9a-z]{6}$/.test(a[1]) ? { tomb: a[1] } : null;
     if (a.length !== 7) return null;
     const t = parseInt(a[0], 36);
     if (!(t >= 0) || !/^[0-9a-z]{6}$/.test(a[1]) || !ST_KINDS.has(a[2])) return null;
@@ -1570,6 +1573,8 @@ function stFitView() {
     const ui = st.ui, doc = st.doc;
     if (!ui || !doc) return;
     const r = ui.viewport.getBoundingClientRect();
+    // Окно свёрнуто или ещё не разложено — масштаб вышел бы нулевым или отрицательным
+    if (r.width < 40 || r.height < 40) return;
     const pad = r.width < 600 ? 10 : 28;
     const s = Math.min((r.width - pad * 2) / doc.W, (r.height - pad * 2) / doc.H);
     st.view = { s, x: (r.width - doc.W * s) / 2, y: (r.height - doc.H * s) / 2, fit: true, fitS: s };
