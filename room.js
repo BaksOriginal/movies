@@ -11,6 +11,33 @@
 
 const ROOM_VIEW_KEY = "homeView";
 const ROOM_LAMP_KEY = "roomLampOff";
+const ROOM_CURTAIN_KEY = "roomCurtainClosed";
+const ROOM_DAY_FROM = 7;    // с этого часа за окном солнце
+const ROOM_DAY_TO = 20;     // с этого — луна
+// Где стоит второй человек, смотря в каком он разделе: [x, y] в % для ПК и телефона.
+// Разделов нет в списке — значит, сидит на диване.
+const ROOM_PARTNER_SPOTS = {
+    games: { wide: [65, 62], tall: [63, 66] },
+    studio: { wide: [77, 74], tall: [64, 75] },
+    catalog: { wide: [73, 57], tall: [62, 50] },
+    wishlist: { wide: [73, 57], tall: [62, 50] },
+    watched: { wide: [59, 80], tall: [74, 44] },
+    list: { wide: [73, 57], tall: [62, 50] },
+    search: { wide: [73, 57], tall: [62, 50] },
+    online: { wide: [73, 57], tall: [62, 50] },
+    add: { wide: [73, 57], tall: [62, 50] },
+    board: { wide: [29, 30], tall: [45, 14] },
+    calendar: { wide: [47, 22], tall: [83, 15] },
+    chat: { wide: [33, 68], tall: [44, 73] },
+    comments: { wide: [33, 68], tall: [44, 73] },
+    pet: { wide: [53, 76], tall: [46, 62] },
+};
+const ROOM_PARTNER_LABELS = {
+    home: "в комнате", w2g: "у телевизора", games: "играет", studio: "рисует", catalog: "у полки",
+    wishlist: "у полки", watched: "у коробки", list: "у полки", search: "ищет фильм", online: "ищет фильм",
+    add: "добавляет фильмы", board: "у доски", calendar: "у календаря", chat: "в чате", comments: "читает отзывы",
+    pet: "с питомцем", random: "бросает кубик", secret: "хранит секрет",
+};
 
 const ROOM_ART = {
     board: `<svg viewBox="0 0 240 150"><rect width="240" height="150" rx="5" fill="#4a2f1c"/><rect x="8" y="8" width="224" height="134" fill="#a97f53"/><g fill="#7f5c38"><circle cx="30" cy="30" r="1.4"/><circle cx="90" cy="118" r="1.4"/><circle cx="170" cy="40" r="1.4"/><circle cx="205" cy="110" r="1.4"/><circle cx="130" cy="75" r="1.4"/></g><path d="M58 34Q105 62 170 34Q150 70 110 92" fill="none" stroke="#d8132f" stroke-width="1.6"/><g transform="rotate(-4 58 50)"><rect x="30" y="30" width="56" height="48" fill="#ffe873"/><path d="M36 46h42M36 55h34M36 64h38" stroke="#7a6a2d" stroke-width="2"/></g><g transform="rotate(3 170 50)"><rect x="146" y="28" width="52" height="44" fill="#ffb3d1"/><path d="M152 44h38M152 53h28" stroke="#8d4a68" stroke-width="2"/></g><g transform="rotate(-2 110 105)"><rect x="86" y="90" width="50" height="42" fill="#aee2ff"/><path d="M92 106h36M92 115h26" stroke="#3f6e8a" stroke-width="2"/></g><g fill="#e0234e"><circle cx="58" cy="32" r="3.6"/><circle cx="170" cy="30" r="3.6"/><circle cx="110" cy="92" r="3.6"/></g></svg>`,
@@ -106,9 +133,9 @@ function roomCalendarSvg() {
     return `<svg viewBox="0 0 90 110"><rect y="6" width="90" height="104" rx="4" fill="#fbf7ea"/><rect y="6" width="90" height="28" rx="4" fill="#d8132f"/><circle cx="24" cy="6" r="4" fill="#6d6d76"/><circle cx="66" cy="6" r="4" fill="#6d6d76"/><text x="45" y="27" text-anchor="middle" font-size="16" font-weight="800" fill="#fff">${month}</text><text x="45" y="84" text-anchor="middle" font-size="46" font-weight="800" fill="#23202b">${day}</text></svg>`;
 }
 
-function roomTimeOfDay() {
+function roomIsDay() {
     const h = new Date().getHours();
-    return h >= 6 && h < 11 ? "morning" : h >= 11 && h < 17 ? "day" : h >= 17 && h < 21 ? "evening" : "night";
+    return h >= ROOM_DAY_FROM && h < ROOM_DAY_TO;
 }
 
 function buildRoomHome(onViewChange) {
@@ -117,11 +144,23 @@ function buildRoomHome(onViewChange) {
     wrap.appendChild(buildHomeViewBar(onViewChange));
 
     const scene = document.createElement("section");
-    scene.className = `room-scene is-${roomTimeOfDay()}`;
+    scene.className = `room-scene ${roomIsDay() ? "is-day" : "is-night"}`;
     scene.setAttribute("aria-label", "Комната");
-    let lampOff = false;
-    try { lampOff = localStorage.getItem(ROOM_LAMP_KEY) === "1"; } catch (e) {}
-    scene.classList.toggle("is-lamp-off", lampOff);
+    let lampOff = false, curtainClosed = false;
+    try {
+        lampOff = localStorage.getItem(ROOM_LAMP_KEY) === "1";
+        curtainClosed = localStorage.getItem(ROOM_CURTAIN_KEY) === "1";
+    } catch (e) {}
+    // Свет в комнате: днём при открытой шторке светло без лампы и она ни на что
+    // не влияет; иначе всё решает лампа
+    const sunlit = () => roomIsDay() && !curtainClosed;
+    const applyLight = () => {
+        scene.classList.toggle("is-curtain-closed", curtainClosed);
+        scene.classList.toggle("is-sunlit", sunlit());
+        scene.classList.toggle("is-lamp-lit", !sunlit() && !lampOff);
+        scene.classList.toggle("is-dark", !sunlit() && lampOff);
+    };
+    applyLight();
     scene.innerHTML = `<div class="room-wall"></div><div class="room-floor"></div><div class="room-shade"></div>`;
     wrap.appendChild(scene);
 
@@ -140,7 +179,12 @@ function buildRoomHome(onViewChange) {
         return el;
     };
 
-    addObj({ id: "window", ar: "200/170", wide: [3, 6, 19], tall: [3, 2, 28], html: `<span class="room-sky"><i class="room-sun"></i><i class="room-town"></i></span>` });
+    addObj({ id: "window", ar: "200/170", wide: [3, 6, 19], tall: [3, 2, 28], label: "Шторка", html: `<span class="room-sky"><i class="room-sun"></i><i class="room-town"></i></span><span class="room-curtain is-l"></span><span class="room-curtain is-r"></span>`, go: () => {
+        curtainClosed = !curtainClosed;
+        try { localStorage.setItem(ROOM_CURTAIN_KEY, curtainClosed ? "1" : "0"); } catch (e) {}
+        thingSound("paper");
+        applyLight();
+    } });
     addObj({ id: "board", ar: "240/150", wide: [25, 5, 19], tall: [33, 2.5, 30], label: "Доска", html: ROOM_ART.board, go: go("board", "paper") });
     addObj({ id: "calendar", ar: "90/110", wide: [46, 6, 7], tall: [78, 2.5, 18], label: "Календарь", html: roomCalendarSvg(), go: go("calendar", "paper") });
     addObj({ id: "frame", ar: "80/92", wide: [55, 8, 6], tall: [65, 3, 11], label: "Секрет", html: ROOM_ART.frame, go: go("secret", "soft") });
@@ -167,17 +211,47 @@ function buildRoomHome(onViewChange) {
     } : null });
     radio.classList.toggle("is-on", hasMusic && isMusicPlaying);
 
-    addObj({ id: "lamp", ar: "70/260", wide: [1, 37, 5], tall: [51, 45, 9], label: "Свет", html: ROOM_ART.lamp, go: () => {
-        lampOff = !lampOff;
-        scene.classList.toggle("is-lamp-off", lampOff);
-        try { localStorage.setItem(ROOM_LAMP_KEY, lampOff ? "1" : "0"); } catch (e) {}
+    const lamp = addObj({ id: "lamp", ar: "70/260", wide: [1, 37, 5], tall: [51, 45, 9], label: "Свет", html: ROOM_ART.lamp, go: () => {
         thingSound("switch");
+        if (sunlit()) {
+            // Днём лампа не работает: подсказываем, что сначала нужна шторка
+            const tag = lamp.querySelector(".room-tag");
+            tag.textContent = "Сначала закройте шторку";
+            tag.classList.add("is-flash");
+            setTimeout(() => { tag.textContent = "Свет"; tag.classList.remove("is-flash"); }, 2200);
+            return;
+        }
+        lampOff = !lampOff;
+        try { localStorage.setItem(ROOM_LAMP_KEY, lampOff ? "1" : "0"); } catch (e) {}
+        applyLight();
     } });
 
+    // Я всегда на диване на своём месте; второй сидит рядом или ходит по комнате
+    const myName = getUsernameFromEmail(currentUser.email);
+    const iAmLeft = myName !== "Asmoday";
+    const partnerName = iAmLeft ? "Asmoday" : "Myakish";
+    const seat = iAmLeft ? { wide: [19.5, 49.6], tall: [28.4, 47.6] } : { wide: [11.25, 49.6], tall: [12.9, 47.6] };
     const sofa = addObj({ id: "sofa", ar: "300/150", wide: [6, 47, 25], tall: [3, 46, 47], html: `${ROOM_ART.sofa}
-        <span class="room-ava is-left">${userAvatarHtml("Myakish")}</span>
-        <span class="room-ava is-right">${userAvatarHtml("Asmoday")}</span>` });
+        <span class="room-ava ${iAmLeft ? "is-left" : "is-right"}">${userAvatarHtml(myName)}</span>
+        <span class="room-plaid ${iAmLeft ? "is-right" : "is-left"}"></span>` });
     sofa.setAttribute("aria-hidden", "true");
+
+    const partnerEl = document.createElement("div");
+    partnerEl.className = "room-partner";
+    partnerEl.innerHTML = `${userAvatarHtml(partnerName)}<span class="room-tag"></span>`;
+    scene.appendChild(partnerEl);
+    const renderPartner = () => {
+        const p = live.partner;
+        partnerEl.classList.toggle("is-here", !!p);
+        scene.classList.toggle("is-partner-away", !p);
+        if (!p) return;
+        const spot = ROOM_PARTNER_SPOTS[p.where] || seat;
+        partnerEl.style.setProperty("--wx", spot.wide[0] + "%");
+        partnerEl.style.setProperty("--wy", spot.wide[1] + "%");
+        partnerEl.style.setProperty("--tx", spot.tall[0] + "%");
+        partnerEl.style.setProperty("--ty", spot.tall[1] + "%");
+        partnerEl.querySelector(".room-tag").textContent = `${p.name || partnerName} ${ROOM_PARTNER_LABELS[p.where] || "на сайте"}`;
+    };
 
     addObj({ id: "arcade", ar: "130/280", wide: [62, 27, 11.5], tall: [74, 52, 22], label: "Игры", html: ROOM_ART.arcade, go: go("games", "tape") });
 
@@ -215,7 +289,7 @@ function buildRoomHome(onViewChange) {
     addObj({ id: "popcorn", ar: "70/90", wide: [10, 69, 5], tall: [5, 78.7, 10], label: "Будем смотреть", tag: "Планы", html: ROOM_ART.popcorn, go: go("wishlist", "soft") });
     addObj({ id: "dice", ar: "1/1", wide: [17, 76, 2.8], tall: [17, 82.2, 7], label: "Рандомайзер", tag: "Рандом", html: ROOM_ART.dice, go: go("random", "tape") });
     addObj({ id: "notebook", ar: "70/50", wide: [20.5, 76, 5.5], tall: [28, 81.5, 12], label: "Комментарии", tag: "Отзывы", html: ROOM_ART.notebook, go: go("comments", "paper") });
-    addObj({ id: "phone", ar: "90/70", wide: [26.5, 73, 5.5], tall: [41, 81.8, 10], label: "Чат", html: ROOM_ART.phone, go: go("chat", "knob") });
+    const phone = addObj({ id: "phone", ar: "90/70", wide: [26.5, 73, 5.5], tall: [41, 81.8, 10], label: "Чат", html: `<span class="room-phone-body">${ROOM_ART.phone}</span><span class="room-phone-count" hidden></span>`, go: go("chat", "knob") });
     addObj({ id: "box", ar: "150/120", wide: [63, 78, 11], tall: [54, 84, 18], label: "Просмотрено", html: ROOM_ART.box, go: go("watched", "tape") });
     addObj({ id: "easel", ar: "170/240", wide: [82, 67, 13], tall: [75, 81, 20], label: "Арт-студия", html: ROOM_ART.easel, go: go("studio", "soft") });
 
@@ -229,5 +303,21 @@ function buildRoomHome(onViewChange) {
             pet.classList.toggle("is-frozen", petIsFrozen());
         }).catch(() => {});
     }
+
+    // Живая часть: второй человек и звонящий телефон
+    const renderLive = () => {
+        renderPartner();
+        phone.classList.toggle("is-ringing", live.unread > 0);
+        const count = phone.querySelector(".room-phone-count");
+        count.hidden = !live.unread;
+        count.textContent = live.unread > 99 ? "99+" : live.unread;
+    };
+    // Ушли с главной — комната больше не нужна и перестаёт слушать обновления
+    const onLive = () => {
+        if (scene.isConnected) renderLive();
+        else live.listeners.delete(onLive);
+    };
+    liveOnChange(onLive);
+    renderLive();
     return wrap;
 }

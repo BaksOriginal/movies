@@ -5270,9 +5270,8 @@ body.bd-page .hearts-background{ display: none; }
     user-select: none;
     -webkit-user-select: none;
 }
-.room-scene.is-morning{ --wall-a: #4b3a57; --wall-b: #322841; --floor-a: #4a2f1f; --glow: rgba(255,214,150,0.12); }
-.room-scene.is-day{ --wall-a: #5a4c6d; --wall-b: #403556; --floor-a: #54361f; --floor-b: #2c1b10; --glow: rgba(255,230,180,0.08); }
-.room-scene.is-evening{ --wall-a: #3b2548; --wall-b: #241733; --floor-a: #3a2316; --glow: rgba(255,180,100,0.2); }
+.room-scene.is-sunlit{ --wall-a: #6a5a80; --wall-b: #4c3f66; --floor-a: #5d3c22; --floor-b: #311e11; --glow: rgba(255,240,200,0.1); }
+.room-scene.is-lamp-lit{ --wall-a: #2c2040; --wall-b: #1a1229; --floor-a: #33201a; --glow: rgba(255,190,110,0.32); }
 .room-wall{
     position: absolute;
     inset: 0 0 calc(100% - var(--floor-at)) 0;
@@ -5290,7 +5289,7 @@ body.bd-page .hearts-background{ display: none; }
         linear-gradient(var(--floor-a), var(--floor-b));
     box-shadow: inset 0 8px 14px rgba(0,0,0,0.5);
 }
-/* Свет выключен: всё в полумраке, горит только телевизор */
+/* Лампа выключена и шторка не пускает день: всё в полумраке, горит только телевизор */
 .room-shade{
     position: absolute;
     inset: 0;
@@ -5300,10 +5299,12 @@ body.bd-page .hearts-background{ display: none; }
     pointer-events: none;
     transition: opacity .25s ease;
 }
-.room-scene.is-lamp-off .room-shade{ opacity: 1; }
-.room-scene.is-lamp-off .room-tv{ z-index: 31; }
-.room-scene.is-lamp-off .room-lamp{ z-index: 31; }
-.room-scene.is-lamp-off .room-lamp-shade{ fill: #6e6250; }
+.room-scene.is-dark .room-shade{ opacity: 1; }
+.room-scene.is-dark .room-tv, .room-scene.is-dark .room-lamp, .room-scene.is-dark .room-window{ z-index: 31; }
+/* Лампа светится, только когда от неё есть толк */
+.room-lamp-shade{ fill: #7c6d55; }
+.room-scene.is-lamp-lit .room-lamp-shade{ fill: #ffd98f; }
+.room-scene.is-dark .room-sky{ filter: brightness(.7); }
 .room-obj{
     position: absolute;
     left: var(--wx);
@@ -5316,7 +5317,7 @@ body.bd-page .hearts-background{ display: none; }
 /* Подниматься при наведении могут только предметы, на которые можно нажать;
    декор (ковёр, стол, диван, окно) на указатель вообще не реагирует */
 .room-scene button.room-obj:hover, .room-scene .room-tv:hover{ z-index: 35; }
-.room-rug, .room-table, .room-sofa, .room-window{ pointer-events: none; }
+.room-rug, .room-table, .room-sofa{ pointer-events: none; }
 button.room-obj{ cursor: pointer; transition: transform .12s ease; }
 button.room-obj:hover{ transform: translateY(-3px) scale(1.03); }
 button.room-obj:active{ transform: scale(.98); }
@@ -5361,6 +5362,10 @@ button.room-obj:focus-visible{ outline: 2px solid var(--pink-soft); outline-offs
     transition: opacity .1s ease;
 }
 .room-obj:hover > .room-tag, .room-obj:focus-visible > .room-tag{ opacity: 1; }
+/* Мольберт стоит у нижнего края сцены: подпись под ним обрезалась бы */
+@media (hover: hover) and (min-width: 761px){
+    .room-easel .room-tag{ bottom: 6px; transform: translate(-50%, 0); }
+}
 .room-tv:hover > .room-tag{ opacity: 1; }
 @media (hover: none){
     .room-tag{ opacity: .94; font-size: 9.5px; padding: 1px 4px; bottom: 0; transform: translate(-50%, 55%); }
@@ -5383,18 +5388,58 @@ button.room-obj:focus-visible{ outline: 2px solid var(--pink-soft); outline-offs
         linear-gradient(90deg, #0a0a1c 0 16%, #111128 16% 34%, #0a0a1c 34% 56%, #111128 56% 74%, #0a0a1c 74%);
     clip-path: polygon(0 34%, 16% 34%, 16% 8%, 34% 8%, 34% 44%, 56% 44%, 56% 0, 74% 0, 74% 28%, 100% 28%, 100% 100%, 0 100%);
 }
-.is-morning .room-sky{ background: linear-gradient(#7fa8d8, #f3c6b2 80%); }
-.is-morning .room-sun{ left: 20%; top: 46%; background: #fff0c4; box-shadow: 0 0 18px #ffe7ad; }
 .is-day .room-sky{ background: linear-gradient(#58a7e8, #bce3f7); }
 .is-day .room-sun{ left: 60%; top: 13%; background: #fff4bb; box-shadow: 0 0 18px #fff0a6; }
-.is-evening .room-sky{ background: linear-gradient(#332055, #b7537a 58%, #f7a55b); }
-.is-evening .room-sun{ left: 16%; top: 50%; background: #ffd47f; box-shadow: 0 0 18px #ffc266; }
-.is-morning .room-town, .is-day .room-town, .is-evening .room-town{ background: linear-gradient(90deg, #252a42 0 16%, #31365a 16% 34%, #252a42 34% 56%, #31365a 56% 74%, #252a42 74%); }
+.is-day .room-town{ background: linear-gradient(90deg, #4a5578 0 16%, #5a668c 16% 34%, #4a5578 34% 56%, #5a668c 56% 74%, #4a5578 74%); }
+/* Шторка: две половинки ткани, которые сходятся посередине */
+.room-curtain{
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    width: 15%;
+    background: repeating-linear-gradient(90deg, #8c2f53 0 7%, #a53c66 7% 14%, #752746 14% 21%);
+    box-shadow: 0 0 6px rgba(0,0,0,0.45);
+    transition: width .28s ease;
+}
+.room-curtain.is-l{ left: 0; }
+.room-curtain.is-r{ right: 0; }
+.is-curtain-closed .room-curtain{ width: 51%; }
+.room-tag.is-flash{ opacity: 1; background: #5c1c2a; }
+/* Лампа стоит у левого края сцены: длинная подсказка растёт вправо */
+.room-scene .room-lamp .room-tag.is-flash{ left: 0; transform: translate(0, 100%); }
 
 /* Диван и аватарки */
 .room-ava{ position: absolute; top: 12%; width: 25%; aspect-ratio: 1; }
 .room-ava.is-left{ left: 21%; }
 .room-ava.is-right{ right: 21%; }
+.room-plaid{ position: absolute; top: 34%; width: 27%; height: 26%; border-radius: 22% 22% 12% 12%; background: repeating-linear-gradient(135deg, #ffd15c 0 12%, #d8132f 12% 24%); opacity: 0; transition: opacity .3s ease; }
+.room-plaid.is-left{ left: 20%; }
+.room-plaid.is-right{ right: 20%; }
+.is-partner-away .room-plaid{ opacity: .9; }
+/* Второй человек: едет между предметами, когда меняет раздел сайта */
+.room-partner{
+    position: absolute;
+    left: var(--wx);
+    top: var(--wy);
+    width: 6.25%;
+    aspect-ratio: 1;
+    z-index: 12;
+    display: none;
+    transition: left .55s ease, top .55s ease;
+}
+.room-partner.is-here{ display: block; }
+.room-partner:hover .room-tag{ opacity: 1; }
+.room-phone-body{ display: block; width: 100%; height: 100%; }
+.room-phone-body svg{ display: block; width: 100%; height: 100%; overflow: visible; }
+.room-phone.is-ringing .room-phone-body{ animation: roomPhoneRing 2.6s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes roomPhoneRing{
+    0%, 22%, 100%{ transform: none; }
+    3%, 11%, 19%{ transform: rotate(-7deg); }
+    7%, 15%{ transform: rotate(7deg); }
+}
+.room-phone-count{ position: absolute; right: -12%; top: -14%; min-width: 16px; padding: 1px 4px; border-radius: 9px; box-sizing: border-box; background: #e5254f; color: #fff; font-size: 11px; font-weight: 800; line-height: 1.25; text-align: center; box-shadow: 0 0 0 2px #17101c; }
+.room-phone-count[hidden]{ display: none; }
 
 /* Телевизор в комнате */
 .room-tv-screen{
@@ -5442,10 +5487,64 @@ button.room-obj:focus-visible{ outline: 2px solid var(--pink-soft); outline-offs
 @media (max-width: 760px){
     .room-scene{ aspect-ratio: 390 / 680; --floor-at: 40%; }
     .room-obj{ left: var(--tx); top: var(--ty); width: var(--tw); }
+    .room-partner{ left: var(--tx); top: var(--ty); width: 11.75%; }
     .room-shelf{ z-index: 6; }
     .room-radio{ z-index: 7; }
     .room-cassette .retro-tape-label{ font-size: 5px; letter-spacing: 0; }
     .room-cassette .retro-tape-window i{ width: 5px; height: 5px; }
     .room-window{ border-width: 3px; }
     .room-sound-mark{ font-size: 9px; }
+}
+
+/* ---------- Новые сообщения: значок, галочки, уведомление (live.js) ---------- */
+.shell-badge{
+    margin-left: auto;
+    min-width: 19px;
+    padding: 1px 5px;
+    border-radius: 10px;
+    box-sizing: border-box;
+    background: #e5254f;
+    color: #fff;
+    font: 800 11.5px/1.45 var(--font-ui);
+    text-align: center;
+}
+.shell-tab{ position: relative; }
+.shell-tab .shell-badge{ position: absolute; left: 50%; top: 2px; margin-left: 5px; box-shadow: 0 0 0 2px #0d0817; }
+.chat-tick{ display: block; margin-top: 1px; text-align: right; font-size: 11px; font-weight: 800; line-height: 1; letter-spacing: -2px; color: rgba(255,255,255,0.62); }
+.chat-tick.is-read{ color: #6fe7ff; }
+.live-toasts{
+    position: fixed;
+    right: 18px;
+    top: 18px;
+    z-index: 2100;
+    display: grid;
+    gap: 8px;
+    width: min(350px, calc(100vw - 24px));
+    pointer-events: none;
+}
+.live-toast{
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 11px;
+    border-radius: 15px;
+    background: #1d1230;
+    border: 1px solid rgba(255,46,147,0.6);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.55);
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    pointer-events: auto;
+    animation: liveToastIn .22s ease both;
+    transition: opacity .2s ease, transform .2s ease;
+}
+.live-toast.is-leaving{ opacity: 0; transform: translateY(-8px); }
+@keyframes liveToastIn{ from{ opacity: 0; transform: translateY(-10px); } }
+.live-toast-ava{ flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-weight: 800; }
+.live-toast-body{ flex: 1; min-width: 0; display: grid; gap: 1px; }
+.live-toast-body b{ font-size: 13.5px; }
+.live-toast-body span{ font-size: 13.5px; line-height: 1.3; color: var(--text-dim); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.live-toast-close{ flex: none; align-self: flex-start; padding: 1px 3px; color: var(--text-faint); font-size: 13px; }
+@media (max-width: 760px){
+    .live-toasts{ left: 12px; right: 12px; top: calc(env(safe-area-inset-top) + 10px); width: auto; }
 }
