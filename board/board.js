@@ -541,7 +541,7 @@ function bdOpenEditor(note) {
     const isNew = !note.id;
     const d = Object.assign({}, note.data);
     const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
+    overlay.className = "modal-overlay bd-overlay";
     overlay.innerHTML = `
         <div class="modal-content bd-editor">
             <div class="bd-editor-title">${isNew ? (d.kind === "counter" ? "Новый счётчик серий" : "Новая заметка") : (d.kind === "counter" ? "Счётчик серий" : "Заметка")}</div>
