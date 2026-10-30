@@ -4617,6 +4617,24 @@ body.bd-page .hearts-background{ display: none; }
     background: radial-gradient(circle at 35% 30%, #ff9db5, #e0234e 60%, #8d0f2c);
     box-shadow: 0 2px 3px rgba(0,0,0,0.45);
 }
+/* Ручка поворота: заметная, но не спорит с текстом; на доске она мельче из-за масштаба */
+.bd-rotate{
+    position: absolute;
+    right: -13px;
+    top: -13px;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(40,28,12,0.78);
+    color: #fff4c4;
+    font-size: 18px;
+    line-height: 1;
+    cursor: grab;
+    touch-action: none;
+    opacity: .65;
+}
+.bd-rotate:hover, .bd-note.is-dragging .bd-rotate{ opacity: 1; }
 .bd-note-text, .bd-note-title{
     font: 700 24px/1.2 Caveat, var(--font-ui), cursive;
     white-space: pre-wrap;
@@ -4696,6 +4714,10 @@ body.bd-page .hearts-background{ display: none; }
 .bd-seg.is-wrap{ flex-wrap: wrap; }
 .bd-seg button{ flex: 1 1 auto; height: 34px; padding: 0 10px; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--text-dim); white-space: nowrap; }
 .bd-seg button.is-active{ background: var(--surface-3); color: var(--text); }
+.bd-rot-row{ display: flex; align-items: center; gap: 10px; }
+.bd-rot-row .ui-pill{ flex: none; height: 34px; }
+.bd-rot-range{ flex: 1; min-width: 0; margin: 0; padding: 0; accent-color: var(--pink); }
+.bd-field b{ color: var(--text); font-variant-numeric: tabular-nums; }
 .bd-editor-actions{ display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .bd-editor-actions .ui-pill{ height: 42px; padding: 0 18px; }
 .bd-delete{ margin-right: auto; background: rgba(229,53,79,0.16); border-color: rgba(229,53,79,0.5); color: #ff8a9d; }

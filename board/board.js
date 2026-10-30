@@ -87,7 +87,17 @@ function bdLinkify(text) {
 function bdTilt(id) {
     let h = 0;
     for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-    return ((Math.abs(h) % 50) / 10 - 2.5).toFixed(1);
+    return (Math.abs(h) % 50) / 10 - 2.5;
+}
+
+// Угол заметки: заданный вручную, а пока его нет — её случайный наклон
+function bdAngle(id, data) {
+    return data.rot == null ? (id ? bdTilt(id) : 0) : data.rot;
+}
+
+// Угол в пределах -180…180
+function bdWrapAngle(a) {
+    return ((((a + 180) % 360) + 360) % 360) - 180;
 }
 
 function bdClampInt(v, min, fallback) {
@@ -106,6 +116,7 @@ function bdNormalize(data) {
         x: Number.isFinite(+d.x) ? +d.x : 40,
         y: Number.isFinite(+d.y) ? +d.y : 40,
         z: Number.isFinite(+d.z) ? +d.z : 1,
+        rot: d.rot != null && Number.isFinite(+d.rot) ? bdWrapAngle(+d.rot) : null,
         color: BD_COLORS[d.color] ? d.color : "yellow",
         size: BD_SIZES[d.size] ? d.size : "m",
         edge: BD_EDGES[d.edge] ? d.edge : "plain",
@@ -242,6 +253,7 @@ function bdOnMove(p) {
     if (!note || bd.dragId === p.id) return;
     note.data.x = +p.x; note.data.y = +p.y;
     if (Number.isFinite(+p.z)) note.data.z = +p.z;
+    if (p.rot != null && Number.isFinite(+p.rot)) note.data.rot = bdWrapAngle(+p.rot);
     bdPlaceEl(note);
 }
 
@@ -271,7 +283,7 @@ function bdCommit(id, data) {
 function bdPlaceEl(note) {
     const el = bd.els.get(note.id);
     if (!el) return;
-    el.style.transform = `translate(${note.data.x}px, ${note.data.y}px) rotate(${bdTilt(note.id)}deg)`;
+    el.style.transform = `translate(${note.data.x}px, ${note.data.y}px) rotate(${bdAngle(note.id, note.data)}deg)`;
     el.style.zIndex = note.data.z;
 }
 
@@ -292,6 +304,7 @@ function bdRenderNote(note) {
     if (d.kind === "counter") {
         el.innerHTML = `
             <span class="bd-pin"></span>
+            <button type="button" class="ui-btn bd-rotate" aria-label="Повернуть заметку" title="Потяни, чтобы повернуть">↻</button>
             <div class="bd-paper">
                 <div class="bd-note-title">${bdLinkify(d.text) || "Без названия"}</div>
                 <div class="bd-counter">
@@ -309,6 +322,7 @@ function bdRenderNote(note) {
     } else {
         el.innerHTML = `
             <span class="bd-pin"></span>
+            <button type="button" class="ui-btn bd-rotate" aria-label="Повернуть заметку" title="Потяни, чтобы повернуть">↻</button>
             <div class="bd-paper">
                 <div class="bd-note-text">${bdLinkify(d.text) || '<span class="bd-note-empty">Пустая заметка</span>'}</div>
                 ${author}
@@ -444,10 +458,30 @@ function bdApplyZoom() {
 function bdBindBoard() {
     const board = bd.ui.board;
     let drag = null;
+    let turn = null;    // поворот за ручку: { id, pid, cx, cy, start, startRot }
     let lastMoveAt = 0;
+    const pointerAngle = (e) => Math.atan2(e.clientY - turn.cy, e.clientX - turn.cx) * 180 / Math.PI;
 
     board.addEventListener("pointerdown", (e) => {
         if (e.button !== 0 && e.pointerType === "mouse") return;
+        const handle = e.target.closest(".bd-rotate");
+        if (handle && !drag && !turn) {
+            const el = handle.closest(".bd-note");
+            const note = bd.notes.get(el.dataset.id);
+            if (!note) return;
+            e.preventDefault();
+            // Вокруг центра заметки: он не зависит от её текущего угла
+            const r = el.getBoundingClientRect();
+            turn = { id: note.id, pid: e.pointerId, el, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+            turn.start = pointerAngle(e);
+            turn.startRot = bdAngle(note.id, note.data);
+            bd.dragId = note.id;
+            el.classList.add("is-dragging");
+            note.data.z = bdMaxZ() + 1;
+            bdPlaceEl(note);
+            try { board.setPointerCapture(e.pointerId); } catch (err) {}
+            return;
+        }
         if (e.target.closest("a, button")) return;
         const el = e.target.closest(".bd-note");
         if (!el || drag) return;
@@ -469,6 +503,20 @@ function bdBindBoard() {
     });
 
     board.addEventListener("pointermove", (e) => {
+        if (turn && e.pointerId === turn.pid) {
+            const note = bd.notes.get(turn.id);
+            if (!note) return;
+            let rot = Math.round(bdWrapAngle(turn.startRot + pointerAngle(e) - turn.start));
+            if (Math.abs(rot) <= 3) rot = 0;    // легко поставить ровно
+            note.data.rot = rot;
+            bdPlaceEl(note);
+            const now = performance.now();
+            if (now - lastMoveAt > BD_MOVE_MS) {
+                lastMoveAt = now;
+                bdSend("move", { id: note.id, x: note.data.x, y: note.data.y, z: note.data.z, rot });
+            }
+            return;
+        }
         if (!drag || e.pointerId !== drag.pid) return;
         if (!drag.moved) {
             if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
@@ -494,6 +542,15 @@ function bdBindBoard() {
     });
 
     const end = (e) => {
+        if (turn && e.pointerId === turn.pid) {
+            const t = turn;
+            turn = null;
+            bd.dragId = null;
+            t.el.classList.remove("is-dragging");
+            const note = bd.notes.get(t.id);
+            if (note) bdCommit(note.id, note.data);
+            return;
+        }
         if (!drag || e.pointerId !== drag.pid) return;
         const d = drag;
         drag = null;
@@ -568,6 +625,12 @@ function bdOpenEditor(note) {
             <div class="bd-field"><span>Края</span>
                 <div class="bd-seg is-wrap">${Object.entries(BD_EDGES).map(([k, label]) => `<button type="button" class="ui-btn" data-edge="${k}">${label}</button>`).join("")}</div>
             </div>
+            <div class="bd-field"><span>Поворот: <b id="bdRotVal"></b></span>
+                <div class="bd-rot-row">
+                    <input type="range" class="bd-rot-range" id="bdRot" min="-180" max="180" step="1" aria-label="Поворот заметки">
+                    <button type="button" class="ui-btn ui-pill" id="bdRotZero">Ровно</button>
+                </div>
+            </div>
             <div class="bd-editor-actions">
                 ${isNew ? "" : `<button type="button" class="ui-btn ui-pill bd-delete" id="bdDelete">Удалить</button>`}
                 <button type="button" class="ui-btn ui-pill" id="bdCancel">Отмена</button>
@@ -592,6 +655,10 @@ function bdOpenEditor(note) {
         paper.className = `bd-preview edge-${d.edge}`;
         paper.style.setProperty("--note-bg", BD_COLORS[d.color].bg);
         paper.style.width = Math.round(BD_SIZES[d.size].w * 0.62) + "px";
+        const angle = Math.round(bdAngle(note.id, d));
+        paper.style.transform = `rotate(${angle}deg)`;
+        $("#bdRot").value = angle;
+        $("#bdRotVal").textContent = angle + "°";
     };
     renderChoices();
     overlay.addEventListener("click", (e) => {
@@ -603,6 +670,8 @@ function bdOpenEditor(note) {
         renderChoices();
     });
 
+    $("#bdRot").addEventListener("input", (e) => { d.rot = +e.target.value; renderChoices(); });
+    $("#bdRotZero").onclick = () => { d.rot = 0; renderChoices(); };
     $("#bdCancel").onclick = close;
     $("#bdSave").onclick = () => {
         d.text = textEl.value.trim().slice(0, BD_TEXT_MAX);
