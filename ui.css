@@ -4607,6 +4607,23 @@ body.bd-page .hearts-background{ display: none; }
     background: linear-gradient(170deg, rgba(255,255,255,0.28), transparent 45%), var(--note-bg, #ffe873);
     color: #33290f;
 }
+.bd-threads{
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000000;
+    pointer-events: none;
+    overflow: visible;
+}
+.bd-thread-shadow path, .bd-thread-line path, .bd-thread-live, .bd-thread-hit path{ fill: none; stroke-linecap: round; }
+.bd-thread-shadow path{ stroke: rgba(30,12,5,0.32); stroke-width: 3; }
+.bd-thread-line path, .bd-thread-live{ stroke: #d8132f; stroke-width: 2.6; }
+.bd-thread-live{ stroke-dasharray: 8 6; }
+.bd-thread-knot circle{ fill: #8d0f2c; }
+.bd-thread-hit path{ stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
+.bd-board.is-threading .bd-thread-hit path{ pointer-events: none; }
+.bd-note.is-thread-target .bd-paper{ outline: 3px solid #d8132f; outline-offset: 2px; }
 .bd-pin{
     position: absolute;
     left: 50%; top: -7px;
@@ -4616,7 +4633,10 @@ body.bd-page .hearts-background{ display: none; }
     border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ff9db5, #e0234e 60%, #8d0f2c);
     box-shadow: 0 2px 3px rgba(0,0,0,0.45);
+    cursor: crosshair;
 }
+/* В маленькую кнопку легче попасть пальцем с запасом вокруг */
+.bd-pin::after{ content: ""; position: absolute; inset: -10px; border-radius: 50%; }
 /* Ручка поворота: заметная, но не спорит с текстом; на доске она мельче из-за масштаба */
 .bd-rotate{
     position: absolute;

@@ -10,6 +10,10 @@
 // (jsonb): новые виды заметок не потребуют менять таблицу. При одновременной
 // правке одной заметки побеждает последняя запись.
 //
+// Красная нить соединяет кнопки двух заметок. Она хранится у заметки, от
+// которой её протянули (data.links — id других заметок); если любой из двух
+// заметок больше нет, нить просто не рисуется.
+//
 // Канал Supabase Realtime "notes_board": presence — кто на доске;
 // note — заметка изменилась; move — её тащат прямо сейчас; del — удалена.
 // Сообщения доставляются «по возможности», поэтому список ещё и сверяется
@@ -22,6 +26,8 @@ const BD_SYNC_MS = 30000;
 const BD_MOVE_MS = 70;
 const BD_RETRY_MS = 5000;
 const BD_TEXT_MAX = 2000;
+const BD_LINKS_MAX = 30;
+const BD_PIN_TOP = 2;   // центр кнопки ниже верхнего края заметки, px
 const BD_COLORS = {
     yellow: { label: "Жёлтая", bg: "#ffe873" },
     orange: { label: "Оранжевая", bg: "#ffc27a" },
@@ -121,6 +127,7 @@ function bdNormalize(data) {
         size: BD_SIZES[d.size] ? d.size : "m",
         edge: BD_EDGES[d.edge] ? d.edge : "plain",
         by: String(d.by || ""),
+        links: Array.isArray(d.links) ? Array.from(new Set(d.links.filter(x => typeof x === "string"))).slice(0, BD_LINKS_MAX) : [],
     };
 }
 
@@ -269,6 +276,7 @@ function bdRemoveNote(id) {
     const el = bd.els.get(id);
     if (el) el.remove();
     bd.els.delete(id);
+    bdScheduleThreads();
     bdRenderEmpty();
 }
 
@@ -285,6 +293,108 @@ function bdPlaceEl(note) {
     if (!el) return;
     el.style.transform = `translate(${note.data.x}px, ${note.data.y}px) rotate(${bdAngle(note.id, note.data)}deg)`;
     el.style.zIndex = note.data.z;
+    bdScheduleThreads();
+}
+
+// ---------- Красная нить ----------
+// Кнопка закреплена у верхнего края, так что с учётом поворота её место
+// считаем от центра заметки
+function bdPinPoint(note) {
+    const el = bd.els.get(note.id);
+    if (!el) return null;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const a = bdAngle(note.id, note.data) * Math.PI / 180;
+    const dy = BD_PIN_TOP - h / 2;
+    return { x: note.data.x + w / 2 - dy * Math.sin(a), y: note.data.y + h / 2 + dy * Math.cos(a) };
+}
+
+// Нить слегка провисает: квадратичная кривая с серединой ниже прямой
+function bdThreadPath(a, b) {
+    const sag = Math.min(46, Math.hypot(b.x - a.x, b.y - a.y) * 0.09);
+    return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 + sag };
+}
+
+function bdThreadSvg(a, b) {
+    const c = bdThreadPath(a, b);
+    return `M${a.x} ${a.y}Q${c.cx} ${c.cy} ${b.x} ${b.y}`;
+}
+
+// Область нажатия — без концов нити, иначе она закрывала бы сами кнопки
+function bdThreadHit(a, b) {
+    const c = bdThreadPath(a, b);
+    let d = "";
+    for (let i = 0; i <= 12; i++) {
+        const t = 0.12 + (i / 12) * 0.76, u = 1 - t;
+        const x = u * u * a.x + 2 * u * t * c.cx + t * t * b.x;
+        const y = u * u * a.y + 2 * u * t * c.cy + t * t * b.y;
+        d += `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    }
+    return d;
+}
+
+let bdThreadsRaf = 0;
+function bdScheduleThreads() {
+    if (bdThreadsRaf) return;
+    bdThreadsRaf = requestAnimationFrame(() => { bdThreadsRaf = 0; bdRenderThreads(); });
+}
+
+function bdRenderThreads() {
+    if (!bd.ui) return;
+    let shadow = "", line = "", knots = "", hits = "";
+    const knot = (p) => `<circle cx="${p.x}" cy="${p.y}" r="3.2"/>`;
+    const seen = new Set();
+    bd.notes.forEach((note) => {
+        const a = bdPinPoint(note);
+        if (!a) return;
+        note.data.links.forEach((otherId) => {
+            const other = bd.notes.get(otherId);
+            const pair = [note.id, otherId].sort().join("|");
+            if (!other || otherId === note.id || seen.has(pair)) return;
+            const b = bdPinPoint(other);
+            if (!b) return;
+            seen.add(pair);
+            const d = bdThreadSvg(a, b);
+            shadow += `<path d="${d}"/>`;
+            line += `<path d="${d}"/>`;
+            knots += knot(a) + knot(b);
+            hits += `<path d="${bdThreadHit(a, b)}" data-from="${bdEsc(note.id)}" data-to="${bdEsc(otherId)}"/>`;
+        });
+    });
+    bd.ui.threads.innerHTML = `
+        <g class="bd-thread-shadow" transform="translate(1 4)">${shadow}</g>
+        <g class="bd-thread-line">${line}</g>
+        <g class="bd-thread-knot">${knots}</g>
+        <g class="bd-thread-hit">${hits}</g>
+        <path class="bd-thread-live" id="bdThreadLive"/>
+    `;
+}
+
+// Подсказка на пару секунд вместо строки состояния
+let bdHintTimer = 0;
+function bdHint(text) {
+    if (!bd.ui) return;
+    clearTimeout(bdHintTimer);
+    bd.ui.status.className = "bd-status is-wait";
+    bd.ui.status.textContent = text;
+    bdHintTimer = setTimeout(() => { bdHintTimer = 0; bdRenderStatus(); }, 3500);
+}
+
+function bdLinked(a, b) {
+    return a.data.links.includes(b.id) || b.data.links.includes(a.id);
+}
+
+function bdAddThread(from, to) {
+    if (bdLinked(from, to)) { bdHint("Эти заметки уже соединены"); return; }
+    const links = from.data.links.filter(id => bd.notes.has(id));
+    if (links.length >= BD_LINKS_MAX) { bdHint("У этой заметки слишком много нитей"); return; }
+    vibrate(10);
+    bdCommit(from.id, Object.assign({}, from.data, { links: [...links, to.id] }));
+}
+
+function bdRemoveThread(fromId, toId) {
+    const from = bd.notes.get(fromId);
+    if (!from) return;
+    bdCommit(fromId, Object.assign({}, from.data, { links: from.data.links.filter(id => id !== toId) }));
 }
 
 function bdRenderNote(note) {
@@ -340,6 +450,7 @@ function bdRenderStatus() {
     if (!bd.ui) return;
     const el = bd.ui.status;
     let text, cls = "";
+    if (bdHintTimer) return;
     if (bd.missingTable) { text = "Таблица заметок ещё не создана"; cls = "is-bad"; }
     else if (bd.unsaved.size) { text = "Сохраняю…"; cls = "is-wait"; }
     else if (!bd.connected) { text = "Нет связи"; cls = "is-bad"; }
@@ -380,6 +491,7 @@ function showBoardScreen() {
             <div class="bd-scroll" id="bdScroll">
                 <div class="bd-sizer" id="bdSizer">
                     <div class="bd-board" id="bdBoard" style="width:${BD_W}px;height:${BD_H}px">
+                        <svg class="bd-threads" id="bdThreads" viewBox="0 0 ${BD_W} ${BD_H}" aria-hidden="true"></svg>
                         <div class="bd-empty" id="bdEmpty" hidden>Доска пока пустая.<br>Добавьте первую заметку кнопкой сверху.</div>
                     </div>
                 </div>
@@ -394,6 +506,7 @@ function showBoardScreen() {
         sizer: root.querySelector("#bdSizer"),
         status: root.querySelector("#bdStatus"),
         empty: root.querySelector("#bdEmpty"),
+        threads: root.querySelector("#bdThreads"),
     };
     bd.els.clear();
 
@@ -419,6 +532,8 @@ function showBoardScreen() {
 
     bd.notes.forEach(bdRenderNote);
     bdRenderStatus();
+    // Рукописный шрифт меняет высоту заметок, а с ней и место кнопок после поворота
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(bdScheduleThreads);
     bdSync().then(() => { bdRenderEmpty(); bdScrollToNotes(); });
 }
 
@@ -459,11 +574,38 @@ function bdBindBoard() {
     const board = bd.ui.board;
     let drag = null;
     let turn = null;    // поворот за ручку: { id, pid, cx, cy, start, startRot }
+    let thread = null;  // тянем нить: { from, pid, sx, sy, moved, target }
+    const boardPoint = (e) => {
+        const r = board.getBoundingClientRect(), z = bdCurrentZoom();
+        return { x: (e.clientX - r.left) / z, y: (e.clientY - r.top) / z };
+    };
+    // Заметка под пальцем; нить в этот момент нажатия не перехватывает (см. is-threading)
+    const noteAt = (e) => {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        const el = hit && hit.closest ? hit.closest(".bd-note") : null;
+        return el ? bd.notes.get(el.dataset.id) || null : null;
+    };
+    const setThreadTarget = (note) => {
+        if (thread.target === note) return;
+        if (thread.target) { const old = bd.els.get(thread.target.id); if (old) old.classList.remove("is-thread-target"); }
+        thread.target = note;
+        if (note) { const el = bd.els.get(note.id); if (el) el.classList.add("is-thread-target"); }
+    };
     let lastMoveAt = 0;
     const pointerAngle = (e) => Math.atan2(e.clientY - turn.cy, e.clientX - turn.cx) * 180 / Math.PI;
 
     board.addEventListener("pointerdown", (e) => {
         if (e.button !== 0 && e.pointerType === "mouse") return;
+        const pin = e.target.closest(".bd-pin");
+        if (pin && !drag && !turn && !thread) {
+            const note = bd.notes.get(pin.closest(".bd-note").dataset.id);
+            if (!note) return;
+            e.preventDefault();
+            thread = { from: note, pid: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, target: null };
+            board.classList.add("is-threading");
+            try { board.setPointerCapture(e.pointerId); } catch (err) {}
+            return;
+        }
         const handle = e.target.closest(".bd-rotate");
         if (handle && !drag && !turn) {
             const el = handle.closest(".bd-note");
@@ -503,6 +645,16 @@ function bdBindBoard() {
     });
 
     board.addEventListener("pointermove", (e) => {
+        if (thread && e.pointerId === thread.pid) {
+            if (!thread.moved && Math.hypot(e.clientX - thread.sx, e.clientY - thread.sy) < 6) return;
+            thread.moved = true;
+            const a = bdPinPoint(thread.from);
+            const live = document.getElementById("bdThreadLive");
+            if (a && live) live.setAttribute("d", bdThreadSvg(a, boardPoint(e)));
+            const over = noteAt(e);
+            setThreadTarget(over && over.id !== thread.from.id ? over : null);
+            return;
+        }
         if (turn && e.pointerId === turn.pid) {
             const note = bd.notes.get(turn.id);
             if (!note) return;
@@ -542,6 +694,18 @@ function bdBindBoard() {
     });
 
     const end = (e) => {
+        if (thread && e.pointerId === thread.pid) {
+            const t = thread, target = t.target;
+            setThreadTarget(null);
+            thread = null;
+            board.classList.remove("is-threading");
+            const live = document.getElementById("bdThreadLive");
+            if (live) live.removeAttribute("d");
+            if (e.type !== "pointerup") return;
+            if (target) bdAddThread(t.from, target);
+            else bdHint(t.moved ? "Отпусти нить на другой заметке" : "Потяни от кнопки к другой заметке, чтобы соединить их нитью");
+            return;
+        }
         if (turn && e.pointerId === turn.pid) {
             const t = turn;
             turn = null;
@@ -569,6 +733,11 @@ function bdBindBoard() {
 
     // Кнопки счётчика
     board.addEventListener("click", (e) => {
+        const hit = e.target.closest("[data-from]");
+        if (hit) {
+            if (confirm("Убрать эту нить?")) bdRemoveThread(hit.dataset.from, hit.dataset.to);
+            return;
+        }
         const btn = e.target.closest("[data-act]");
         if (!btn) return;
         const note = bd.notes.get(btn.closest(".bd-note").dataset.id);
@@ -680,6 +849,9 @@ function bdOpenEditor(note) {
             d.episode = bdClampInt(episodeEl.value, 1, 1);
         }
         close();
+        // Пока окно было открыто, заметку могли перенести или соединить нитью
+        const cur = note.id && bd.notes.get(note.id);
+        if (cur) { d.x = cur.data.x; d.y = cur.data.y; d.z = cur.data.z; d.links = cur.data.links; }
         bdCommit(note.id || crypto.randomUUID(), d);
         vibrate(10);
     };
