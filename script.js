@@ -3685,7 +3685,7 @@ function buildCommentFeedItem(c, mine, container) {
             </button>
         </div>
     `;
-    item.querySelector(".cf-avatar").textContent = name.slice(0, 1).toUpperCase();
+    item.querySelector(".cf-avatar").innerHTML = userAvatarHtml(name);
     item.querySelector(".cf-name").textContent = name;
     item.querySelector(".cf-text").textContent = c.comment;
     item.querySelector(".cf-title-name").textContent = m ? m[1] : c.title;

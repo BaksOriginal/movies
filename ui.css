@@ -4602,3 +4602,21 @@ html.pz-playing, body.pz-playing{ overflow: hidden; overscroll-behavior: none; }
 .pz-done-sub{ font-size: 13px; color: var(--text-dim); }
 .pz-done-actions{ display: flex; gap: 8px; margin-top: 6px; }
 .pz-done-actions .ui-pill{ height: 40px; padding: 0 18px; }
+
+/* ---------- Аватарки пользователей (см. USER_AVATARS в core.js) ---------- */
+.user-ava-svg{
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    overflow: hidden;
+    flex: none;
+}
+.shell-avatar:has(.user-ava-svg),
+.cf-avatar:has(.user-ava-svg),
+.duo-avatar:has(.user-ava-svg),
+.st-partner-ava:has(.user-ava-svg),
+.st-card-here:has(.user-ava-svg){
+    padding: 0;
+    background: none;
+}

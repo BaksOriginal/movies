@@ -191,6 +191,46 @@ function getUsernameFromEmail(email) {
     return email || "Аноним";
 }
 
+// Аватарки пользователей — нарисованы SVG прямо здесь, без файлов.
+// Myakish — маленький демонёнок, Asmoday — булочка. Без id внутри
+// (градиентов и т.п.), чтобы одну и ту же аватарку можно было вставлять
+// на страницу много раз.
+const USER_AVATARS = {
+    Asmoday: `<svg class="user-ava-svg" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" fill="#ffd3a1"/>
+        <circle cx="51" cy="11" r="10" fill="#ffe8c9" opacity=".7"/>
+        <path d="M13 31c-5-1.5-6.5-7-4-11.5C12 13 20 11 25 13.5c4-3.5 10-3.5 14 0C44 11 52 13 55 19.5c2.5 4.5 1 10-4 11.5V50a6 6 0 0 1-6 6H19a6 6 0 0 1-6-6z" fill="#c9772e"/>
+        <path d="M17 32.5c-4-1.2-5-5.4-3.2-8.7 2.2-4.2 8.2-5.6 12-3.6 3.4-3 8.6-3 12 0 3.8-2 9.8-.6 12 3.6 1.8 3.3.8 7.5-3.2 8.7V49a3.5 3.5 0 0 1-3.5 3.5h-23A3.5 3.5 0 0 1 17 49z" fill="#ffeac4"/>
+        <circle cx="25" cy="26.5" r="1.1" fill="#e2b77c"/><circle cx="38.5" cy="24.5" r="1.1" fill="#e2b77c"/><circle cx="44.5" cy="30.5" r="1" fill="#e2b77c"/>
+        <ellipse cx="22" cy="42" rx="3.6" ry="2.3" fill="#ff8fa3" opacity=".8"/>
+        <ellipse cx="42" cy="42" rx="3.6" ry="2.3" fill="#ff8fa3" opacity=".8"/>
+        <path d="M22.5 37.5q3-3.6 6 0M35.5 37.5q3-3.6 6 0" fill="none" stroke="#5a3214" stroke-width="2.3" stroke-linecap="round"/>
+        <path d="M29 42.5q1.5 2.2 3 0q1.5 2.2 3 0" fill="none" stroke="#5a3214" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`,
+    Myakish: `<svg class="user-ava-svg" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" fill="#2b1145"/>
+        <circle cx="32" cy="38" r="27" fill="#ff2e93" opacity=".2"/>
+        <path d="M17.5 25 13.5 9l12.5 9.5z" fill="#ff4f9a"/>
+        <path d="M46.5 25 50.5 9 38 18.5z" fill="#ff4f9a"/>
+        <circle cx="32" cy="37.5" r="19.5" fill="#b77bff"/>
+        <path d="M21.5 30.5l6.5 2M42.5 30.5l-6.5 2" stroke="#2b0d40" stroke-width="2.2" stroke-linecap="round"/>
+        <ellipse cx="25.5" cy="37.5" rx="3" ry="3.6" fill="#2b0d40"/>
+        <ellipse cx="38.5" cy="37.5" rx="3" ry="3.6" fill="#2b0d40"/>
+        <circle cx="26.7" cy="36.2" r="1.1" fill="#fff"/><circle cx="39.7" cy="36.2" r="1.1" fill="#fff"/>
+        <ellipse cx="21" cy="43.5" rx="3.4" ry="2.1" fill="#ff7ab8" opacity=".85"/>
+        <ellipse cx="43" cy="43.5" rx="3.4" ry="2.1" fill="#ff7ab8" opacity=".85"/>
+        <path d="M26.5 45q6 4.5 12-1" fill="none" stroke="#2b0d40" stroke-width="2" stroke-linecap="round"/>
+        <path d="M33.8 47l1.3 2.8 1.5-3.4z" fill="#fff"/>
+    </svg>`,
+};
+
+// Аватарка по имени: своя картинка или (для незнакомых) первая буква
+function userAvatarHtml(name) {
+    if (USER_AVATARS[name]) return USER_AVATARS[name];
+    const letter = String(name || "?").slice(0, 1).toUpperCase();
+    return letter.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
 // Вибро-отклик (используется в каталоге, играх и совместном просмотре)
 function vibrate(pattern) {
     if (navigator.vibrate) {

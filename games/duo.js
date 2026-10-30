@@ -558,13 +558,13 @@ function openDuoRoom(id) {
         const pScore = pKey ? room.series[pKey] || 0 : 0;
         playersEl.innerHTML = `
             <div class="duo-player is-me">
-                <span class="duo-avatar">${escapeGameText(duo.myName[0] || "?")}</span>
+                <span class="duo-avatar">${userAvatarHtml(duo.myName)}</span>
                 <span class="duo-player-body"><span class="duo-player-name"></span><span class="duo-player-sub">Ты${!playing && duo.ready ? " · готов(а)" : ""}</span></span>
             </div>
             <div class="duo-score"><b>${myScore}</b><i>:</i><b>${pScore}</b></div>
             <div class="duo-player is-partner${here ? " is-online" : ""}">
                 <span class="duo-player-body"><span class="duo-player-name"></span><span class="duo-player-sub">${!duo.connected ? "соединение…" : here ? (!playing && duo.partner.ready ? "готов(а)" : "в комнате") : !duo.partnerOnline ? "не в сети" : duo.partner && duo.partner.room ? "в другой игре" : "в разделе игр"}</span></span>
-                <span class="duo-avatar">${escapeGameText(pName[0] || "?")}<i class="duo-dot"></i></span>
+                <span class="duo-avatar">${userAvatarHtml(pName)}<i class="duo-dot"></i></span>
             </div>
             <div class="duo-quick">
                 <button type="button" class="ui-btn duo-quick-btn" id="duoEmojiBtn" aria-label="Отправить эмодзи" title="Эмодзи">😊</button>

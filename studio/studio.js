@@ -1036,7 +1036,7 @@ function stRenderGalleryPresence() {
         const here = card.querySelector(".st-card-here");
         const on = !!(st.partner && st.partner.d === card.dataset.id);
         here.hidden = !on;
-        here.textContent = on ? stPartnerName()[0] || "?" : "";
+        here.innerHTML = on ? userAvatarHtml(stPartnerName()) : "";
         here.title = on ? `${stPartnerName()} рисует здесь` : "";
     });
 }
@@ -1461,7 +1461,7 @@ function stRenderPartner() {
     const online = !!st.partner && st.connected;
     el.className = "st-partner" + (here ? " is-here" : online ? " is-online" : "");
     el.innerHTML = `
-        <span class="st-partner-ava">${stEsc(name[0] || "?")}<i></i></span>
+        <span class="st-partner-ava">${userAvatarHtml(name)}<i></i></span>
         <span class="st-partner-text">${here ? "рисует с тобой" : online ? "Позвать" : st.connected ? "не в студии" : "нет связи"}</span>
     `;
     el.title = here ? `${name} в этом рисунке` : online ? `Позвать ${name} в этот рисунок` : `${name} не в студии`;

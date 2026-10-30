@@ -320,7 +320,7 @@ function renderShellUser() {
     const box = shell.els.user;
     const name = currentUser ? getUsernameFromEmail(currentUser.email) : "";
     box.innerHTML = `
-        <div class="shell-avatar">${escapeShellText(name.slice(0, 1).toUpperCase())}</div>
+        <div class="shell-avatar">${userAvatarHtml(name)}</div>
         <div class="shell-user-name">${escapeShellText(name)}</div>
         <div class="shell-user-buttons"></div>
     `;
@@ -464,7 +464,7 @@ function openShellMoreSheet() {
     sheet.innerHTML = `
         <div class="shell-sheet-handle"></div>
         <div class="shell-sheet-user">
-            <div class="shell-avatar">${escapeShellText(name.slice(0, 1).toUpperCase())}</div>
+            <div class="shell-avatar">${userAvatarHtml(name)}</div>
             <div class="shell-user-name">${escapeShellText(name)}</div>
         </div>
         <div class="shell-sheet-grid"></div>
