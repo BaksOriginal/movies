@@ -343,7 +343,6 @@ body[data-section="pet"] .shell-main .container{ max-width: 1240px; }
 .sdk-keys-hint{ display: block; }
 
 /* Игры вдвоём: карточки в ряд, стол крупнее */
-.duo-cards{ grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .bg-table{ padding: 16px 24px; }
 .duo-room{ max-width: 960px; }
 .duo-lobby{ padding: 28px 32px; max-width: 620px; width: 100%; justify-self: center; }

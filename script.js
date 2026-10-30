@@ -2567,7 +2567,7 @@ function navigateFromShell(id) {
         case "add": resetScreenState(); showBatchAddTitlesScreen(); return true;
         case "online": resetScreenState(); showOnlineSearchScreen(); return true;
     }
-    return false; // w2g / games / studio — отдельные страницы
+    return false; // w2g / games / studio / board — отдельные страницы
 }
 
 // Диплинк с других страниц сайта (../#wishlist, ../#category:...) — оболочка

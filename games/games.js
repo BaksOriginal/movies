@@ -476,11 +476,9 @@ const GAMES_META = [
     { id: "puzzle", hue: 215, emoji: "🧩", title: "Пазл",                    desc: "Собери любой постер с сайта: 24, 54 или 96 деталей. Можно выбрать фильм или довериться случаю.", leaderboard: false, tileText: () => puzzleTileText(), start: () => showPuzzleMenu() }
 ];
 
-// Экран выбора игры — "карта": шестиугольные точки-уровни, соединённые
-// кривой пунктирной тропинкой. Рядом с каждой точкой — название и рекорд.
-// Тап по точке открывает окно игры с таблицей лидеров и кнопкой "Играть"
-// (см. showGameInfoModal). Раскладку считает layoutGamesMap(): на телефоне
-// тропинка петляет сверху вниз, на ПК — слева направо.
+// Экран выбора игры — звёздная карта со всеми играми (см. chart.js).
+// Тап по одиночной игре открывает окно с таблицей лидеров и кнопкой
+// "Играть" (см. showGameInfoModal), по игре вдвоём — её комнату.
 async function showGamesScreen() {
     if (!currentUser) { location.href = "../"; return; }
 
@@ -506,44 +504,7 @@ async function showGamesScreen() {
     if (!container.isConnected) return;
 
     container.innerHTML = "";
-    container.appendChild(buildDuoSection());
-    const soloTitle = document.createElement("h2");
-    soloTitle.className = "duo-section-title games-solo-title";
-    soloTitle.textContent = "Одиночные";
-    container.appendChild(soloTitle);
-    const map = document.createElement("div");
-    map.className = "games-map";
-    map.innerHTML = `
-        <svg class="games-map-path" aria-hidden="true">
-            <path class="games-map-trail-glow"></path>
-            <path class="games-map-trail"></path>
-        </svg>
-        <span class="games-map-flag games-map-flag-start">Старт</span>
-        <span class="games-map-flag games-map-flag-end">🏁</span>
-    `;
-    GAMES_META.forEach((game, i) => {
-        const node = document.createElement("button");
-        node.type = "button";
-        node.className = "ui-btn map-node";
-        node.style.setProperty("--h", game.hue);
-        node.style.setProperty("--i", i);
-        node.setAttribute("aria-label", game.title);
-        node.innerHTML = `
-            <span class="map-hex">
-                <span class="map-hex-inner"><span class="map-hex-emoji">${game.emoji}</span></span>
-                <span class="map-hex-num">${i + 1}</span>
-            </span>
-            <span class="map-label">
-                <span class="map-label-title"></span>
-                <span class="map-label-score">${buildGameTileScore(game)}</span>
-            </span>
-        `;
-        node.querySelector(".map-label-title").textContent = game.title;
-        node.onclick = () => showGameInfoModal(game.id);
-        map.appendChild(node);
-    });
-    container.appendChild(map);
-    initGamesMap(map);
+    container.appendChild(buildGamesChart());
 
     // Страницу перезагрузили, пока мы были в комнате игры вдвоём (мобильный
     // браузер так делает после переключения приложений) — возвращаемся туда
@@ -559,77 +520,6 @@ async function showGamesScreen() {
         const g = GAMES_META.find(x => x.id === play);
         if (g) g.start();
     }
-}
-
-// Расставляет точки карты и прокладывает между ними тропинку. Телефон —
-// зигзаг сверху вниз (подписи сбоку), ПК — зигзаг слева направо (подписи
-// под точками). Тропинка — плавные кривые Безье через центры шестиугольников.
-function layoutGamesMap(map) {
-    const nodes = [...map.querySelectorAll(".map-node")];
-    if (nodes.length === 0) return;
-    const horizontal = map.clientWidth >= 760;
-    map.classList.toggle("games-map-horizontal", horizontal);
-
-    const width = map.clientWidth;
-    const points = nodes.map((node, i) => {
-        let x, y;
-        if (horizontal) {
-            const step = width / nodes.length;
-            x = step * (i + 0.5);
-            y = i % 2 === 0 ? 120 : 250;
-        } else {
-            x = i % 2 === 0 ? width * 0.24 : width * 0.76;
-            y = 90 + i * 150;
-        }
-        node.style.left = x + "px";
-        node.style.top = y + "px";
-        node.classList.toggle("map-node-flip", !horizontal && i % 2 === 1);
-        return { x, y };
-    });
-
-    const height = horizontal ? 400 : points[points.length - 1].y + 110;
-    map.style.height = height + "px";
-
-    // Хвосты тропинки: от флажка "Старт" и до финиша
-    const first = points[0], last = points[points.length - 1];
-    const start = horizontal ? { x: 34, y: first.y - 80 } : { x: first.x + 40, y: 22 };
-    const end = horizontal ? { x: width - 26, y: last.y + 80 } : { x: last.x - 40, y: height - 24 };
-    const all = [start, ...points, end];
-
-    let d = `M ${all[0].x} ${all[0].y}`;
-    for (let i = 1; i < all.length; i++) {
-        const p0 = all[i - 1], p1 = all[i];
-        if (horizontal) {
-            const dx = (p1.x - p0.x) * 0.55;
-            d += ` C ${p0.x + dx} ${p0.y}, ${p1.x - dx} ${p1.y}, ${p1.x} ${p1.y}`;
-        } else {
-            const dy = (p1.y - p0.y) * 0.6;
-            d += ` C ${p0.x} ${p0.y + dy}, ${p1.x} ${p1.y - dy}, ${p1.x} ${p1.y}`;
-        }
-    }
-    const svg = map.querySelector(".games-map-path");
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.querySelectorAll("path").forEach(p => p.setAttribute("d", d));
-
-    const flagStart = map.querySelector(".games-map-flag-start");
-    const flagEnd = map.querySelector(".games-map-flag-end");
-    flagStart.style.left = start.x + "px";
-    flagStart.style.top = start.y + "px";
-    flagEnd.style.left = end.x + "px";
-    flagEnd.style.top = end.y + "px";
-}
-
-// Пересчитывает карту сразу и при ресайзе/повороте экрана, пока она есть на
-// странице — слушатель сам себя снимает, когда карта исчезла.
-let gamesMapResizeObserver = null;
-function initGamesMap(map) {
-    layoutGamesMap(map);
-    if (gamesMapResizeObserver) gamesMapResizeObserver.disconnect();
-    gamesMapResizeObserver = new ResizeObserver(() => {
-        if (map.isConnected) layoutGamesMap(map);
-        else gamesMapResizeObserver.disconnect();
-    });
-    gamesMapResizeObserver.observe(map);
 }
 
 // Строка рекордов на точке карты: свой рекорд и лидер
