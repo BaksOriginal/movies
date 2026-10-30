@@ -138,15 +138,6 @@ function thingSound(name) {
             retroBurst(ctx, t + 0.44, 0.04, { freq: 2400, q: 2, vol: 0.2 });
             retroThunk(ctx, t + 0.44, 170, 0.1, 0.18);
             break;
-        case "ring":    // негромкий звонок старого телефона
-            for (let k = 0; k < 2; k++) {
-                const at = t + k * 0.42;
-                for (let n = 0; n < 5; n++) {
-                    retroThunk(ctx, at + n * 0.055, 1250, 0.05, 0.035);
-                    retroThunk(ctx, at + n * 0.055 + 0.027, 980, 0.05, 0.03);
-                }
-            }
-            break;
         case "eject":
             retroBurst(ctx, t, 0.04, { freq: 2400, q: 2, vol: 0.16 });
             retroBurst(ctx, t + 0.05, 0.3, { freq: 1400, q: 1, vol: 0.05, sweep: 800 });

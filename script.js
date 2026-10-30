@@ -4377,15 +4377,6 @@ function createChatBubble(msg) {
         bubble.appendChild(heart);
     }
 
-    // Галочка у своих сообщений: ✓ отправлено, ✓✓ прочитано (см. live.js)
-    if (isMine) {
-        let tick = document.createElement("span");
-        tick.className = "chat-tick";
-        tick.dataset.created = msg.created_at || "";
-        chatPaintTick(tick);
-        bubble.appendChild(tick);
-    }
-
     // Долгое нажатие — открывает меню (ответить, а для своих сообщений — ещё редактировать/удалить)
     bubble.style.cursor = "pointer";
     attachChatLongPress(bubble, msg, isMine);
@@ -4690,7 +4681,6 @@ function renderChatMessages() {
     // Добавляем новые сообщения на их место, убираем удалённые и обновляем
     // текст отредактированных (см. syncChatBubbles в core.js)
     const addedNew = syncChatBubbles(box, chatMessages, createChatBubble, updateChatBubbleContent);
-    liveMarkOpenChatRead();
 
     // Прокручиваем вниз только если появились новые сообщения и пользователь
     // и так был у нижнего края (чтобы не сбивать чтение старых сообщений)

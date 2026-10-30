@@ -96,7 +96,6 @@ const shell = {
     section: null,
     subKey: null,
     els: {},
-    badges: {},
 };
 
 function isDesktopLayout() {
@@ -142,7 +141,6 @@ function initShell(opts) {
     renderShellUser();
     if (shell.opts.searchEl) setShellSearch(shell.opts.searchEl);
     initShellBackTrap();
-    if (typeof initSiteLive === "function") initSiteLive();
 }
 
 function destroyShell() {
@@ -275,7 +273,6 @@ function renderShellSidebar() {
     });
 
     highlightShellNav();
-    paintShellBadges();
 }
 
 function buildShellNavItem(id, label, iconHtml, count) {
@@ -306,7 +303,6 @@ function renderShellTabbar() {
         bar.appendChild(btn);
     });
     highlightShellNav();
-    paintShellBadges();
 }
 
 function renderShellActions() {
@@ -392,30 +388,6 @@ function setShellSection(section, subKey = null) {
     setShellBack(null);
     setShellTitle(SHELL_LABELS[section] || "");
     highlightShellNav();
-    if (typeof liveSetWhere === "function") liveSetWhere(section);
-}
-
-// Красный значок с числом у пункта меню и вкладки (например, новые сообщения)
-function setShellBadge(id, n) {
-    shell.badges[id] = n;
-    paintShellBadges();
-}
-
-function paintShellBadges() {
-    if (!shell.root) return;
-    Object.keys(shell.badges).forEach((id) => {
-        const n = shell.badges[id];
-        shell.root.querySelectorAll(`.shell-nav-item[data-nav="${id}"], .shell-tab[data-tab="${id}"]`).forEach((el) => {
-            let badge = el.querySelector(".shell-badge");
-            if (!n) { if (badge) badge.remove(); return; }
-            if (!badge) {
-                badge = document.createElement("span");
-                badge.className = "shell-badge";
-                el.appendChild(badge);
-            }
-            badge.textContent = n > 99 ? "99+" : n;
-        });
-    });
 }
 
 function highlightShellNav() {
