@@ -41,6 +41,8 @@ function buildHomeViewBar(onChange) {
     const hello = document.createElement("span");
     hello.className = "home-view-hello";
     hello.textContent = `Привет, ${getUsernameFromEmail(currentUser.email)} 👋`;
+    // На обычной главной приветствие уже есть в большом блоке ниже
+    if (homeView() !== "room") hello.style.visibility = "hidden";
     bar.appendChild(hello);
 
     const sound = document.createElement("button");
@@ -165,14 +167,14 @@ function buildRoomHome(onViewChange) {
     } : null });
     radio.classList.toggle("is-on", hasMusic && isMusicPlaying);
 
-    addObj({ id: "lamp", ar: "70/260", wide: [1, 37, 5], tall: [54, 45, 9], label: "Свет", html: ROOM_ART.lamp, go: () => {
+    addObj({ id: "lamp", ar: "70/260", wide: [1, 37, 5], tall: [51, 45, 9], label: "Свет", html: ROOM_ART.lamp, go: () => {
         lampOff = !lampOff;
         scene.classList.toggle("is-lamp-off", lampOff);
         try { localStorage.setItem(ROOM_LAMP_KEY, lampOff ? "1" : "0"); } catch (e) {}
         thingSound("switch");
     } });
 
-    const sofa = addObj({ id: "sofa", ar: "300/150", wide: [6, 47, 25], tall: [3, 46, 50], html: `${ROOM_ART.sofa}
+    const sofa = addObj({ id: "sofa", ar: "300/150", wide: [6, 47, 25], tall: [3, 46, 47], html: `${ROOM_ART.sofa}
         <span class="room-ava is-left">${userAvatarHtml("Myakish")}</span>
         <span class="room-ava is-right">${userAvatarHtml("Asmoday")}</span>` });
     sofa.setAttribute("aria-hidden", "true");
@@ -210,10 +212,10 @@ function buildRoomHome(onViewChange) {
     });
 
     addObj({ id: "table", ar: "240/90", wide: [8, 78, 25], tall: [3, 84, 49], html: ROOM_ART.table });
-    addObj({ id: "popcorn", ar: "70/90", wide: [10, 69, 5], tall: [3, 77, 10], label: "Будем смотреть", tag: "Планы", html: ROOM_ART.popcorn, go: go("wishlist", "soft") });
-    addObj({ id: "dice", ar: "1/1", wide: [17, 76, 2.8], tall: [17, 80.5, 7], label: "Рандомайзер", tag: "Рандом", html: ROOM_ART.dice, go: go("random", "tape") });
-    addObj({ id: "notebook", ar: "70/50", wide: [20.5, 76, 5.5], tall: [29, 80, 12], label: "Комментарии", tag: "Отзывы", html: ROOM_ART.notebook, go: go("comments", "paper") });
-    addObj({ id: "phone", ar: "90/70", wide: [26.5, 73, 5.5], tall: [41, 78.5, 10], label: "Чат", html: ROOM_ART.phone, go: go("chat", "knob") });
+    addObj({ id: "popcorn", ar: "70/90", wide: [10, 69, 5], tall: [5, 78.7, 10], label: "Будем смотреть", tag: "Планы", html: ROOM_ART.popcorn, go: go("wishlist", "soft") });
+    addObj({ id: "dice", ar: "1/1", wide: [17, 76, 2.8], tall: [17, 82.2, 7], label: "Рандомайзер", tag: "Рандом", html: ROOM_ART.dice, go: go("random", "tape") });
+    addObj({ id: "notebook", ar: "70/50", wide: [20.5, 76, 5.5], tall: [28, 81.5, 12], label: "Комментарии", tag: "Отзывы", html: ROOM_ART.notebook, go: go("comments", "paper") });
+    addObj({ id: "phone", ar: "90/70", wide: [26.5, 73, 5.5], tall: [41, 81.8, 10], label: "Чат", html: ROOM_ART.phone, go: go("chat", "knob") });
     addObj({ id: "box", ar: "150/120", wide: [63, 78, 11], tall: [54, 84, 18], label: "Просмотрено", html: ROOM_ART.box, go: go("watched", "tape") });
     addObj({ id: "easel", ar: "170/240", wide: [82, 67, 13], tall: [75, 81, 20], label: "Арт-студия", html: ROOM_ART.easel, go: go("studio", "soft") });
 
