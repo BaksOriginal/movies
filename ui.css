@@ -4741,3 +4741,708 @@ body.bd-page .hearts-background{ display: none; }
 .bd-editor-actions{ display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .bd-editor-actions .ui-pill{ height: 42px; padding: 0 18px; }
 .bd-delete{ margin-right: auto; background: rgba(229,53,79,0.16); border-color: rgba(229,53,79,0.5); color: #ff8a9d; }
+
+/* ---------- Каталог: полка с кассетами (vhs.js) ----------
+   Только статичная графика, без фильтров и постоянных анимаций */
+.vhs-toggle{
+    display: inline-flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+.vhs-toggle button{
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.vhs-toggle button.is-active{ background: var(--surface-3); color: var(--text); }
+.vhs-toggle-row{ display: flex; justify-content: center; margin: 6px 0 14px; }
+
+.vhs-shelves{
+    --spine-w: 58px;
+    --spine-h: 248px;
+    --plank: 16px;
+    display: grid;
+    gap: 18px;
+    margin-bottom: 14px;
+    text-align: left;
+}
+.vhs-plate{
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    max-width: 100%;
+    margin: 0 0 -1px 10px;
+    padding: 5px 12px 6px;
+    border-radius: 7px 7px 0 0;
+    border: 1px solid hsla(var(--h), 90%, 62%, 0.65);
+    border-bottom: 0;
+    background: hsl(var(--h) 45% 17%);
+    color: #fff;
+    font-size: 13px;
+}
+.vhs-plate b{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
+.vhs-plate span{ flex: none; font: 700 11px/1 ui-monospace, Consolas, monospace; color: hsl(var(--h) 90% 76%); }
+.vhs-shelf{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, var(--spine-w));
+    grid-auto-rows: calc(var(--spine-h) + var(--plank) + 10px);
+    justify-content: start;
+    column-gap: 3px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid #000;
+    /* Полка: тёмная задняя стенка и доска под каждым рядом */
+    background:
+        repeating-linear-gradient(to bottom,
+            transparent 0 calc(var(--spine-h) + 10px),
+            #7d5433 calc(var(--spine-h) + 10px) calc(var(--spine-h) + 12px),
+            #54351f calc(var(--spine-h) + 12px) calc(var(--spine-h) + var(--plank) + 6px),
+            #2a1a0f calc(var(--spine-h) + var(--plank) + 6px) calc(var(--spine-h) + var(--plank) + 10px)),
+        linear-gradient(90deg, rgba(0,0,0,0.45), transparent 8%, transparent 92%, rgba(0,0,0,0.45)),
+        #150e0a;
+}
+.vhs-spine{
+    position: relative;
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: var(--spine-w);
+    height: var(--spine-h);
+    margin-top: 10px;
+    padding: 7px 3px 8px;
+    border-radius: 3px 3px 1px 1px;
+    color: #fff;
+    overflow: hidden;
+    box-shadow: inset 2px 0 0 rgba(255,255,255,0.24), inset -3px 0 0 rgba(0,0,0,0.35), 0 -1px 0 rgba(255,255,255,0.08);
+    background: hsl(var(--h) 68% 36%);
+    transition: transform .12s ease;
+}
+.vhs-spine:hover, .vhs-spine:focus-visible{ transform: translateY(-8px); }
+.vhs-spine:active{ transform: translateY(-3px); }
+/* Рисунок зависит от категории */
+.vhs-spine.is-film{
+    background:
+        linear-gradient(hsl(var(--h) 90% 66%) 0 3px, transparent 3px 6px, hsl(var(--h) 90% 66%) 6px 8px, transparent 8px) 0 calc(100% - 26px) / 100% 8px no-repeat,
+        linear-gradient(170deg, hsl(var(--h) 72% 40%), hsl(var(--h) 72% 26%));
+}
+.vhs-spine.is-toon{
+    background:
+        radial-gradient(circle, rgba(255,255,255,0.2) 2.5px, transparent 3px) 0 0 / 12px 12px,
+        hsl(var(--h) 76% 43%);
+}
+.vhs-spine.is-tv{
+    background:
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0.09) 0 2px, transparent 2px 8px),
+        linear-gradient(hsl(var(--h) 60% 32%), hsl(var(--h) 66% 22%));
+}
+.vhs-spine.is-anime{
+    background:
+        radial-gradient(circle at 50% calc(100% - 44px), rgba(255,255,255,0.3) 0 16px, transparent 16.5px),
+        linear-gradient(hsl(var(--h) 70% 24%), hsl(var(--h) 78% 44%));
+}
+.vhs-box{
+    grid-column: span 2;
+    width: calc(var(--spine-w) * 2 + 3px);
+    background:
+        linear-gradient(90deg, rgba(0,0,0,0.3) 0 3px, transparent 3px calc(100% - 3px), rgba(0,0,0,0.3) calc(100% - 3px)),
+        repeating-linear-gradient(135deg, hsl(var(--h) 60% 27%) 0 10px, hsl(var(--h) 60% 22%) 10px 20px);
+    outline: 1px solid hsla(var(--h), 90%, 70%, 0.55);
+    outline-offset: -3px;
+}
+.vhs-brand{
+    flex: none;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: #f4f1e6;
+    color: #15121c;
+    font: 900 10px/1.2 ui-monospace, Consolas, monospace;
+    letter-spacing: .04em;
+}
+.vhs-marks{ flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.vhs-marks:empty{ display: none; }
+.vhs-mark{
+    display: grid;
+    place-items: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 3px;
+    border-radius: 3px;
+    font: 800 11px/1 var(--font-ui);
+    font-style: normal;
+}
+.vhs-mark.is-watched{ background: #3ddc84; color: #03220f; }
+.vhs-mark.is-wish{ background: #ffd15c; color: #3a2a00; }
+.vhs-mark.is-score{ background: #15121c; color: #ffd15c; }
+.vhs-mark.is-new{ background: #fff; color: #c5114d; font-size: 8.5px; }
+.vhs-name{
+    flex: 1;
+    min-height: 0;
+    align-self: center;
+    max-width: 100%;
+    writing-mode: vertical-rl;
+    overflow: hidden;
+    font-weight: 800;
+    font-size: 16px;
+    line-height: 1.15;
+    letter-spacing: .01em;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.65);
+}
+.vhs-name.is-long{ font-size: 12.5px; }
+.vhs-box .vhs-name{ font-size: 16px; }
+.vhs-year{ flex: none; font: 700 10.5px/1 ui-monospace, Consolas, monospace; color: rgba(255,255,255,0.9); text-shadow: 0 1px 1px rgba(0,0,0,0.6); }
+@media (max-width: 520px){
+    .vhs-shelves{ --spine-w: 45px; --spine-h: 206px; --plank: 13px; }
+    .vhs-shelf{ padding: 0 6px; column-gap: 2px; }
+    .vhs-name{ font-size: 14px; }
+    .vhs-name.is-long{ font-size: 11px; }
+    .vhs-brand{ font-size: 9px; padding: 1px 3px; }
+    .vhs-mark{ min-width: 18px; }
+    .vhs-year{ font-size: 9.5px; }
+}
+
+/* ---------- Карточка тайтла в стиле кассеты ---------- */
+.modal-content.title-sheet.is-vhs{
+    padding-top: 16px;
+    background:
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0.016) 0 1px, transparent 1px 4px),
+        #17141d;
+    border: 1px solid #38333f;
+}
+.vhs-tape{
+    position: relative;
+    margin-bottom: 14px;
+    padding: 10px 12px 12px;
+    border-radius: 10px 10px 16px 16px / 10px 10px 8px 8px;
+    background: linear-gradient(#25222c, #111016);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -3px 0 rgba(0,0,0,0.5), 0 8px 18px rgba(0,0,0,0.4);
+}
+.vhs-sticker{
+    display: grid;
+    gap: 1px;
+    padding: 0 10px 7px;
+    border-radius: 3px;
+    background: #f5f1e3;
+    color: #18141e;
+    overflow: hidden;
+}
+.vhs-sticker-band{ display: block; height: 9px; margin: 0 -10px 6px; background: linear-gradient(90deg, hsl(var(--h) 80% 50%) 0 60%, hsl(calc(var(--h) + 34) 85% 56%) 60% 82%, hsl(calc(var(--h) + 70) 85% 60%) 82%); }
+.vhs-sticker-title{
+    font: 700 21px/1.15 var(--font-display);
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.vhs-sticker-meta{ font: 700 10.5px/1.35 ui-monospace, Consolas, monospace; color: #5d5661; }
+.vhs-window{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 9px auto 0;
+    max-width: 280px;
+    padding: 5px 14px;
+    border-radius: 7px;
+    background: linear-gradient(#0a090d, #1b1a22);
+    border: 1px solid #000;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.vhs-reel{
+    flex: none;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, #111 0 4px, #e9e6da 4.5px 7px, transparent 7.5px),
+        conic-gradient(#d7d3c5 0 8%, transparent 8% 33%, #d7d3c5 33% 41%, transparent 41% 66%, #d7d3c5 66% 74%, transparent 74%),
+        #2b2520;
+    box-shadow: 0 0 0 5px #181312;
+}
+.vhs-reel.is-small{ width: 32px; height: 32px; box-shadow: 0 0 0 2px #181312; }
+.vhs-tape-strip{ flex: 1; height: 3px; background: #33291f; }
+
+.is-vhs .ts-title{ display: none; }
+.is-vhs .ts-poster{
+    position: relative;
+    border-radius: 3px;
+    border: 0;
+    box-shadow: 4px 0 0 hsl(var(--h) 60% 28%), 0 8px 18px rgba(0,0,0,0.5);
+}
+.is-vhs .ts-poster::after{
+    content: "VHS";
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    padding: 1px 4px;
+    background: #f4f1e6;
+    color: #15121c;
+    font: 900 9.5px/1.2 ui-monospace, Consolas, monospace;
+}
+.is-vhs .ts-meta{ color: hsl(var(--h) 85% 74%); font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+.is-vhs .ts-badge{ border-radius: 3px; }
+.is-vhs .ts-overview{
+    padding: 9px 12px;
+    border-left: 3px solid hsl(var(--h) 80% 55%);
+    background: rgba(255,255,255,0.03);
+    color: #d5cfdb;
+    font-size: 13.5px;
+}
+/* Кнопки — как клавиши видеомагнитофона */
+.is-vhs .ts-action{
+    border-radius: 4px;
+    border: 1px solid #000;
+    background: linear-gradient(#55525c, #34313a);
+    color: #f4f1e6;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 3px 0 #0a090d;
+    font-family: ui-monospace, Consolas, monospace;
+    font-weight: 700;
+}
+.is-vhs .ts-action:hover{ background: linear-gradient(#64606b, #3e3b45); }
+.is-vhs .ts-action:active{ transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 0 #0a090d; }
+
+/* ---------- Совместный просмотр: телевизор ---------- */
+.wp-tv{
+    position: relative;
+    margin: 24px 0 10px;
+    padding: 10px 10px 0;
+    border-radius: 18px;
+    background:
+        repeating-linear-gradient(92deg, rgba(0,0,0,0.13) 0 3px, transparent 3px 11px, rgba(255,200,140,0.05) 11px 13px, transparent 13px 21px),
+        linear-gradient(#5c3b24, #3b2415);
+    border: 1px solid #1d110a;
+    box-shadow: inset 0 1px 0 rgba(255,220,180,0.25), 0 14px 30px rgba(0,0,0,0.5);
+}
+/* Антенна */
+.wp-tv::before, .wp-tv::after{
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    width: 2px;
+    height: 28px;
+    background: linear-gradient(#d9d9e0, #6d6d76);
+    transform-origin: 50% 100%;
+}
+.wp-tv::before{ transform: rotate(-28deg); }
+.wp-tv::after{ transform: rotate(28deg); }
+.wp-tv .wp-player-container{
+    margin: 0;
+    border-radius: 22px / 26px;
+    border: 3px solid #0b0a0f;
+    box-shadow: 0 0 0 2px #2a1a10, inset 0 0 24px rgba(0,0,0,0.8);
+}
+.wp-tv-panel{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    padding: 0 8px;
+}
+.wp-tv-brand{ font: 800 12px/1 var(--font-display); letter-spacing: .1em; color: #f0d7b7; white-space: nowrap; }
+.wp-tv-grille{
+    flex: 1;
+    min-width: 0;
+    height: 15px;
+    background: repeating-linear-gradient(90deg, #160d07 0 2px, transparent 2px 5px);
+    opacity: .85;
+}
+.wp-tv-led{
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6e1216;
+    box-shadow: inset 0 0 1px rgba(0,0,0,0.8);
+}
+.wp-tv.is-playing .wp-tv-led{ background: #4dff91; box-shadow: 0 0 8px #4dff91; }
+.wp-tv-knob{
+    flex: none;
+    position: relative;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #cfcfd4, #75757d 60%, #3c3c42);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.wp-tv-knob::after{ content: ""; position: absolute; left: 50%; top: 2px; width: 2px; height: 7px; margin-left: -1px; background: #18181c; }
+.wp-tv-knob.is-turned{ transform: rotate(62deg); }
+@media (max-width: 520px){
+    .wp-tv{ padding: 6px 6px 0; border-radius: 13px; margin-top: 22px; }
+    .wp-tv-panel{ height: 30px; gap: 7px; }
+    .wp-tv .wp-player-container{ border-radius: 14px / 17px; border-width: 2px; }
+    .wp-tv-knob{ width: 16px; height: 16px; }
+}
+
+/* ---------- Телевизор: экран каналов (retro.js) ---------- */
+.retro-screen{ position: relative; display: block; overflow: hidden; background: #000; }
+.retro-screen canvas{ display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+/* Строки развёртки и затемнение к краям кинескопа */
+.retro-screen::after{
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        repeating-linear-gradient(to bottom, rgba(0,0,0,0.2) 0 1px, transparent 1px 3px),
+        radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.6) 100%);
+}
+.retro-osd{
+    position: absolute;
+    left: 5%;
+    top: 6%;
+    z-index: 1;
+    font: 800 clamp(9px, 3.4cqw, 22px)/1.1 ui-monospace, Consolas, monospace;
+    color: #4dff91;
+    text-shadow: 0 0 6px rgba(77,255,145,0.7), 1px 1px 0 #000;
+    opacity: 0;
+    pointer-events: none;
+}
+.retro-osd.is-on{ opacity: 1; }
+.retro-hint{
+    position: absolute;
+    left: 0; right: 0; bottom: 10%;
+    z-index: 1;
+    padding: 0 12px;
+    text-align: center;
+    font: 700 clamp(11px, 3cqw, 18px)/1.25 ui-monospace, Consolas, monospace;
+    color: #fff;
+    text-shadow: 0 1px 3px #000, 0 0 8px #000;
+    pointer-events: none;
+}
+.retro-hint:empty{ display: none; }
+
+/* ---------- Кассета ---------- */
+.retro-tape{
+    display: flex;
+    flex-direction: column;
+    gap: 7%;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 6% 7%;
+    border-radius: 6%;
+    background: linear-gradient(#2a2731, #121017);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), 0 3px 8px rgba(0,0,0,0.5);
+}
+.retro-tape-label{
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: linear-gradient(#ff2e93 0 22%, #f5f1e3 22%);
+    color: #18141e;
+    font: 800 clamp(7px, 1.1vw, 13px)/1 ui-monospace, Consolas, monospace;
+    letter-spacing: .08em;
+    padding-top: 12%;
+}
+.retro-tape-window{
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    gap: 6px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #08070b;
+}
+.retro-tape-window i{
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #16131a 0 2px, #e9e6da 2.5px 4px, #2b2520 4.5px);
+}
+.retro-tape-window b{ flex: 1; height: 2px; background: #33291f; }
+.retro-flying{ will-change: transform; }
+
+.retro-dialog{ width: min(460px, calc(100vw - 24px)); padding: 18px; display: grid; gap: 14px; background: #17141d; border: 1px solid #38333f; text-align: left; }
+.retro-dialog-tape{
+    padding: 12px;
+    border-radius: 12px 12px 18px 18px / 12px 12px 8px 8px;
+    background: linear-gradient(#25222c, #111016);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 10px 24px rgba(0,0,0,0.45);
+    display: grid;
+    gap: 10px;
+}
+.retro-dialog-sticker{ display: grid; gap: 7px; padding: 0 12px 12px; border-radius: 3px; background: #f5f1e3; overflow: hidden; }
+.retro-dialog-sticker > i{ display: block; height: 11px; margin: 0 -12px 3px; background: linear-gradient(90deg, #ff2e93 0 58%, #ff9a3d 58% 82%, #ffd15c 82%); }
+.retro-dialog-sticker label{ font: 800 14px/1.2 var(--font-display); color: #18141e; }
+.retro-dialog-sticker textarea{
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 7px 8px;
+    resize: vertical;
+    border: 0;
+    border-bottom: 2px solid #9d96a6;
+    border-radius: 0;
+    background: transparent;
+    color: #18141e;
+    font: 600 15px/1.35 ui-monospace, Consolas, monospace;
+    outline: none;
+}
+.retro-dialog-sticker textarea:focus{ border-bottom-color: #ff2e93; }
+.retro-dialog-sticker textarea::placeholder{ color: #76707e; }
+.retro-dialog .retro-tape-window{ max-width: 260px; margin: 0 auto; width: 100%; box-sizing: border-box; padding: 5px 16px; }
+.retro-dialog .retro-tape-window i{ width: 34px; height: 34px; background: radial-gradient(circle, #111 0 4px, #e9e6da 4.5px 6.5px, transparent 7px), conic-gradient(#d7d3c5 0 8%, transparent 8% 33%, #d7d3c5 33% 41%, transparent 41% 66%, #d7d3c5 66% 74%, transparent 74%), #2b2520; }
+.retro-dialog-actions{ display: flex; justify-content: flex-end; gap: 8px; }
+.retro-dialog-actions .ui-pill{ height: 42px; padding: 0 18px; }
+
+/* ---------- Совместный просмотр: экран, панель, кассета, свет ---------- */
+.wp-tv-screen{ position: relative; container-type: inline-size; }
+.wp-tv .retro-screen{
+    position: absolute;
+    inset: 3px;
+    z-index: 1;
+    border-radius: 19px / 23px;
+}
+.wp-tv.has-video .retro-screen{ display: none; }
+.wp-tv-knob{ all: unset; flex: none; box-sizing: border-box; position: relative; width: 22px; height: 22px; border-radius: 50%; cursor: pointer; background: radial-gradient(circle at 35% 30%, #cfcfd4, #75757d 60%, #3c3c42); box-shadow: 0 1px 2px rgba(0,0,0,0.6); transition: transform .12s ease; }
+.wp-tv-vol{ flex: none; width: 74px; height: 22px; margin: 0; padding: 0; accent-color: #f0d7b7; cursor: pointer; }
+.wp-tv.has-video .wp-tv-knob, .wp-tv.has-video .wp-tv-vol{ opacity: .35; pointer-events: none; }
+.wp-tv-slot{ flex: none; width: 64px; height: 8px; border-radius: 1px; background: #000; border: 1px solid #6b5a49; }
+.wp-tv-grille{ min-width: 12px; }
+.wp-deck-row{ display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.wp-cassette{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    padding: 6px 14px 6px 8px;
+    border-radius: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    font-weight: 800;
+    font-size: 14px;
+    text-align: left;
+    transition: background .15s ease;
+}
+.wp-cassette:hover{ background: var(--surface-3); }
+.wp-cassette-art{ flex: none; width: 74px; height: 46px; }
+.wp-cassette-text{ display: grid; gap: 1px; min-width: 0; }
+.wp-cassette-text small{ font-size: 11.5px; font-weight: 600; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-deck-btn{ flex: none; height: 44px; padding: 0 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-strong); font-size: 13px; font-weight: 800; color: var(--text); white-space: nowrap; }
+.wp-deck-btn[hidden]{ display: none; }
+.wp-deck-btn:hover{ background: var(--surface-3); }
+/* Выключатель света — только на ПК: на телефоне смотрят на весь экран */
+.wp-light-switch{ display: none; }
+@media (max-width: 520px){
+    .wp-tv-vol{ width: 54px; }
+    .wp-tv-slot{ width: 38px; }
+    .wp-tv-brand{ font-size: 10px; }
+    .wp-tv .retro-screen{ inset: 2px; border-radius: 12px / 15px; }
+    .wp-tv-knob{ width: 18px; height: 18px; }
+    .wp-cassette-art{ width: 58px; height: 36px; }
+}
+
+/* ---------- Главная: панель вида ---------- */
+.home-view-bar{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.home-view-hello{ margin-right: auto; font-size: 15px; font-weight: 700; color: var(--text-dim); }
+.home-view-sound{ width: 40px; height: 40px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); font-size: 17px; }
+.room-next{ margin-top: 14px; }
+
+/* ---------- Главная: комната ---------- */
+.room-scene{
+    --wall-a: #1d1630;
+    --wall-b: #120d20;
+    --floor-a: #2d1c14;
+    --floor-b: #170e09;
+    --floor-at: 68%;
+    --glow: rgba(255,200,120,0.2);
+    position: relative;
+    aspect-ratio: 1200 / 680;
+    overflow: hidden;
+    border-radius: var(--radius-l);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+    user-select: none;
+    -webkit-user-select: none;
+}
+.room-scene.is-morning{ --wall-a: #4b3a57; --wall-b: #322841; --floor-a: #4a2f1f; --glow: rgba(255,214,150,0.12); }
+.room-scene.is-day{ --wall-a: #5a4c6d; --wall-b: #403556; --floor-a: #54361f; --floor-b: #2c1b10; --glow: rgba(255,230,180,0.08); }
+.room-scene.is-evening{ --wall-a: #3b2548; --wall-b: #241733; --floor-a: #3a2316; --glow: rgba(255,180,100,0.2); }
+.room-wall{
+    position: absolute;
+    inset: 0 0 calc(100% - var(--floor-at)) 0;
+    background:
+        radial-gradient(38% 80% at 3% 62%, var(--glow), transparent 75%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 2px, transparent 2px 64px),
+        linear-gradient(var(--wall-a), var(--wall-b));
+}
+.room-floor{
+    position: absolute;
+    inset: var(--floor-at) 0 0 0;
+    background:
+        repeating-linear-gradient(90deg, rgba(0,0,0,0.25) 0 2px, transparent 2px 90px),
+        repeating-linear-gradient(to bottom, rgba(0,0,0,0.16) 0 1px, transparent 1px 34px),
+        linear-gradient(var(--floor-a), var(--floor-b));
+    box-shadow: inset 0 8px 14px rgba(0,0,0,0.5);
+}
+/* Свет выключен: всё в полумраке, горит только телевизор */
+.room-shade{
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    background: rgba(3,2,10,0.74);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+}
+.room-scene.is-lamp-off .room-shade{ opacity: 1; }
+.room-scene.is-lamp-off .room-tv{ z-index: 31; }
+.room-scene.is-lamp-off .room-lamp{ z-index: 31; }
+.room-scene.is-lamp-off .room-lamp-shade{ fill: #6e6250; }
+.room-obj{
+    position: absolute;
+    left: var(--wx);
+    top: var(--wy);
+    width: var(--ww);
+    display: block;
+    padding: 0;
+}
+.room-obj > svg{ display: block; width: 100%; height: 100%; overflow: visible; }
+.room-scene .room-obj:hover{ z-index: 35; }
+button.room-obj{ cursor: pointer; transition: transform .12s ease; }
+button.room-obj:hover{ transform: translateY(-3px) scale(1.03); }
+button.room-obj:active{ transform: scale(.98); }
+button.room-obj:focus-visible{ outline: 2px solid var(--pink-soft); outline-offset: 2px; }
+.room-rug{ z-index: 1; }
+.room-frame, .room-board, .room-calendar, .room-window{ z-index: 2; }
+.room-shelf{ z-index: 3; }
+.room-radio{ z-index: 4; }
+.room-lamp{ z-index: 4; }
+.room-sofa{ z-index: 4; }
+.room-arcade{ z-index: 4; }
+.room-tv{ z-index: 5; }
+.room-box{ z-index: 7; }
+.room-pet{ z-index: 7; }
+.room-table{ z-index: 8; }
+.room-popcorn, .room-dice, .room-notebook, .room-phone{ z-index: 9; }
+.room-easel{ z-index: 9; }
+.room-shelf-row:hover{ opacity: .82; }
+.room-radio.is-on{ filter: drop-shadow(0 0 6px rgba(255,226,154,0.85)); }
+.room-pet.is-frozen{ filter: saturate(.35) hue-rotate(170deg) brightness(1.15); }
+.room-pet-art{ display: block; width: 100%; height: 100%; }
+.room-pet-art svg{ display: block; width: 100%; height: 100%; }
+
+/* Подписи: на ПК при наведении, на сенсорных экранах всегда */
+.room-tag{
+    position: absolute;
+    left: 50%;
+    bottom: -4px;
+    z-index: 40;
+    transform: translate(-50%, 100%);
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(9,6,18,0.92);
+    border: 1px solid var(--border-strong);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .1s ease;
+}
+.room-obj:hover > .room-tag, .room-obj:focus-visible > .room-tag{ opacity: 1; }
+.room-tv:hover > .room-tag{ opacity: 1; }
+@media (hover: none){
+    .room-tag{ opacity: .94; font-size: 9.5px; padding: 1px 4px; bottom: 0; transform: translate(-50%, 55%); }
+    .room-board .room-tag, .room-frame .room-tag, .room-calendar .room-tag{ transform: translate(-50%, 35%); }
+}
+
+/* Окно: небо зависит от времени суток */
+.room-window{ border: clamp(4px, .7vw, 9px) solid #3f2a18; border-radius: 3px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); box-sizing: border-box; }
+.room-window::before, .room-window::after{ content: ""; position: absolute; z-index: 2; background: #3f2a18; }
+.room-window::before{ left: 50%; top: 0; bottom: 0; width: clamp(3px, .45vw, 6px); margin-left: -2px; }
+.room-window::after{ top: 42%; left: 0; right: 0; height: clamp(3px, .45vw, 6px); }
+.room-sky{ position: absolute; inset: 0; overflow: hidden; background: linear-gradient(#060a24, #1b1747 70%, #33245f); }
+.room-sun{ position: absolute; left: 62%; top: 16%; width: 20%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 62% 38%, #f3f1ff 0 58%, transparent 60%); }
+.room-town{
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 34%;
+    background:
+        radial-gradient(circle, #f5c86a 0 1px, transparent 1.5px) 3px 5px / 11px 9px,
+        linear-gradient(90deg, #0a0a1c 0 16%, #111128 16% 34%, #0a0a1c 34% 56%, #111128 56% 74%, #0a0a1c 74%);
+    clip-path: polygon(0 34%, 16% 34%, 16% 8%, 34% 8%, 34% 44%, 56% 44%, 56% 0, 74% 0, 74% 28%, 100% 28%, 100% 100%, 0 100%);
+}
+.is-morning .room-sky{ background: linear-gradient(#7fa8d8, #f3c6b2 80%); }
+.is-morning .room-sun{ left: 20%; top: 46%; background: #fff0c4; box-shadow: 0 0 18px #ffe7ad; }
+.is-day .room-sky{ background: linear-gradient(#58a7e8, #bce3f7); }
+.is-day .room-sun{ left: 60%; top: 13%; background: #fff4bb; box-shadow: 0 0 18px #fff0a6; }
+.is-evening .room-sky{ background: linear-gradient(#332055, #b7537a 58%, #f7a55b); }
+.is-evening .room-sun{ left: 16%; top: 50%; background: #ffd47f; box-shadow: 0 0 18px #ffc266; }
+.is-morning .room-town, .is-day .room-town, .is-evening .room-town{ background: linear-gradient(90deg, #252a42 0 16%, #31365a 16% 34%, #252a42 34% 56%, #31365a 56% 74%, #252a42 74%); }
+
+/* Диван и аватарки */
+.room-ava{ position: absolute; top: 12%; width: 25%; aspect-ratio: 1; }
+.room-ava.is-left{ left: 21%; }
+.room-ava.is-right{ right: 21%; }
+
+/* Телевизор в комнате */
+.room-tv-screen{
+    position: absolute;
+    left: 5.26%;
+    top: 17.1%;
+    width: 55.8%;
+    height: 53.6%;
+    border-radius: 10% / 13%;
+    container-type: inline-size;
+}
+.room-tv-screen.ui-btn{ display: block; overflow: hidden; padding: 0; background: #000; cursor: pointer; }
+.room-tv-screen:hover{ box-shadow: 0 0 0 2px rgba(255,255,255,0.35); }
+.room-knob{
+    position: absolute;
+    left: 65%;
+    width: 8.2%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: linear-gradient(90deg, transparent 46%, #17171b 46% 54%, transparent 54%) 50% 10% / 100% 42% no-repeat, radial-gradient(circle at 35% 30%, #dcdce0, #75757d 60%, #3c3c42);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.7);
+    cursor: pointer;
+    transition: transform .12s ease;
+}
+/* Запас вокруг мелких ручек и кассеты, чтобы легко попасть пальцем */
+.room-knob::after, .room-cassette::after{ content: ""; position: absolute; inset: -6px; }
+.room-knob.is-ch{ top: 19%; }
+.room-knob.is-vol{ top: 32%; }
+.room-sound-mark{ position: absolute; left: 66%; top: 45%; font-size: clamp(9px, 1.1vw, 15px); line-height: 1; pointer-events: none; }
+.room-cassette{
+    position: absolute;
+    left: 80%;
+    top: 67.3%;
+    width: 18%;
+    height: 17.6%;
+    cursor: pointer;
+    transition: transform .12s ease;
+}
+.room-cassette:hover{ transform: translateY(-5px) rotate(-2deg); }
+.room-cassette .retro-tape-window{ padding: 1px 3px; gap: 2px; }
+.room-cassette .retro-tape-window i{ width: 7px; height: 7px; background: #e9e6da; }
+.room-cassette .retro-tape-label{ font-size: clamp(5px, .62vw, 8.5px); }
+
+/* Телефон: своя компоновка и пол выше */
+@media (max-width: 760px){
+    .room-scene{ aspect-ratio: 390 / 680; --floor-at: 40%; }
+    .room-obj{ left: var(--tx); top: var(--ty); width: var(--tw); }
+    .room-shelf{ z-index: 6; }
+    .room-radio{ z-index: 7; }
+    .room-cassette .retro-tape-label{ font-size: 5px; letter-spacing: 0; }
+    .room-cassette .retro-tape-window i{ width: 5px; height: 5px; }
+    .room-window{ border-width: 3px; }
+    .room-sound-mark{ font-size: 9px; }
+}

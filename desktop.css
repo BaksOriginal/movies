@@ -284,8 +284,15 @@ body[data-section="w2g"] #app > h1{ margin: 0 0 12px; }
    и без этого все блоки под ним съезжали на ряд выше */
 body[data-section="w2g"] #watchPartyStatusBar{ grid-row: 2; }
 body[data-section="w2g"] #watchPartyJoinBanner{ grid-row: 3; }
-body[data-section="w2g"] #watchPartyPlayerContainer{ grid-row: 4; }
-body[data-section="w2g"] .wp-url-row{ grid-row: 5; }
+body[data-section="w2g"] #watchPartyTv{
+    grid-row: 4;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+body[data-section="w2g"] #watchPartyTv .wp-tv-panel{ flex: none; }
+body[data-section="w2g"] .wp-tv-screen{ flex: 1; min-height: 0; }
+body[data-section="w2g"] .wp-deck-row{ grid-row: 5; }
 body[data-section="w2g"] #watchPartyNote{ grid-row: 6; }
 body[data-section="w2g"] .wp-player-container{
     aspect-ratio: auto;
@@ -391,3 +398,31 @@ body[data-section="pet"] .shell-main .container{ max-width: 1240px; }
 .bs-area.is-place .bs-dock{ align-self: center; }
 .bs-area.is-place .bs-fleet{ justify-content: flex-start; }
 .bs-area.is-place .bs-tools{ justify-content: flex-start; }
+
+/* ---------- Совместный просмотр: выключатель света ---------- */
+.wp-light-switch{ display: inline-flex; align-items: center; gap: 8px; }
+.wp-light-switch i{
+    display: block;
+    width: 13px;
+    height: 22px;
+    border-radius: 3px;
+    background: linear-gradient(#f4f1e6 0 50%, #a8a39a 50%);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+}
+body.wp-lights-off .wp-light-switch i{ background: linear-gradient(#a8a39a 0 50%, #f4f1e6 50%); }
+body.wp-lights-off, html:has(body.wp-lights-off){ background: #020104; }
+body.wp-lights-off .shell-sidebar,
+body.wp-lights-off .shell-topbar,
+body.wp-lights-off .hearts-background,
+body.wp-lights-off[data-section="w2g"] #app > *:not(#watchPartyTv):not(.wp-deck-row){
+    opacity: .1;
+    animation: none;
+    transition: opacity .35s ease;
+}
+body.wp-lights-off[data-section="w2g"] #app > .wp-swipe-wrap:hover,
+body.wp-lights-off .shell-sidebar:hover,
+body.wp-lights-off .shell-topbar:hover{ opacity: .9; }
+body.wp-lights-off .wp-deck-row{ opacity: .35; transition: opacity .2s ease; }
+body.wp-lights-off .wp-deck-row:hover{ opacity: 1; }
+body.wp-lights-off .wp-tv{ box-shadow: 0 0 110px rgba(130,165,255,0.2), 0 14px 30px rgba(0,0,0,0.5); }
+body.wp-lights-off .shell-main, body.wp-lights-off .shell-main .container{ background: transparent; }

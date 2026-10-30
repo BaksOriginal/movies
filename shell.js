@@ -508,6 +508,15 @@ function openShellMoreSheet() {
         music.onclick = () => { toggleBgMusic(); paint(); };
         row.appendChild(music);
     }
+    if (typeof thingSound === "function") {
+        const things = document.createElement("button");
+        things.type = "button";
+        things.className = "shell-sheet-pill";
+        const paintThings = () => { things.innerHTML = `<span>${thingsMuted() ? "🔇 Звуки вещей" : "🔊 Звуки вещей"}</span>`; };
+        paintThings();
+        things.onclick = () => { setThingsMuted(!thingsMuted()); paintThings(); thingSound("switch"); };
+        row.appendChild(things);
+    }
     const logout = document.createElement("button");
     logout.type = "button";
     logout.className = "shell-sheet-pill shell-sheet-pill-danger";

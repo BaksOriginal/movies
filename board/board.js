@@ -388,6 +388,7 @@ function bdAddThread(from, to) {
     const links = from.data.links.filter(id => bd.notes.has(id));
     if (links.length >= BD_LINKS_MAX) { bdHint("У этой заметки слишком много нитей"); return; }
     vibrate(10);
+    thingSound("pin");
     bdCommit(from.id, Object.assign({}, from.data, { links: [...links, to.id] }));
 }
 
@@ -726,7 +727,7 @@ function bdBindBoard() {
             return;
         }
         bd.dragId = null;
-        if (note) bdCommit(note.id, note.data);
+        if (note) { thingSound("paper"); bdCommit(note.id, note.data); }
     };
     board.addEventListener("pointerup", end);
     board.addEventListener("pointercancel", end);
@@ -747,6 +748,7 @@ function bdBindBoard() {
         else if (btn.dataset.act === "season") { data.season += 1; data.episode = 1; }
         else if (btn.dataset.act === "back" && data.episode > 1) data.episode -= 1;
         vibrate(8);
+        thingSound("knob");
         bdCommit(note.id, data);
     });
 }
@@ -854,6 +856,7 @@ function bdOpenEditor(note) {
         if (cur) { d.x = cur.data.x; d.y = cur.data.y; d.z = cur.data.z; d.links = cur.data.links; }
         bdCommit(note.id || crypto.randomUUID(), d);
         vibrate(10);
+        thingSound("pin");
     };
     const del = $("#bdDelete");
     if (del) del.onclick = async () => {

@@ -478,6 +478,72 @@ async function createWPCustomIframePlayer(mountEl, src) {
     };
 }
 
+// ---------- Телевизор: каналы, кассета ----------
+let watchPartyRetroTv = null;
+
+function mountWatchPartyTv(idleEl, panel) {
+    const tv = mountRetroTv(idleEl);
+    watchPartyRetroTv = tv;
+    tv.setHint("Вставьте кассету");
+    const knob = panel.querySelector("#wpTvChannel");
+    const volume = panel.querySelector("#wpTvVolume");
+    const paint = () => { knob.style.transform = `rotate(${tv.channelIndex() * 60 - 60}deg)`; };
+    tv.onChange(paint);
+    paint();
+    knob.onclick = () => { thingSound("knob"); tv.next(); };
+    volume.value = Math.round(retroVolume() * 100);
+    volume.oninput = () => setRetroVolume(volume.value / 100);
+    // Браузер разрешает звук только после первого действия пользователя
+    const arm = () => {
+        document.removeEventListener("pointerdown", arm, true);
+        if (watchPartyRetroTv === tv && !watchPartyPlayer) tv.setSound(true);
+    };
+    document.addEventListener("pointerdown", arm, true);
+    // Кассету вставили на главной — она доезжает до видика уже здесь
+    let pending = null;
+    try {
+        pending = sessionStorage.getItem(RETRO_PENDING_KEY);
+        sessionStorage.removeItem(RETRO_PENDING_KEY);
+    } catch (e) {}
+    if (pending) setTimeout(() => insertWatchPartyTape(pending), 900);
+}
+
+function setWatchPartyTvHasVideo(has) {
+    const tv = document.getElementById("watchPartyTv");
+    if (tv) tv.classList.toggle("has-video", has);
+    if (watchPartyRetroTv) {
+        if (has) watchPartyRetroTv.setSound(false);
+        watchPartyRetroTv.setPaused(has);
+    }
+    const eject = document.getElementById("wpEjectBtn");
+    if (eject) eject.hidden = !has;
+    const art = document.getElementById("wpCassetteArt");
+    if (art) art.style.opacity = has ? ".35" : "";
+    const title = document.getElementById("wpCassetteTitle");
+    if (title) title.textContent = has ? "Сменить кассету" : "Вставить кассету";
+}
+
+function insertWatchPartyTape(value) {
+    if (!parseWatchPartyUrl(value)) {
+        showWPStatusNote("⚠️ Ссылка не распознана. Подойдут YouTube, Rutube, прямые ссылки на .mp4/.webm/.m3u8 или код плеера <iframe>");
+        return;
+    }
+    cassetteFlyInto(document.getElementById("wpCassetteArt"), document.getElementById("wpTvSlot"), () => {
+        loadWatchPartySource(value, { initialTime: 0, autoplay: false, announce: true });
+    });
+}
+
+function ejectWatchPartyTape() {
+    thingSound("eject");
+    if (watchPartyPlayer) { try { watchPartyPlayer.destroy(); } catch (e) {} watchPartyPlayer = null; }
+    const container = document.getElementById("watchPartyPlayerContainer");
+    if (container) container.innerHTML = "";
+    watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 };
+    setWatchPartyTvHasVideo(false);
+    trackWPPresence();
+    renderWPStatusBar();
+}
+
 // ---------- Загрузка источника (своя или пришедшая от партнёра) ----------
 async function loadWatchPartySource(rawUrl, opts) {
     opts = opts || {};
@@ -489,7 +555,7 @@ async function loadWatchPartySource(rawUrl, opts) {
 
     const container = document.getElementById("watchPartyPlayerContainer");
     if (!container) return;
-    container.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Загружаем видео...</p>';
+    container.innerHTML = "";
 
     if (watchPartyPlayer) {
         try { watchPartyPlayer.destroy(); } catch (e) {}
@@ -508,7 +574,9 @@ async function loadWatchPartySource(rawUrl, opts) {
     }
 
     if (!player) {
-        container.innerHTML = '<p style="text-align:center;color:var(--pink-soft);padding:40px 0;">Не удалось загрузить видео.</p>';
+        container.innerHTML = "";
+        setWatchPartyTvHasVideo(false);
+        showWPStatusNote("⚠️ Не удалось загрузить видео с этой кассеты");
         return;
     }
 
@@ -523,6 +591,7 @@ async function loadWatchPartySource(rawUrl, opts) {
     player.onSeek = handleLocalWPSeek;
 
     watchPartyPlayer = player;
+    setWatchPartyTvHasVideo(true);
     const initialTime = opts.initialTime || 0;
     watchPartySelfState = {
         url: rawUrl,
@@ -584,7 +653,13 @@ function broadcastWP(type, extra) {
     });
 }
 
+function renderWatchPartyTvLed() {
+    const tv = document.getElementById("watchPartyTv");
+    if (tv) tv.classList.toggle("is-playing", !!watchPartySelfState.playing);
+}
+
 async function trackWPPresence() {
+    renderWatchPartyTvLed();
     if (!watchPartyChannel || !currentUser) return;
     try {
         await watchPartyChannel.track({
@@ -620,6 +695,7 @@ function handleRemoteWPPayload(payload) {
             watchPartyPlayer.play();
         });
         watchPartySelfState.playing = true;
+        renderWatchPartyTvLed();
         showWPStatusNote(senderName + " нажал(а) ▶️ Play");
     } else if (payload.type === "pause") {
         applyRemoteWP(() => {
@@ -627,6 +703,7 @@ function handleRemoteWPPayload(payload) {
             watchPartyPlayer.seekTo(payload.time || 0);
         });
         watchPartySelfState.playing = false;
+        renderWatchPartyTvLed();
         showWPStatusNote(senderName + " поставил(а) ⏸ на паузу");
     } else if (payload.type === "seek") {
         applyRemoteWP(() => watchPartyPlayer.seekTo(payload.time || 0));
@@ -742,6 +819,7 @@ function initWatchPartyChannel() {
                 if (watchPartyPlayer && watchPartySelfState.playing) {
                     applyRemoteWP(() => watchPartyPlayer.pause());
                     watchPartySelfState.playing = false;
+                    renderWatchPartyTvLed();
                 }
                 closeWatchPartyPeerConnectionOnly(); // сам звонок разорвался вместе с партнёром — сохраняем состояние наших кнопок mic/cam, но чистим RTC
                 showWPStatusNote("⚠️ Партнёр отключился — видео поставлено на паузу");
@@ -793,6 +871,8 @@ function initWatchPartyChannel() {
 }
 
 function leaveWatchPartyScreen() {
+    document.body.classList.remove("wp-lights-off");
+    if (watchPartyRetroTv) { watchPartyRetroTv.destroy(); watchPartyRetroTv = null; }
     isWatchPartyScreenOpen = false;
     if (watchPartyHeartbeat) { clearInterval(watchPartyHeartbeat); watchPartyHeartbeat = null; }
     if (watchPartyLeaveTimer) { clearTimeout(watchPartyLeaveTimer); watchPartyLeaveTimer = null; }
@@ -1941,47 +2021,6 @@ function renderWatchPartyChatMessages() {
     }
 }
 
-// ---------- Модалка вставки кода стороннего плеера (<iframe>) ----------
-function showWPIframeModal() {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.id = "wpIframeModal";
-    overlay.innerHTML = `
-        <div class="modal-content">
-            <h3 style="text-align: center; margin-bottom: 15px;">🔗 Вставить код плеера</h3>
-            <form class="modal-form" id="wpIframeForm">
-                <textarea id="wpIframeInput" rows="5" placeholder='<iframe src="..." width="640" height="360"></iframe>' style="width:100%; resize:vertical; font-family:monospace; font-size:13px; box-sizing:border-box;" required></textarea>
-                <div class="modal-buttons">
-                    <button type="submit" class="btn-save">Загрузить</button>
-                    <button type="button" class="btn-cancel" id="wpIframeCancel">Отмена</button>
-                </div>
-            </form>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const closeModal = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
-    overlay.querySelector("#wpIframeCancel").onclick = closeModal;
-
-    const textarea = overlay.querySelector("#wpIframeInput");
-    textarea.focus();
-
-    overlay.querySelector("#wpIframeForm").onsubmit = (e) => {
-        e.preventDefault();
-        const html = textarea.value.trim();
-        if (!html) return;
-
-        if (!extractIframeSrc(html)) {
-            alert("Не нашлось тега <iframe> с атрибутом src. Проверьте и вставьте код плеера целиком.");
-            return;
-        }
-
-        closeModal();
-        loadWatchPartySource(html, { initialTime: 0, autoplay: false, announce: true });
-    };
-}
-
 // ---------- Экран совместного просмотра ----------
 async function showWatchPartyScreen() {
     if (!currentUser) { location.href = "../"; return; }
@@ -2020,46 +2059,50 @@ async function showWatchPartyScreen() {
     let playerContainer = document.createElement("div");
     playerContainer.id = "watchPartyPlayerContainer";
     playerContainer.className = "wp-player-container";
-    playerContainer.innerHTML = '<p style="text-align:center;color:var(--text-faint);padding:40px 0;">Вставьте ссылку ниже, чтобы начать</p>';
-    app.appendChild(playerContainer);
+    // Плеер стоит в корпусе старого телевизора. Пока кассеты нет, на экране
+    // каналы (retro.js); лампочка горит, пока идёт видео
+    let tv = document.createElement("div");
+    tv.id = "watchPartyTv";
+    tv.className = "wp-tv";
+    let tvScreen = document.createElement("div");
+    tvScreen.className = "wp-tv-screen";
+    tvScreen.appendChild(playerContainer);
+    let tvIdle = document.createElement("div");
+    tvScreen.appendChild(tvIdle);
+    tv.appendChild(tvScreen);
+    let tvPanel = document.createElement("div");
+    tvPanel.className = "wp-tv-panel";
+    tvPanel.innerHTML = `
+        <span class="wp-tv-brand">愛-TV</span>
+        <span class="wp-tv-grille"></span>
+        <span class="wp-tv-slot" id="wpTvSlot"></span>
+        <span class="wp-tv-led"></span>
+        <button type="button" class="wp-tv-knob" id="wpTvChannel" aria-label="Следующий канал" title="Следующий канал"></button>
+        <input type="range" class="wp-tv-vol" id="wpTvVolume" min="0" max="100" aria-label="Громкость телевизора" title="Громкость телевизора">
+    `;
+    tv.appendChild(tvPanel);
+    app.appendChild(tv);
+    mountWatchPartyTv(tvIdle, tvPanel);
 
     // Строка вставки ссылки + кнопка запуска рядом с ней
-    let urlRow = document.createElement("div");
-    urlRow.className = "chat-input-row wp-url-row";
-    let urlInput = document.createElement("input");
-    urlInput.type = "text";
-    urlInput.id = "wpUrlInput";
-    urlInput.className = "chat-text-input";
-    urlInput.placeholder = "Ссылка: YouTube, Rutube";
-    urlInput.autocomplete = "off";
-    // Кнопка вставки кода стороннего плеера (целиком <iframe>) — стоит левее
-    // кнопки запуска, тот же стиль иконки, что у кнопки со стикерами в чате.
-    let wpIframeBtn = document.createElement("button");
-    wpIframeBtn.id = "wpIframeBtn";
-    wpIframeBtn.type = "button";
-    wpIframeBtn.className = "chat-sticker-btn";
-    wpIframeBtn.title = "Вставить код плеера (iframe)";
-    wpIframeBtn.textContent = "🔗";
-    wpIframeBtn.onclick = () => showWPIframeModal();
-
-    let loadBtn = document.createElement("button");
-    loadBtn.id = "wpLoadBtn";
-    loadBtn.type = "button";
-    loadBtn.className = "chat-send-btn"; // тот же стиль, что и у кнопки отправки сообщений в чат
-    loadBtn.textContent = "➤"; // тот же эмодзи, что и у кнопки отправки сообщений в чат
-    const doLoad = () => {
-        const val = urlInput.value.trim();
-        if (!val) return;
-        loadWatchPartySource(val, { initialTime: 0, autoplay: false, announce: true });
+    // Кассета вместо строки ссылки: окно вставки открывается по нажатию
+    let deckRow = document.createElement("div");
+    deckRow.className = "wp-deck-row";
+    deckRow.innerHTML = `
+        <button type="button" class="ui-btn wp-cassette" id="wpCassetteBtn">
+            <span class="wp-cassette-art" id="wpCassetteArt">${retroCassetteHtml("ВИДЕО")}</span>
+            <span class="wp-cassette-text"><span id="wpCassetteTitle">Вставить кассету</span><small id="wpCassetteSub">YouTube, Rutube, файл или код плеера</small></span>
+        </button>
+        <button type="button" class="ui-btn wp-deck-btn" id="wpEjectBtn" hidden>⏏ Вынуть</button>
+        <button type="button" class="ui-btn wp-deck-btn wp-light-switch" id="wpLightSwitch"><i></i>Свет</button>
+    `;
+    deckRow.querySelector("#wpCassetteBtn").onclick = () => openCassetteDialog(insertWatchPartyTape);
+    deckRow.querySelector("#wpEjectBtn").onclick = ejectWatchPartyTape;
+    deckRow.querySelector("#wpLightSwitch").onclick = () => {
+        thingSound("switch");
+        document.body.classList.toggle("wp-lights-off");
     };
-    loadBtn.onclick = doLoad;
-    urlInput.onkeydown = (e) => {
-        if (e.key === "Enter") { e.preventDefault(); doLoad(); }
-    };
-    urlRow.appendChild(urlInput);
-    urlRow.appendChild(wpIframeBtn);
-    urlRow.appendChild(loadBtn);
-    app.appendChild(urlRow);
+    app.appendChild(deckRow);
 
     let note = document.createElement("div");
     note.id = "watchPartyNote";

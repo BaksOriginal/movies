@@ -1235,6 +1235,8 @@ function refreshUIFromState() {
         }
     });
 
+    refreshVhsMarks();
+
     // 3. Экраны "Просмотрено"/"Будем смотреть" строятся "на лету" из текущего
     // состояния, а не из статичного списка — поэтому точечного патча иконок
     // (шаг 2) им недостаточно: тайтл после изменения может должен переехать в
@@ -2198,6 +2200,22 @@ async function showHome() {
     home.className = "home";
     app.appendChild(home);
 
+    // ---- Комната: предметы ведут в разделы (см. room.js). Ниже — ближайший
+    // просмотр, поиск на телефоне и те же ленты постеров, что на обычной главной.
+    if (homeView() === "room") {
+        home.appendChild(buildRoomHome(() => showHome()));
+        const next = buildHomeNextCard();
+        next.classList.add("room-next");
+        home.appendChild(next);
+        const roomSearch = document.createElement("div");
+        roomSearch.className = "home-search only-mobile";
+        roomSearch.appendChild(buildSearchBar());
+        home.appendChild(roomSearch);
+        appendHomeRails(home);
+        return;
+    }
+    home.appendChild(buildHomeViewBar(() => showHome()));
+
     // ---- Верх: приветствие + ближайший просмотр | счётчики и поиск ----
     const top = document.createElement("div");
     top.className = "home-top";
@@ -2270,7 +2288,11 @@ async function showHome() {
         home.appendChild(buildHomeWatchPartyButton());
     }
 
-    // ---- Ленты постеров ----
+    appendHomeRails(home);
+}
+
+// Ленты постеров внизу главной
+function appendHomeRails(home) {
     const recentlyAdded = getRecentlyAddedTitles();
     if (recentlyAdded.length > 0) {
         home.appendChild(buildUiSection("Новое на сайте", buildPosterRail(recentlyAdded.slice(0, 24), { badge: "NEW" }),
@@ -3230,6 +3252,7 @@ function showActionMenu(itemText) {
 
     overlay.innerHTML = `
         <div class="modal-content title-sheet">
+            ${catalogView() === "vhs" ? vhsCardTapeHtml() : ""}
             <div class="ts-head">
                 <div class="ts-poster"><span>🎬</span></div>
                 <div class="ts-info">
@@ -3258,6 +3281,7 @@ function showActionMenu(itemText) {
 
     overlay.querySelector("#menuTitle").textContent = m ? m[1] : itemText;
     overlay.querySelector("#tsMeta").textContent = m ? m[2] : "";
+    if (catalogView() === "vhs") vhsFillCard(overlay.querySelector(".title-sheet"), itemText, m ? m[1] : itemText, m ? m[2] : "");
     overlay.querySelector("#amRatingsBox").innerHTML = buildRatingsSummaryHtml(itemText);
     document.body.appendChild(overlay);
 
@@ -3997,7 +4021,9 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
         if (catalogCurrentPage > totalPages) catalogCurrentPage = totalPages;
         if (catalogCurrentPage < 1) catalogCurrentPage = 1;
 
-        app.appendChild(buildPerPageBar(totalItems, () => openData(content, false, customTitle, true)));
+        const perPageBar = buildPerPageBar(totalItems, () => openData(content, false, customTitle, true));
+        perPageBar.appendChild(buildCatalogViewToggle(() => openData(content, false, customTitle, true)));
+        app.appendChild(perPageBar);
 
         if (perPage > 0) {
             const start = (catalogCurrentPage - 1) * perPage;
@@ -4025,7 +4051,10 @@ function openData(content, saveHistory = true, customTitle = null, preservePage 
     const gridContainer = document.createElement("div");
     gridContainer.className = "catalog-grid";
 
-    if (Array.isArray(pageItems)) {
+    if (Array.isArray(pageItems) && !isInSecretCategory && catalogView() === "vhs") {
+        renderVhsShelves(pageItems, listFragment);
+    }
+    else if (Array.isArray(pageItems)) {
         pageItems.forEach(item => {
             if (typeof item === "string") {
                 renderItemRow(item, isInSecretCategory ? listFragment : gridContainer);
@@ -5912,7 +5941,13 @@ function renderTitleListOrEmpty(list, emptyEmoji, emptyText) {
     } else {
         // Собираем сетку карточек за кадром и вставляем одним куском
         const listFragment = document.createDocumentFragment();
-        renderCardGrid(list, listFragment);
+        const toggleRow = document.createElement("div");
+        toggleRow.className = "vhs-toggle-row";
+        toggleRow.appendChild(buildCatalogViewToggle(() => refreshUIFromState()));
+        listFragment.appendChild(toggleRow);
+        const plain = list.filter(item => !vhsIsSecretTitle(item));
+        if (catalogView() === "vhs" && plain.length === list.length) renderVhsShelves(list, listFragment);
+        else renderCardGrid(list, listFragment);
         app.appendChild(listFragment);
     }
     app.classList.toggle("long-list", list.length > 25);
