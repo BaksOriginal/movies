@@ -4803,6 +4803,7 @@ async function showChatScreen() {
 
     await loadChatMessages();
     renderChatMessages();
+    pinChatToBottomOnOpen(document.getElementById("chatBox"));
 
     // Подстраховка на случай проблем с realtime. Пока канал подписан,
     // сообщения и так приходят мгновенно — тогда сверяемся раз в 30 секунд,

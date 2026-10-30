@@ -2359,6 +2359,7 @@ async function showWatchPartyScreen() {
 
     await loadWatchPartyChatMessages();
     renderWatchPartyChatMessages();
+    pinChatToBottomOnOpen(document.getElementById("wpChatBox"));
 
     // Подстраховка на случай проблем с realtime — как у обычного чата.
     // Дополнительно сверяем id последнего сообщения до/после подгрузки: если

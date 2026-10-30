@@ -316,6 +316,30 @@ function syncChatBubbles(box, messages, createBubble, updateBubble) {
     return addedAtBottom;
 }
 
+// Чат только что открыли: прокручиваем к последнему сообщению и держим его
+// внизу, пока догружаются стикеры и шрифты (от них растёт высота сообщений и
+// чат оказывался выше низа). Как только человек сам начал листать — отпускаем.
+const CHAT_PIN_MS = 5000;
+function pinChatToBottomOnOpen(box) {
+    if (!box) return;
+    const pin = () => { box.scrollTop = box.scrollHeight; };
+    const release = () => {
+        clearInterval(timer);
+        clearTimeout(stop);
+        observer.disconnect();
+        box.removeEventListener("load", pin, true);
+        ["wheel", "touchstart", "pointerdown"].forEach(ev => box.removeEventListener(ev, release));
+    };
+    const timer = setInterval(() => { if (box.isConnected) pin(); else release(); }, 250);
+    const stop = setTimeout(release, CHAT_PIN_MS);
+    const observer = new ResizeObserver(pin);   // размер самого окна чата (раскладка страницы)
+    observer.observe(box);
+    box.addEventListener("load", pin, true);    // догрузилась картинка-стикер
+    ["wheel", "touchstart", "pointerdown"].forEach(ev => box.addEventListener(ev, release, { passive: true }));
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (box.isConnected) pin(); });
+    pin();
+}
+
 // Обрезает текст цитаты ответа для превью
 function buildReplyPreviewText(msg) {
     if (isStickerMessage(msg.message)) return "🖼️ Стикер";
