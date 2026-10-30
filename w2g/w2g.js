@@ -1921,7 +1921,7 @@ function showWPChatMessageMenu(msg, isMine) {
             alert("Время удаления истекло (доступно только 24 часа после отправки).");
             return;
         }
-        if (!confirm("Удалить это сообщение?")) return;
+        if (!(await siteConfirm("Удалить это сообщение?", "Удалить"))) return;
 
         const { error: replyUpdateError } = await db.from('watch_party_messages')
             .update({ reply_to_text: "Сообщение удалено" })

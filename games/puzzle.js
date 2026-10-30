@@ -150,8 +150,8 @@ async function showPuzzleMenu() {
             <span class="sdk-level-desc">${lvl.desc}</span>
             <span class="sdk-level-best">${b ? `🏆 ${pzFormatTime(b.time)} · собрано: ${b.wins}` : "Ещё не собирали"}</span>
         `;
-        card.onclick = () => {
-            if (saved && !confirm("Начать новый пазл? Незаконченный будет потерян.")) return;
+        card.onclick = async () => {
+            if (saved && !(await siteConfirm("Начать новый пазл? Незаконченный будет потерян.", "Начать"))) return;
             newPuzzleGame(key);
         };
         grid.appendChild(card);
@@ -424,6 +424,7 @@ function startPuzzleGame(state) {
         pieceEl.style.zIndex = ++zTop;
         pieceEl.classList.add("is-dragging");
         vibrate(5);
+        thingSound("paper");
     });
     field.addEventListener("pointermove", (e) => {
         if (!drag || e.pointerId !== drag.id) return;

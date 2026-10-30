@@ -316,6 +316,43 @@ function syncChatBubbles(box, messages, createBubble, updateBubble) {
     return addedAtBottom;
 }
 
+// Единые уведомления и подтверждения вместо системных окон браузера.
+// alert на сайте только сообщает об ошибке, поэтому ждать его не нужно.
+window.alert = function (text) {
+    const old = document.querySelector(".site-notice");
+    if (old) old.remove();
+    const el = document.createElement("div");
+    el.className = "site-notice";
+    el.setAttribute("role", "alert");
+    el.textContent = String(text == null ? "" : text);
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+};
+
+// Подтверждение. Возвращает Promise с true/false.
+function siteConfirm(text, yes = "Да") {
+    return new Promise((resolve) => {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay site-dialog-overlay";
+        overlay.innerHTML = `
+            <div class="modal-content site-dialog">
+                <p class="site-dialog-text"></p>
+                <div class="site-dialog-actions">
+                    <button type="button" class="btn-cancel-gray" data-a="no">Отмена</button>
+                    <button type="button" class="btn-action-delete" data-a="yes"></button>
+                </div>
+            </div>
+        `;
+        overlay.querySelector(".site-dialog-text").textContent = text;
+        overlay.querySelector("[data-a=yes]").textContent = yes;
+        const finish = (v) => { overlay.remove(); resolve(v); };
+        overlay.addEventListener("click", (e) => { if (e.target === overlay) finish(false); });
+        overlay.querySelector("[data-a=no]").onclick = () => finish(false);
+        overlay.querySelector("[data-a=yes]").onclick = () => finish(true);
+        document.body.appendChild(overlay);
+    });
+}
+
 // Чат только что открыли: прокручиваем к последнему сообщению и держим его
 // внизу, пока догружаются стикеры и шрифты (от них растёт высота сообщений и
 // чат оказывался выше низа). Как только человек сам начал листать — отпускаем.

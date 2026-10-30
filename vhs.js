@@ -169,11 +169,48 @@ function renderVhsShelves(items, container) {
     container.appendChild(wrap);
 }
 
+// «Просмотрено»: кассеты лежат стопками в коробке. Название читается целиком,
+// на кассете только отметка о просмотре и своя оценка.
+function renderVhsCrate(list, container, label) {
+    const crate = document.createElement("div");
+    crate.className = "vhs-crate";
+    crate.dataset.label = label;
+    const stacks = document.createElement("div");
+    stacks.className = "vhs-stacks";
+    list.forEach((itemText) => {
+        const m = itemText.match(/^(.*)\s\((\d{4})\)$/);
+        const score = getMyRatingScore(itemText);
+        const tape = document.createElement("button");
+        tape.type = "button";
+        tape.className = "ui-btn vhs-lying";
+        tape.style.setProperty("--h", vhsHueOf(vhsGenreOf(itemText)));
+        tape.title = itemText;
+        tape.innerHTML = `
+            <i class="vhs-mark is-watched" title="Просмотрено">✓</i>
+            <span class="vhs-lying-name"></span>
+            <span class="vhs-lying-year"></span>
+            ${score != null ? `<i class="vhs-mark is-score" title="Моя оценка">${score}</i>` : ""}
+        `;
+        tape.querySelector(".vhs-lying-name").textContent = m ? m[1] : itemText;
+        tape.querySelector(".vhs-lying-year").textContent = m ? m[2] : "";
+        tape.onclick = () => { thingSound("tape"); showActionMenu(itemText); };
+        stacks.appendChild(tape);
+    });
+    crate.appendChild(stacks);
+    container.appendChild(crate);
+}
+
 // Оценки и списки изменились — обновляем наклейки на месте
 function refreshVhsMarks() {
     document.querySelectorAll(".vhs-spine[data-vhs-title]").forEach((spine) => {
         vhsApplyMarks(spine, spine.dataset.vhsTitle);
     });
+}
+
+// Бумажная наклейка в шапке окон оценки и действий
+function vhsPanelSticker(kicker, title) {
+    const safe = (t) => String(t).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    return `<div class="vhs-panel-sticker"><i></i><small>${safe(kicker)}</small><b>${safe(title)}</b></div>`;
 }
 
 // Части карточки тайтла в стиле кассеты

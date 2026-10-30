@@ -199,8 +199,8 @@ function showSudokuMenu() {
             <span class="sdk-level-desc">${lvl.desc}</span>
             <span class="sdk-level-best">${b ? `🏆 ${sdkFormatTime(b.time)} · побед: ${b.wins}` : "Ещё не пройдено"}</span>
         `;
-        card.onclick = () => {
-            if (saved && !confirm("Начать новую партию? Текущая будет потеряна.")) return;
+        card.onclick = async () => {
+            if (saved && !(await siteConfirm("Начать новую партию? Текущая будет потеряна.", "Начать"))) return;
             newSudokuGame(key);
         };
         grid.appendChild(card);
@@ -436,6 +436,7 @@ function startSudokuGame(state) {
     }
 
     function placeDigit(d) {
+        thingSound("pencil");
         if (finished || paused || selected < 0 || isGiven(selected)) return;
         const i = selected;
 

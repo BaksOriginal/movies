@@ -399,6 +399,7 @@ function ckMount(container, ctx) {
         update(state, info) {
             const changed = !S || JSON.stringify(S) !== JSON.stringify(state);
             const animate = !!S && changed;
+            if (animate) thingSound("clack");
             const prevRendered = prevBoard;
             S = state;
             pending = false;

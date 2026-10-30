@@ -1381,14 +1381,14 @@ function showStarChoiceModal(title) {
     optionsHtml += `<button id="choiceCancel" class="btn-cancel-gray">Отмена</button>`;
 
     overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Действие с тайтлом</h3>
-            <p style="color: #cbb8e8; margin-bottom: 20px; font-size: 14px;">"${title.replace(/\s*\(\d{4}\)$/, "")}"</p>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="modal-content vhs-panel">
+            ${vhsPanelSticker("Что делаем с кассетой", title.replace(/\s*\(\d{4}\)$/, ""))}
+            <div class="action-buttons">
                 ${optionsHtml}
             </div>
         </div>
     `;
+    thingSound("tape");
 
     document.body.appendChild(overlay);
 
@@ -1658,13 +1658,27 @@ function playVhsRewindTransition(navigateFn) {
 
 // Экран авторизации
 function showLoginScreen() {
+    // Ночной видеопрокат: вход по клубной карте
     app.innerHTML = `
-        <h1>Авторизация</h1>
-        <form class="login-form" id="loginForm">
-            <input type="text" id="loginUsername" placeholder="Имя" required autocomplete="username">
-            <input type="password" id="loginPassword" placeholder="Пароль" required autocomplete="current-password">
-            <button type="submit">Войти</button>
-        </form>
+        <div class="login-scene">
+            <div class="login-sign">愛してる<small>ВИДЕОПРОКАТ</small></div>
+            <div class="login-card" id="loginCard">
+                <div class="login-card-head">
+                    <span><b>Клубная карта</b><small>ТОЛЬКО ДЛЯ ДВОИХ</small></span>
+                    <span class="login-card-avas"><span>${userAvatarHtml("Myakish")}</span><span>${userAvatarHtml("Asmoday")}</span></span>
+                </div>
+                <div class="login-card-stripe"></div>
+                <form class="login-form login-card-form" id="loginForm">
+                    <label class="login-field">Имя
+                        <input type="text" id="loginUsername" required autocomplete="username">
+                    </label>
+                    <label class="login-field">Пароль
+                        <input type="password" id="loginPassword" required autocomplete="current-password">
+                    </label>
+                    <button type="submit" class="login-submit">Войти</button>
+                </form>
+            </div>
+        </div>
     `;
 
     document.getElementById("loginForm").onsubmit = async (e) => {
@@ -1689,6 +1703,12 @@ function showLoginScreen() {
         if (error) {
             sessionStorage.removeItem("playLoginGlitch");
             alert("Ошибка входа: неверный никнейм или пароль.");
+            const card = document.getElementById("loginCard");
+            if (card) {
+                card.classList.remove("is-error");
+                void card.offsetWidth;
+                card.classList.add("is-error");
+            }
             console.error("Ошибка авторизации:", error.message);
         }
     };
@@ -3359,12 +3379,13 @@ function showRatingModal(itemText) {
     }
 
     overlay.innerHTML = `
-        <div class="modal-content" style="text-align: center;">
-            <h3 style="margin-bottom: 10px;">Оценка (${myUsername})</h3>
-            <p style="color: #cbb8e8; margin-bottom: 15px; font-size: 14px;">"${itemText.replace(/\s*\(\d{4}\)$/, "")}"</p>
-            <div class="rating-stars" id="ratingStars">${starsHtml}</div>
-            <p id="ratingValueLabel" style="color: var(--pink-soft); font-weight: bold; margin: 10px 0 20px; min-height: 18px;">${currentScore > 0 ? currentScore + "/10" : ""}</p>
-            <div class="action-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="modal-content vhs-panel">
+            ${vhsPanelSticker(`Оценка · ${myUsername}`, itemText.replace(/\s*\(\d{4}\)$/, ""))}
+            <div class="vhs-rating">
+                <div class="rating-stars" id="ratingStars">${starsHtml}</div>
+                <div class="vhs-rating-led" id="ratingValueLabel">${currentScore > 0 ? currentScore + "/10" : ""}</div>
+            </div>
+            <div class="action-buttons">
                 ${existing ? '<button id="ratingDelete" class="btn-action-delete">🗑️ Удалить мою оценку</button>' : ''}
                 <button id="ratingCancel" class="btn-action-cancel">Закрыть</button>
             </div>
@@ -3411,6 +3432,7 @@ function showRatingModal(itemText) {
             }
 
             spawnSparkBurstAt(el);
+            thingSound("pin");
             overlay.remove();
             refreshRatingsUI();
         });
@@ -3493,7 +3515,7 @@ async function showCommentsModal(itemText) {
                 if (isMine) {
                     card.querySelector('[data-act="edit"]').onclick = () => showCommentForm(c);
                     card.querySelector('[data-act="delete"]').onclick = async () => {
-                        if (!confirm("Удалить ваш комментарий?")) return;
+                        if (!(await siteConfirm("Удалить ваш комментарий?", "Удалить"))) return;
                         const { error } = await db.from('comments').delete().eq('id', c.id);
                         if (error) {
                             alert("Не удалось удалить комментарий.");
@@ -3710,6 +3732,14 @@ function buildCommentFeedItem(c, mine, container) {
         </div>
     `;
     item.querySelector(".cf-avatar").innerHTML = userAvatarHtml(name);
+    // Штамп с оценкой, которую автор поставил этому фильму
+    const authorRating = (ratingsData[c.title] || []).find(r => r.userId === c.user_id);
+    if (authorRating) {
+        const stamp = document.createElement("span");
+        stamp.className = "cf-stamp";
+        stamp.innerHTML = `<span>${authorRating.score}<small>из 10</small></span>`;
+        item.appendChild(stamp);
+    }
     item.querySelector(".cf-name").textContent = name;
     item.querySelector(".cf-text").textContent = c.comment;
     item.querySelector(".cf-title-name").textContent = m ? m[1] : c.title;
@@ -3762,7 +3792,7 @@ function showCommentDetailModal(comment, container) {
             showCommentDetailEditForm(overlay, comment, container);
         };
         overlay.querySelector("#commentDetailDelete").onclick = async () => {
-            if (!confirm("Удалить ваш комментарий?")) return;
+            if (!(await siteConfirm("Удалить ваш комментарий?", "Удалить"))) return;
             const { error } = await db.from('comments').delete().eq('id', comment.id);
             if (error) {
                 alert("Не удалось удалить комментарий.");
@@ -4377,6 +4407,15 @@ function createChatBubble(msg) {
         bubble.appendChild(heart);
     }
 
+    // Аватарка собеседника сбоку от его сообщения
+    if (!isMine) {
+        bubble.classList.add("has-ava");
+        let ava = document.createElement("span");
+        ava.className = "chat-ava";
+        ava.innerHTML = userAvatarHtml(msg.username);
+        bubble.appendChild(ava);
+    }
+
     // Долгое нажатие — открывает меню (ответить, а для своих сообщений — ещё редактировать/удалить)
     bubble.style.cursor = "pointer";
     attachChatLongPress(bubble, msg, isMine);
@@ -4572,7 +4611,7 @@ function showChatMessageMenu(msg, isMine) {
             alert("Время удаления истекло (доступно только 24 часа после отправки).");
             return;
         }
-        if (!confirm("Удалить это сообщение?")) return;
+        if (!(await siteConfirm("Удалить это сообщение?", "Удалить"))) return;
 
         // Сначала помечаем "удалено" во всех ответах, ссылающихся на это
         // сообщение — иначе после удаления самого сообщения его текст
@@ -5808,7 +5847,7 @@ async function handleDeleteClick(itemText) {
     const cleanTitle = match[1].trim();
     const year = parseInt(match[2], 10);
 
-    if (confirm(`Вы уверены, что хотите навсегда удалить "${cleanTitle}"?`)) {
+    if (await siteConfirm(`Навсегда удалить «${cleanTitle}»?`, "Удалить")) {
         
         // Удаляем из просмотренных
         const { error: watchedError } = await db
@@ -5932,7 +5971,8 @@ function buildListPageHead(titleText, count) {
     return head;
 }
 
-function renderTitleListOrEmpty(list, emptyEmoji, emptyText) {
+// crateLabel — показать кассеты стопками в подписанной коробке, а не на полке
+function renderTitleListOrEmpty(list, emptyEmoji, emptyText, crateLabel = null) {
     if (list.length === 0) {
         const empty = document.createElement("div");
         empty.className = "ui-empty";
@@ -5947,7 +5987,10 @@ function renderTitleListOrEmpty(list, emptyEmoji, emptyText) {
         toggleRow.appendChild(buildCatalogViewToggle(() => refreshUIFromState()));
         listFragment.appendChild(toggleRow);
         const plain = list.filter(item => !vhsIsSecretTitle(item));
-        if (catalogView() === "vhs" && plain.length === list.length) renderVhsShelves(list, listFragment);
+        if (catalogView() === "vhs" && plain.length === list.length) {
+            if (crateLabel) renderVhsCrate(list, listFragment, crateLabel);
+            else renderVhsShelves(list, listFragment);
+        }
         else renderCardGrid(list, listFragment);
         app.appendChild(listFragment);
     }
@@ -5988,29 +6031,28 @@ function renderWatchedScreen(bucketKey) {
     const list = sortTitlesAlphabetically(bucketKey ? Array.from(WATCHED_BUCKETS[bucketKey].set()) : getAllWatchedTitles());
     app.appendChild(buildListPageHead("🎬 Просмотрено", list.length));
 
-    const chips = document.createElement("div");
-    chips.className = "chip-row";
-    const chip = (label, count, isActive, onClick) => {
+    // Вместо чипов — картонные коробки: все кассеты, мои, партнёра и общие
+    const boxes = document.createElement("div");
+    boxes.className = "wb-boxes";
+    const box = (label, count, isActive, onClick) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "ui-btn chip" + (isActive ? " active" : "");
-        const labelSpan = document.createElement("span");
-        labelSpan.textContent = label;
-        const countSpan = document.createElement("span");
-        countSpan.className = "chip-count";
-        countSpan.textContent = count;
-        btn.append(labelSpan, countSpan);
-        btn.onclick = isActive ? null : onClick;
-        chips.appendChild(btn);
+        btn.className = "ui-btn wb-box" + (isActive ? " is-active" : "");
+        btn.innerHTML = `${ROOM_ART.box}<b></b><span>${count}</span>`;
+        btn.querySelector("b").textContent = label;
+        btn.setAttribute("aria-pressed", isActive);
+        btn.onclick = isActive ? null : () => { thingSound("tape"); onClick(); };
+        boxes.appendChild(btn);
     };
-    chip("Все", getAllWatchedTitles().length, !bucketKey, () => renderWatchedTop());
+    box("Все", getAllWatchedTitles().length, !bucketKey, () => renderWatchedTop());
     Object.keys(WATCHED_BUCKETS).forEach(key => {
         const bucket = WATCHED_BUCKETS[key];
-        chip(bucket.chip, bucket.set().size, bucketKey === key, () => renderWatchedBucket(key));
+        box(stripLeadingEmoji(bucket.chip) || bucket.chip, bucket.set().size, bucketKey === key, () => renderWatchedBucket(key));
     });
-    app.appendChild(chips);
+    app.appendChild(boxes);
 
-    renderTitleListOrEmpty(list, "🎬", "Здесь пока пусто");
+    const boxLabel = bucketKey ? stripLeadingEmoji(WATCHED_BUCKETS[bucketKey].label) : "Просмотрено";
+    renderTitleListOrEmpty(list, "🎬", "Здесь пока пусто", boxLabel);
 }
 
 function renderWishlistFolder() {
@@ -6067,6 +6109,7 @@ function renderCalendarScreen() {
     prevBtn.className = "calendar-nav-btn";
     prevBtn.textContent = "←";
     prevBtn.onclick = () => {
+        thingSound("paper");
         calendarViewMonth--;
         if (calendarViewMonth < 0) { calendarViewMonth = 11; calendarViewYear--; }
         renderCalendarScreen();
@@ -6081,6 +6124,7 @@ function renderCalendarScreen() {
     nextBtn.className = "calendar-nav-btn";
     nextBtn.textContent = "→";
     nextBtn.onclick = () => {
+        thingSound("paper");
         calendarViewMonth++;
         if (calendarViewMonth > 11) { calendarViewMonth = 0; calendarViewYear++; }
         renderCalendarScreen();
@@ -6142,10 +6186,11 @@ function renderCalendarScreen() {
         cell.appendChild(dayNum);
 
         if (titlesForDay.length > 0) {
-            let dot = document.createElement("span");
-            dot.className = "calendar-day-dot";
-            dot.textContent = titlesForDay.length > 1 ? String(titlesForDay.length) : "●";
-            cell.appendChild(dot);
+            // На дне лежит кассета; несколько фильмов — цифра на ней
+            let tape = document.createElement("span");
+            tape.className = "cal-tape";
+            tape.textContent = titlesForDay.length > 1 ? String(titlesForDay.length) : "";
+            cell.appendChild(tape);
         }
 
         grid.appendChild(cell);
@@ -6169,7 +6214,7 @@ function buildCalendarAgenda() {
 
     const head = document.createElement("h2");
     head.className = "ui-section-title";
-    head.textContent = "Ближайшие планы";
+    head.textContent = "Программа передач";
     section.appendChild(head);
 
     const todayKey = todayDateKey();

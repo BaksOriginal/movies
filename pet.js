@@ -395,88 +395,85 @@ function petMonsterSvg(stage, uid) {
 }
 
 // ---------- Комната ----------
+// Комната питомца нарисована в том же стиле, что и комната на главной;
+// за окном то же время суток. Поверх неё живут сам питомец, мусор и эффекты.
 function petRoomSvg() {
-    const lights = Array.from({ length: 13 }, (_, i) => {
-        const x = 20 + i * 30;
-        const y = 22 + Math.sin((i / 12) * Math.PI) * 16;
-        const colors = ["#ff2e93", "#2ee8ff", "#ffd15c", "#8b3bff"];
-        return `<circle class="pet-light" style="animation-delay:${(i % 4) * -0.6}s" cx="${x}" cy="${y}" r="3.2" fill="${colors[i % 4]}"/>`;
-    }).join("");
+    const day = typeof roomIsDay === "function" ? roomIsDay() : true;
+    const wallA = day ? "#6a5a80" : "#2c2040", wallB = day ? "#4c3f66" : "#1a1229";
+    const floorA = day ? "#5d3c22" : "#33201a", floorB = day ? "#311e11" : "#170e09";
+    const skyA = day ? "#58a7e8" : "#060a24", skyB = day ? "#bce3f7" : "#33245f";
+    const town = day ? "#4a5578" : "#0a0a1c";
     return `
     <svg class="pet-room-svg" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <defs>
-            <linearGradient id="prWall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#150823"/><stop offset="1" stop-color="#2b0f40"/></linearGradient>
-            <linearGradient id="prFloor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a1a4a"/><stop offset="1" stop-color="#170a24"/></linearGradient>
-            <linearGradient id="prSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#07030f"/><stop offset="1" stop-color="#4a1150"/></linearGradient>
-            <radialGradient id="prRug" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ff7fc4" stop-opacity="0.55"/><stop offset="0.7" stop-color="#8b3bff" stop-opacity="0.45"/><stop offset="1" stop-color="#8b3bff" stop-opacity="0.15"/></radialGradient>
-            <radialGradient id="prLamp" cx="0.5" cy="0" r="1"><stop offset="0" stop-color="#ffd15c" stop-opacity="0.45"/><stop offset="1" stop-color="#ffd15c" stop-opacity="0"/></radialGradient>
-            <pattern id="prDots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="9" cy="9" r="1.2" fill="#ffffff" opacity="0.06"/></pattern>
+            <linearGradient id="prWall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${wallA}"/><stop offset="1" stop-color="${wallB}"/></linearGradient>
+            <linearGradient id="prFloor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${floorA}"/><stop offset="1" stop-color="${floorB}"/></linearGradient>
+            <linearGradient id="prSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyA}"/><stop offset="1" stop-color="${skyB}"/></linearGradient>
+            <radialGradient id="prLamp" cx="0.5" cy="0" r="1"><stop offset="0" stop-color="#ffc66e" stop-opacity="${day ? 0.12 : 0.34}"/><stop offset="1" stop-color="#ffc66e" stop-opacity="0"/></radialGradient>
         </defs>
 
         <!-- стена и пол -->
         <rect width="400" height="214" fill="url(#prWall)"/>
-        <rect width="400" height="214" fill="url(#prDots)"/>
         <rect y="214" width="400" height="86" fill="url(#prFloor)"/>
-        ${[232, 254, 280].map(y => `<line x1="0" y1="${y}" x2="400" y2="${y}" stroke="#000" stroke-opacity="0.2"/>`).join("")}
-        <rect y="211" width="400" height="3" fill="#ff2e93" opacity="0.7"/>
+        ${[90, 180, 270, 360].map(x => `<line x1="${x}" y1="214" x2="${x}" y2="300" stroke="#000" stroke-opacity="0.25" stroke-width="2"/>`).join("")}
+        ${[240, 268].map(y => `<line x1="0" y1="${y}" x2="400" y2="${y}" stroke="#000" stroke-opacity="0.16"/>`).join("")}
+        <rect y="209" width="400" height="5" fill="#2b1a0f"/>
 
-        <!-- гирлянда -->
-        <path d="M20 22 Q200 54 380 22" fill="none" stroke="#000" stroke-opacity="0.5" stroke-width="1.2"/>
-        ${lights}
-
-        <!-- окно с ночным городом -->
-        <g transform="translate(28 50)">
-            <rect width="104" height="92" rx="8" fill="url(#prSky)"/>
-            <circle cx="76" cy="24" r="11" fill="#ffe8b0"/>
-            <circle cx="20" cy="18" r="1.3" fill="#fff"/><circle cx="44" cy="30" r="1" fill="#fff"/><circle cx="58" cy="12" r="1.2" fill="#fff"/>
-            <path d="M0 92 V70 h12 V58 h10 V74 h12 V50 h12 V66 h14 V56 h10 V72 h12 V62 h12 V92 Z" fill="#12071f"/>
-            <rect x="15" y="64" width="2" height="2" fill="#2ee8ff"/><rect x="38" y="58" width="2" height="2" fill="#ff7fc4"/><rect x="70" y="66" width="2" height="2" fill="#2ee8ff"/>
-            <rect width="104" height="92" rx="8" fill="none" stroke="#c9a2ff" stroke-width="4"/>
-            <line x1="52" y1="0" x2="52" y2="92" stroke="#c9a2ff" stroke-width="3"/>
-            <path d="M-6 -4 Q14 46 4 98 L-6 98 Z" fill="#ff7fc4" opacity="0.55"/>
-            <path d="M110 -4 Q90 46 100 98 L110 98 Z" fill="#ff7fc4" opacity="0.55"/>
+        <!-- окно -->
+        <g transform="translate(26 40)">
+            <rect x="-5" y="-5" width="114" height="102" rx="2" fill="#3f2a18"/>
+            <rect width="104" height="92" fill="url(#prSky)"/>
+            <circle cx="72" cy="24" r="11" fill="${day ? "#fff4bb" : "#f3f1ff"}"/>
+            <path d="M0 92 V68 h16 V52 h16 V72 h22 V44 h18 V62 h32 V92 Z" fill="${town}"/>
+            ${day ? "" : `<g fill="#f5c86a"><rect x="20" y="58" width="2" height="2"/><rect x="26" y="66" width="2" height="2"/><rect x="60" y="52" width="2" height="2"/><rect x="66" y="60" width="2" height="2"/><rect x="80" y="70" width="2" height="2"/><rect x="92" y="76" width="2" height="2"/></g>`}
+            <path d="M52 0V92M0 40H104" stroke="#3f2a18" stroke-width="4"/>
+            <path d="M0 0H15V92H0Z M89 0H104V92H89Z" fill="#a53c66"/>
+            <path d="M5 0V92M10 0V92M94 0V92M99 0V92" stroke="#752746" stroke-width="1.5"/>
         </g>
 
-        <!-- постер с киноплёнкой -->
-        <g transform="translate(160 60)">
-            <rect width="54" height="70" rx="4" fill="#1a0b2e" stroke="#ffd15c" stroke-width="2.5"/>
-            <rect x="12" y="20" width="30" height="22" rx="3" fill="#ff2e93"/>
-            <path d="M12 20 l30 -8 l2 6 l-30 8 Z" fill="#fff" opacity="0.9"/>
-            <rect x="12" y="50" width="30" height="3" rx="1.5" fill="#2ee8ff"/>
+        <!-- картинка с сердцем -->
+        <g transform="translate(160 50)">
+            <rect width="52" height="62" rx="2" fill="#2b1a0f"/>
+            <rect x="5" y="5" width="42" height="52" fill="#2b1040"/>
+            <path d="M26 45S11 36 11 25.500a8 8 0 0 1 15-4.500 8 8 0 0 1 15 4.500C41 36 26 45 26 45z" fill="#ff2e93"/>
         </g>
 
-        <!-- полка с книгами и растением -->
-        <g transform="translate(262 108)">
-            <rect x="0" y="40" width="112" height="6" rx="2" fill="#5a2a6e"/>
-            <rect x="8" y="12" width="9" height="28" fill="#2ee8ff"/><rect x="19" y="8" width="8" height="32" fill="#ff7fc4"/>
-            <rect x="29" y="16" width="10" height="24" fill="#ffd15c"/><rect x="41" y="10" width="7" height="30" fill="#8b3bff" transform="rotate(8 44 25)"/>
-            <path d="M84 40 h20 l-3 -16 h-14 Z" fill="#c26a3d"/>
-            <path d="M94 24 Q82 6 90 0 Q96 10 94 24 Q104 4 112 6 Q104 14 94 24" fill="#39ff9c" opacity="0.85"/>
+        <!-- полка с кассетами и цветком -->
+        <g transform="translate(244 104)">
+            <rect x="0" y="40" width="112" height="7" fill="#74492a"/>
+            <rect x="0" y="47" width="112" height="3" fill="#4e3019"/>
+            <rect x="8" y="10" width="11" height="30" fill="#d8132f"/><rect x="21" y="6" width="11" height="34" fill="#2f80ff"/>
+            <rect x="34" y="11" width="11" height="29" fill="#1fbf6a"/><rect x="47" y="8" width="11" height="32" fill="#ff7a00"/>
+            <g fill="#f4f1e6"><rect x="10" y="14" width="7" height="5"/><rect x="23" y="10" width="7" height="5"/><rect x="36" y="15" width="7" height="5"/><rect x="49" y="12" width="7" height="5"/></g>
+            <path d="M80 40 h20 l-3 -15 h-14 Z" fill="#b5613a"/>
+            <path d="M90 25 Q76 8 83 0 Q90 8 90 25 Q100 5 108 6 Q101 15 90 25" fill="#3fa96a"/>
         </g>
 
         <!-- торшер -->
-        <g transform="translate(352 118)">
-            <path d="M-34 32 L34 32 L60 180 L-60 180 Z" fill="url(#prLamp)"/>
-            <path d="M-16 32 L16 32 L10 8 L-10 8 Z" fill="#ffd15c"/>
-            <rect x="-2" y="32" width="4" height="140" fill="#3a1a4a"/>
-            <ellipse cx="0" cy="174" rx="16" ry="4" fill="#3a1a4a"/>
+        <g transform="translate(366 92)">
+            <path d="M-46 30 L46 30 L92 200 L-92 200 Z" fill="url(#prLamp)"/>
+            <path d="M-11 0h22l10 32h-42z" fill="#ffd98f"/>
+            <path d="M-11 0h22l2 6h-26z" fill="#c9974f"/>
+            <rect x="-2" y="32" width="4" height="140" fill="#6d6256"/>
+            <ellipse cx="0" cy="176" rx="17" ry="6" fill="#3a3129"/>
         </g>
 
-        <!-- коврик -->
-        <ellipse cx="200" cy="262" rx="140" ry="28" fill="url(#prRug)"/>
-        <ellipse cx="200" cy="262" rx="112" ry="20" fill="none" stroke="#ffd15c" stroke-opacity="0.35" stroke-dasharray="4 6"/>
+        <!-- ковёр -->
+        <ellipse cx="200" cy="262" rx="150" ry="30" fill="#3a1f5e"/>
+        <ellipse cx="200" cy="262" rx="132" ry="24" fill="none" stroke="#ff7fc4" stroke-width="2.5"/>
+        <ellipse cx="200" cy="262" rx="102" ry="17" fill="#4c2878"/>
 
         <!-- лежанка -->
-        <g transform="translate(66 236)">
-            <ellipse cx="0" cy="14" rx="46" ry="16" fill="#5a1f6e"/>
-            <ellipse cx="0" cy="8" rx="38" ry="11" fill="#8b3bff"/>
-            <ellipse cx="0" cy="6" rx="28" ry="7" fill="#b57bff"/>
+        <g transform="translate(66 240)">
+            <ellipse cx="0" cy="14" rx="46" ry="16" fill="#74492a"/>
+            <ellipse cx="0" cy="9" rx="39" ry="11" fill="#a53c66"/>
+            <ellipse cx="0" cy="7" rx="27" ry="7" fill="#ff7fc4"/>
         </g>
 
         <!-- миска -->
-        <g transform="translate(316 252)">
-            <path d="M-22 0 h44 l-6 14 h-32 Z" fill="#2ee8ff"/>
-            <ellipse cx="0" cy="0" rx="22" ry="5" fill="#0d6a7a"/>
+        <g transform="translate(316 256)">
+            <path d="M-22 0 h44 l-6 14 h-32 Z" fill="#d8132f"/>
+            <ellipse cx="0" cy="0" rx="22" ry="5" fill="#7a1a30"/>
             <g class="pet-bowl-food">
                 <circle cx="-8" cy="-3" r="5" fill="#ffb347"/><circle cx="2" cy="-5" r="5" fill="#ff8a3d"/><circle cx="10" cy="-2" r="4.5" fill="#ffb347"/>
             </g>

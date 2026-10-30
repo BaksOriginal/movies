@@ -5467,3 +5467,698 @@ button.room-obj:focus-visible{ outline: 2px solid var(--pink-soft); outline-offs
     .room-window{ border-width: 3px; }
     .room-sound-mark{ font-size: 9px; }
 }
+
+/* ==========================================================
+   ЕДИНЫЙ СТИЛЬ: окна как корпус кассеты, кнопки как клавиши видика
+   ========================================================== */
+.modal-content{
+    position: relative;
+    background:
+        repeating-linear-gradient(to bottom, rgba(255,255,255,0.016) 0 1px, transparent 1px 4px),
+        #17141d;
+    border: 1px solid #38333f;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 24px 60px rgba(0,0,0,0.6);
+}
+.modal-content:not(.title-sheet):not(.pz-picker):not(.retro-dialog):not(.gameover)::before{
+    content: "";
+    display: block;
+    height: 6px;
+    margin: -8px 0 14px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #ff2e93 0 58%, #ff9a3d 58% 82%, #ffd15c 82%);
+}
+.modal-content h3{ font-family: var(--font-display); }
+.modal-content .btn-pink-style,
+.modal-content .btn-save,
+.modal-content .btn-cancel,
+.modal-content .btn-cancel-gray,
+.modal-content .btn-action-edit,
+.modal-content .btn-action-delete,
+.modal-content .btn-action-cancel{
+    min-height: 46px;
+    padding: 9px 14px;
+    border-radius: 5px;
+    border: 1px solid #000;
+    background: linear-gradient(#55525c, #34313a);
+    color: #f4f1e6;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 700;
+    text-shadow: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 3px 0 #0a090d;
+    animation: none;
+    transition: transform .06s ease, background .12s ease;
+}
+.modal-content .btn-pink-style:hover,
+.modal-content .btn-cancel:hover,
+.modal-content .btn-cancel-gray:hover,
+.modal-content .btn-action-edit:hover,
+.modal-content .btn-action-cancel:hover{ background: linear-gradient(#64606b, #3e3b45); color: #fff; }
+.modal-content .btn-pink-style:active,
+.modal-content .btn-save:active,
+.modal-content .btn-cancel:active,
+.modal-content .btn-cancel-gray:active,
+.modal-content .btn-action-edit:active,
+.modal-content .btn-action-delete:active,
+.modal-content .btn-action-cancel:active{ transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 0 #0a090d; }
+/* Главная клавиша — красная «запись», опасная — бордовая, отмена — тёмная */
+.modal-content .btn-save{ background: linear-gradient(#e0355a, #a81a3c); color: #fff; }
+.modal-content .btn-save:hover{ background: linear-gradient(#ef4369, #b92045); }
+.modal-content .btn-action-delete{ background: linear-gradient(#6c2536, #471523); color: #ffc4d0; }
+.modal-content .btn-action-delete:hover{ background: linear-gradient(#7d2b3f, #521929); color: #fff; }
+.modal-content .btn-cancel,
+.modal-content .btn-cancel-gray,
+.modal-content .btn-action-cancel{ background: linear-gradient(#2e2b34, #1f1c24); color: #cfc8d8; }
+.modal-content input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.modal-content select,
+.modal-content textarea{ border-radius: 5px; }
+
+/* Окно-подтверждение вместо системного */
+.site-dialog{ width: min(380px, calc(100vw - 24px)); text-align: left; }
+.site-dialog-text{ margin: 0 0 16px; font-size: 15px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.site-dialog-actions{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.site-notice{
+    position: fixed;
+    left: 50%;
+    top: calc(env(safe-area-inset-top) + 18px);
+    z-index: 2200;
+    width: min(420px, calc(100vw - 24px));
+    transform: translateX(-50%);
+    padding: 11px 16px;
+    border-radius: 6px;
+    background: #17141d;
+    border: 1px solid #38333f;
+    border-left: 5px solid #ff2e93;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.55);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    animation: stPopIn .18s ease both;
+}
+
+/* ---------- Оценка: наклейка кассеты ---------- */
+.vhs-panel{ text-align: left; }
+.modal-content.vhs-panel::before{ display: none !important; }
+.vhs-panel-sticker{
+    display: grid;
+    gap: 2px;
+    margin-bottom: 14px;
+    padding: 0 12px 10px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: #f5f1e3;
+    color: #18141e;
+}
+.vhs-panel-sticker > i{ display: block; height: 9px; margin: 0 -12px 7px; background: linear-gradient(90deg, #ff2e93 0 58%, #ff9a3d 58% 82%, #ffd15c 82%); }
+.vhs-panel-sticker small{ font: 800 10.5px/1.2 ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: #6c6573; }
+.vhs-panel-sticker b{ font: 700 19px/1.2 var(--font-display); overflow-wrap: anywhere; }
+.vhs-panel .action-buttons{ display: grid !important; gap: 9px !important; }
+.vhs-rating{ padding: 12px 10px; margin-bottom: 14px; border-radius: 5px; background: #08070b; border: 1px solid #000; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); text-align: center; }
+.vhs-rating .rating-stars{ display: flex; justify-content: center; flex-wrap: nowrap; gap: 1px; margin: 0; }
+.vhs-rating .rating-star{ font-size: clamp(21px, 7vw, 28px); color: #39343f; }
+.vhs-rating .rating-star.filled{ color: #ffd15c; }
+.vhs-rating-led{ margin-top: 7px; min-height: 22px; font: 800 18px/1.2 ui-monospace, Consolas, monospace; color: #4dff91; }
+
+/* ---------- Календарь: настенный ---------- */
+.cal-main{
+    position: relative;
+    margin-top: 10px;
+    padding: 0 12px 14px;
+    border-radius: 6px;
+    background: #fbf7ea;
+    color: #23202b;
+    box-shadow: 0 16px 34px rgba(0,0,0,0.45);
+}
+/* Кольца переплёта */
+.cal-main::before{
+    content: "";
+    position: absolute;
+    left: 12%; right: 12%; top: -9px;
+    height: 20px;
+    background: radial-gradient(circle at 50% 50%, #9d9da6 0 5px, #55555d 5.5px 7px, transparent 7.5px) 0 0 / 11.11% 100% repeat-x;
+    z-index: 1;
+}
+.calendar-month-nav{ margin: 0 -12px 8px; padding: 18px 12px 11px; border-radius: 6px 6px 0 0; background: #c8102e; }
+.calendar-month-label{ color: #fff; font-family: var(--font-display); text-transform: uppercase; letter-spacing: .05em; }
+@layer legacy {
+    .cal-main .calendar-month-nav .calendar-nav-btn{ background: rgba(0,0,0,0.2) !important; border-color: rgba(255,255,255,0.35) !important; color: #fff !important; box-shadow: none !important; }
+}
+.cal-main .calendar-nav-btn:hover{ filter: brightness(1.25); }
+.cal-main .calendar-weekday{ color: #7a7482; font-weight: 800; }
+.cal-main .calendar-weekday:nth-child(n+6){ color: #c8102e; }
+.cal-main .calendar-grid{ gap: 2px; }
+.cal-main .calendar-day{
+    position: relative;
+    border: 0;
+    border-radius: 2px;
+    background: rgba(0,0,0,0.035);
+    color: #23202b;
+    box-shadow: none;
+}
+.cal-main .calendar-day-empty-slot{ background: transparent; }
+.cal-main .calendar-day-number{ color: inherit; font-family: var(--font-display); font-weight: 700; }
+.cal-main .calendar-day:nth-child(7n), .cal-main .calendar-day:nth-child(7n-1){ color: #c8102e; }
+.cal-main .calendar-day-past{ opacity: .45; }
+/* Сегодня обведено маркером */
+.cal-main .calendar-day-today{ background: transparent; box-shadow: inset 0 0 0 2.5px #c8102e; border-radius: 50% 46% 52% 48%; color: #c8102e; }
+/* День с планами: на нём лежит маленькая кассета */
+.cal-main .calendar-day-active{ background: #ffe873; cursor: pointer; border: 0; box-shadow: none; transition: transform .1s ease; }
+.cal-main .calendar-day-active.calendar-day-today{ box-shadow: inset 0 0 0 2.5px #c8102e; }
+.cal-main .calendar-day-active:hover{ transform: rotate(-2deg) scale(1.06); }
+.cal-tape{
+    position: absolute;
+    left: 50%;
+    bottom: 11%;
+    display: grid;
+    place-items: center;
+    width: min(70%, 34px);
+    height: 13px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: radial-gradient(circle at 26% 62%, #d7d3c5 0 1.6px, transparent 2px), radial-gradient(circle at 74% 62%, #d7d3c5 0 1.6px, transparent 2px), #17151d;
+    color: #fff;
+    font: 800 8px/1 ui-monospace, Consolas, monospace;
+}
+/* Ближайшие планы: телепрограмма из газеты */
+.cal-agenda{
+    padding: 16px 14px;
+    border-radius: 3px;
+    background: #efe7d1;
+    color: #211d17;
+    box-shadow: 0 16px 34px rgba(0,0,0,0.45);
+}
+.cal-agenda .ui-section-title{
+    margin-bottom: 10px;
+    padding-bottom: 7px;
+    border-bottom: 3px double #211d17;
+    color: #211d17;
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 700;
+    font-size: 21px;
+    text-align: center;
+}
+.cal-agenda .ui-empty{ color: #5b5346; background: transparent; border-color: rgba(0,0,0,0.25); }
+.cal-agenda-row{ padding: 10px 2px; border: 0; border-bottom: 1px solid rgba(0,0,0,0.25); border-radius: 0; background: transparent; color: inherit; }
+.cal-agenda-row:hover{ background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.25); }
+.cal-agenda-today{ border-color: rgba(0,0,0,0.25); }
+.cal-agenda-date{ background: transparent; border: 0; }
+.cal-agenda-day{ color: #211d17; font-family: Georgia, "Times New Roman", serif; }
+.cal-agenda-month{ color: #6a6152; }
+.cal-agenda-when, .cal-agenda-today .cal-agenda-when{ color: #a31430; }
+.cal-agenda-name{ color: #211d17; font-family: Georgia, "Times New Roman", serif; font-weight: 700; }
+.cal-agenda-poster{ border-radius: 2px; border: 0; }
+
+/* ---------- Комментарии: вырезки из киножурнала ---------- */
+.comment-feed{ display: grid; gap: 16px; }
+.comment-feed-day{
+    margin: 4px 0 0;
+    padding: 4px 0;
+    border-top: 1px solid rgba(255,255,255,0.22);
+    border-bottom: 1px solid rgba(255,255,255,0.22);
+    color: #d9d2c3;
+    font: 700 13px/1.3 Georgia, "Times New Roman", serif;
+    letter-spacing: .1em;
+    text-align: center;
+    text-transform: uppercase;
+}
+.comment-feed-item{
+    position: relative;
+    display: flex;
+    gap: 12px;
+    padding: 16px 14px 13px;
+    border: 0;
+    border-radius: 1px;
+    background: #efe7d1;
+    color: #211d17;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.4);
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 5px), 92% 100%, 78% calc(100% - 4px), 62% 100%, 44% calc(100% - 4px), 26% 100%, 10% calc(100% - 4px), 0 100%);
+}
+.comment-feed-item:nth-child(3n){ transform: rotate(-.5deg); }
+.comment-feed-item:nth-child(3n+1){ transform: rotate(.45deg); }
+.comment-feed-mine{ background: #f3edda; }
+.cf-avatar{ width: 40px; height: 40px; }
+.cf-name{ color: #211d17; font-family: Georgia, "Times New Roman", serif; font-size: 15px; }
+.cf-name::before{ content: "Рецензия: "; font-weight: 400; font-style: italic; color: #6a6152; }
+.cf-time{ color: #6a6152; }
+.cf-text{ padding-right: 58px; color: #211d17; font: 400 16px/1.42 Georgia, "Times New Roman", serif; background: transparent; }
+.cf-title{ align-self: flex-start; padding: 5px 9px 5px 5px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.3); background: rgba(0,0,0,0.05); color: #211d17; }
+.cf-title:hover{ border-color: rgba(0,0,0,0.6); background: rgba(0,0,0,0.09); }
+.cf-title-name{ color: #211d17; font-weight: 800; }
+.cf-title-year{ color: #6a6152; }
+.cf-title-poster{ border-radius: 1px; background: #cfc6ae; }
+/* Штамп с оценкой автора */
+.cf-stamp{
+    position: absolute;
+    right: 12px;
+    top: 11px;
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border: 3px double #b0172f;
+    border-radius: 50%;
+    color: #b0172f;
+    font: 800 15px/1 ui-monospace, Consolas, monospace;
+    opacity: .85;
+    transform: rotate(-13deg);
+}
+.cf-stamp small{ display: block; font-size: 8px; font-weight: 800; text-align: center; }
+
+/* ---------- Добавить тайтлы: чистые кассеты ---------- */
+.add-card{
+    position: relative;
+    padding: 0 14px 74px;
+    overflow: hidden;
+    border-radius: 12px 12px 18px 18px / 12px 12px 10px 10px;
+    border: 10px solid #1c1a22;
+    border-bottom-width: 0;
+    background: linear-gradient(#f5f1e3 0 calc(100% - 66px), #1c1a22 calc(100% - 66px));
+    color: #18141e;
+    box-shadow: 0 12px 24px rgba(0,0,0,0.45);
+}
+.add-card:focus-within{ border-color: #29262f; }
+.add-card-error{ border-color: #5c1c2a; }
+/* Окошко с катушками внизу кассеты */
+.add-card::after{
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 11px;
+    width: min(250px, 66%);
+    height: 42px;
+    transform: translateX(-50%);
+    border-radius: 6px;
+    background:
+        radial-gradient(circle at 18% 50%, #111 0 3px, #e9e6da 3.5px 6px, #2b2520 6.5px 15px, transparent 15.5px),
+        radial-gradient(circle at 82% 50%, #111 0 3px, #e9e6da 3.5px 6px, #2b2520 6.5px 11px, transparent 11.5px),
+        linear-gradient(transparent 49%, #33291f 49% 53%, transparent 53%),
+        #08070b;
+}
+.add-card-head{ margin: 0 -14px 10px; padding: 7px 10px 6px 14px; background: linear-gradient(90deg, #ff2e93 0 58%, #ff9a3d 58% 82%, #ffd15c 82%); }
+.add-card-num{ color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.4); font-family: ui-monospace, Consolas, monospace; }
+.add-card-remove{ color: #fff; }
+.add-card-remove:hover{ background: rgba(0,0,0,0.25); color: #fff; }
+.add-card .add-field > span{ color: #6c6573; font-weight: 800; }
+.add-card .add-field em{ color: #8d8693; }
+.add-card .add-field input{
+    height: 38px;
+    padding: 0 3px;
+    border: 0;
+    border-bottom: 2px solid #9d96a6;
+    border-radius: 0;
+    background: transparent;
+    color: #18141e;
+    font-weight: 700;
+}
+.add-card .add-field input::placeholder{ color: #9d96a6; }
+.add-card .add-field input:focus{ border-bottom-color: #ff2e93; background: transparent; }
+.add-card-error .rGenre{ border-bottom-color: #d8132f; }
+.add-card .chip{ background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.2); color: #3a3540; }
+.add-card .chip.active{ background: #18141e; border-color: #18141e; color: #f5f1e3; }
+
+/* ---------- Онлайн-поиск: терминал видеопроката ---------- */
+.online-search-form{
+    --crt: #4dff91;
+    position: relative;
+    padding: 34px 14px 16px;
+    border-radius: 12px;
+    border: 8px solid #26232c;
+    background:
+        repeating-linear-gradient(to bottom, rgba(77,255,145,0.05) 0 1px, transparent 1px 3px),
+        #04120b;
+    box-shadow: inset 0 0 26px rgba(0,0,0,0.85), 0 12px 26px rgba(0,0,0,0.45);
+    font-family: ui-monospace, Consolas, monospace;
+}
+.online-search-form::before{
+    content: "ВИДЕОПРОКАТ 愛 · ПОИСК ПО БАЗЕ TMDB";
+    position: absolute;
+    left: 14px; right: 14px; top: 10px;
+    color: var(--crt);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.online-search-row-main .search-input-field,
+.os-filter-field input,
+.os-filter-field select{
+    border-radius: 2px;
+    border: 1px solid rgba(77,255,145,0.5);
+    background: rgba(0,0,0,0.5);
+    color: var(--crt);
+    font-family: ui-monospace, Consolas, monospace;
+    font-weight: 700;
+}
+.os-filter-field select option{ background: #04120b; color: #4dff91; }
+.online-search-row-main .search-input-field::placeholder,
+.os-filter-field input::placeholder{ color: rgba(77,255,145,0.45); }
+.online-search-row-main .search-input-field:focus{ border-color: var(--crt); box-shadow: 0 0 10px rgba(77,255,145,0.35); }
+.os-filter-field label{ color: rgba(77,255,145,0.8); font-family: ui-monospace, Consolas, monospace; }
+@layer legacy {
+    .online-search-form .online-search-row-main .btn-search-icon{ background: #4dff91 !important; border-radius: 2px !important; box-shadow: none !important; }
+}
+.online-search-hint{ font-family: ui-monospace, Consolas, monospace; color: #7ee8a8; }
+.online-search-hint::before{ content: "> "; }
+.online-search-card{
+    border-radius: 3px;
+    background: #17141d;
+    border: 1px solid #38333f;
+    box-shadow: 4px 0 0 #2b2733, 0 10px 20px rgba(0,0,0,0.4);
+}
+
+/* ---------- Игровые автоматы для аркад ---------- */
+#app:has(> .game-wrap.is-arcade) > h1{ display: none; }
+.game-wrap.is-arcade .game-score-row{
+    border-radius: 3px;
+    border-color: #000;
+    background: #08070b;
+    color: #4dff91;
+    font-family: ui-monospace, Consolas, monospace;
+}
+.game-wrap.is-arcade .game-score-row span{ color: #ffd15c; }
+.arcade-cab{
+    --h: 300;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100%;
+    padding: 0 12px;
+    border-radius: 12px 12px 6px 6px;
+    background: linear-gradient(90deg, #120a24, #2a1a46 8%, #2a1a46 92%, #120a24);
+    box-shadow: 0 0 0 2px hsla(var(--h), 90%, 60%, 0.65), 0 18px 40px rgba(0,0,0,0.55), 0 0 34px hsla(var(--h), 90%, 60%, 0.22);
+}
+.arcade-marquee{
+    align-self: stretch;
+    margin: 0 -12px 10px;
+    padding: 8px 12px;
+    border-radius: 12px 12px 0 0;
+    background: linear-gradient(hsl(var(--h) 92% 58%), hsl(var(--h) 85% 38%));
+    color: #fff;
+    font: 900 clamp(13px, 2.4vw, 19px)/1.15 ui-monospace, Consolas, monospace;
+    letter-spacing: .1em;
+    text-align: center;
+    text-transform: uppercase;
+    text-shadow: 0 2px 0 rgba(0,0,0,0.45);
+}
+.arcade-cab .game-canvas-wrap{ border-radius: 10px; box-shadow: 0 0 0 5px #06050a, 0 0 0 7px #4a3f61; }
+.arcade-cab .game-canvas{ border: 0; border-radius: 8px; box-shadow: none; }
+.arcade-cab .game-start-overlay{ border-radius: 8px; backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(6,3,14,0.62); }
+.arcade-deck{
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: 13px -12px 0;
+    padding: 8px 12px;
+    border-radius: 0 0 6px 6px;
+    background: linear-gradient(#3a2363, #21123f);
+}
+.arcade-deck i{ display: block; flex: none; }
+.arcade-stick{ width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff8a9d, #d8132f); box-shadow: 0 7px 0 -5px #ddd, 0 2px 3px rgba(0,0,0,0.5); }
+.arcade-btn{ width: 13px; height: 13px; border-radius: 50%; background: #ffd15c; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.3); }
+.arcade-btn.is-b{ background: #2ee8ff; }
+.arcade-coin{ width: 6px; height: 16px; border-radius: 1px; background: #120825; box-shadow: 0 0 0 2px #ffd15c; }
+.game-wrap.is-arcade .dpad-btn{ border: 0; background: radial-gradient(circle at 38% 30%, #ff8a9d, #c8102e 70%); color: #fff; box-shadow: inset 0 -4px 0 rgba(0,0,0,0.3), 0 5px 10px rgba(0,0,0,0.45); }
+.game-wrap.is-arcade .dpad-btn:active{ transform: translateY(2px); box-shadow: inset 0 -1px 0 rgba(0,0,0,0.3); background: radial-gradient(circle at 38% 30%, #ff8a9d, #c8102e 70%); }
+
+/* ---------- Судоку: страница газеты ---------- */
+.sdk-board{ background: #211d17; border-color: #211d17; box-shadow: 0 14px 30px rgba(0,0,0,0.5); }
+.sdk-cell, .sdk-cell.is-peer{ background: #efe7d1; color: #211d17; font-family: Georgia, "Times New Roman", serif; }
+.sdk-cell.is-peer{ background: #e2d8bd; }
+.sdk-cell.is-given{ color: #211d17; font-weight: 700; }
+.sdk-cell.is-user{ color: #1c47b8; text-shadow: none; font-family: "Comic Sans MS", "Segoe Print", cursive; }
+.sdk-cell.is-same{ background: #f0d46a; }
+.sdk-cell.is-wrong{ color: #c8102e; background: #f3c4bb; text-shadow: none; }
+.sdk-cell.is-conflict{ background: #f3c4bb; }
+.sdk-board.is-hidden .sdk-cell{ background: #d4cbb2; }
+.sdk-notes{ color: #5b5346; }
+
+/* ---------- Настольные игры: деревянный стол с сукном ---------- */
+.dk-table, .bg-table{
+    border: 9px solid #4a2f1c;
+    box-shadow: inset 0 0 44px rgba(0,0,0,0.5), 0 14px 28px rgba(0,0,0,0.45);
+}
+.dk-table{ background: radial-gradient(80% 65% at 50% 45%, #1e7a52, #0d4a30 80%); }
+.bg-table{ background: radial-gradient(80% 65% at 50% 45%, #2b2358, #17123a 80%); }
+.pz-field{ border: 8px solid #4a2f1c; background: repeating-linear-gradient(92deg, rgba(0,0,0,0.13) 0 3px, transparent 3px 11px, rgba(255,200,140,0.04) 11px 13px, transparent 13px 21px), #6d4628; }
+
+/* ---------- Комната питомца: как главная ---------- */
+.pet-room{ border: 1px solid var(--border-strong); border-radius: var(--radius-l); box-shadow: 0 18px 44px rgba(0,0,0,0.45); }
+
+/* ---------- Экран входа: ночной видеопрокат и клубная карта ---------- */
+.login-scene{
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(16px, 4vh, 34px);
+    padding: 20px 16px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    text-align: left;
+    background:
+        linear-gradient(transparent 0 76%, #1d120c 76% 77%, #2d1c14 77%, #170e09),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 2px, transparent 2px 64px),
+        linear-gradient(#1d1630, #120d20);
+}
+/* Стеллажи с кассетами за витриной */
+.login-scene::before{
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    height: 76%;
+    opacity: .34;
+    background:
+        repeating-linear-gradient(to bottom, transparent 0 86px, #54351f 86px 96px),
+        repeating-linear-gradient(90deg, #a81a3c 0 16px, #1c47b8 16px 32px, #1f8a58 32px 46px, #c97b12 46px 62px, #6c2bb0 62px 78px, #120a1a 78px 82px);
+    pointer-events: none;
+}
+.login-sign{
+    position: relative;
+    padding: 9px 22px 11px;
+    border: 3px solid #ff2e93;
+    border-radius: 10px;
+    background: rgba(9,5,16,0.82);
+    box-shadow: 0 0 22px rgba(255,46,147,0.65), inset 0 0 16px rgba(255,46,147,0.32);
+    color: #ffe3f1;
+    font: 700 clamp(24px, 6vw, 40px)/1.1 var(--font-display);
+    text-align: center;
+    text-shadow: 0 0 10px #ff2e93, 0 0 24px #ff2e93;
+}
+.login-sign small{ display: block; margin-top: 3px; color: #8ff3ff; font: 800 clamp(10px, 2.2vw, 13px)/1.2 ui-monospace, Consolas, monospace; letter-spacing: .24em; text-shadow: 0 0 9px #2ee8ff; }
+.login-card{
+    position: relative;
+    box-sizing: border-box;
+    width: min(390px, 100%);
+    padding: 0 18px 18px;
+    overflow: hidden;
+    border-radius: 16px;
+    background: #f5f1e3;
+    color: #18141e;
+    box-shadow: 0 24px 54px rgba(0,0,0,0.65);
+}
+.login-card.is-error{ animation: sdkShake .35s ease; }
+.login-card-head{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 -18px;
+    padding: 13px 18px;
+    background: linear-gradient(100deg, #ff2e93, #8b3bff);
+    color: #fff;
+}
+.login-card-head b{ font: 700 17px/1.15 var(--font-display); }
+.login-card-head small{ display: block; margin-top: 2px; font: 700 10.5px/1.2 ui-monospace, Consolas, monospace; letter-spacing: .08em; opacity: .85; }
+.login-card-avas{ display: flex; flex: none; }
+.login-card-avas span{ display: block; width: 36px; height: 36px; border-radius: 50%; box-shadow: 0 0 0 2px #fff; }
+.login-card-avas span + span{ margin-left: -9px; }
+.login-card-stripe{ height: 28px; margin: 0 -18px 15px; background: #15121c; }
+.login-form.login-card-form{ display: grid; gap: 13px; margin: 0; padding: 0; background: none; border: 0; box-shadow: none; }
+.login-field{ display: grid; gap: 3px; color: #6c6573; font: 800 11px/1.2 ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.login-card-form .login-field input{
+    box-sizing: border-box;
+    width: 100%;
+    height: 40px;
+    margin: 0;
+    padding: 0 3px;
+    border: 0;
+    border-bottom: 2px solid #9d96a6;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #18141e;
+    font: 700 17px var(--font-ui);
+    letter-spacing: 0;
+    text-transform: none;
+    outline: none;
+}
+.login-card-form .login-field input:focus{ border-bottom-color: #ff2e93; }
+.login-card-form .login-submit{
+    width: 100%;
+    min-height: 48px;
+    margin: 5px 0 0;
+    border: 1px solid #000;
+    border-radius: 6px;
+    background: linear-gradient(#e0355a, #a81a3c);
+    color: #fff;
+    font: 800 15px var(--font-ui);
+    text-shadow: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 3px 0 #4e0c1b;
+    animation: none;
+    cursor: pointer;
+}
+.login-card-form .login-submit:active{ transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 0 #4e0c1b; }
+
+/* ---------- Чат: лёгкое обновление, читаемость на первом месте ---------- */
+body[data-section="chat"] .chat-box{
+    background:
+        radial-gradient(circle at 1px 1px, rgba(255,255,255,0.045) 1px, transparent 0) 0 0 / 22px 22px,
+        linear-gradient(#1d1630, #120d20);
+    border-color: var(--border-strong);
+}
+.chat-bubble.has-ava{ position: relative; margin-left: 38px; }
+.chat-ava{ position: absolute; left: -38px; bottom: 0; width: 30px; height: 30px; }
+
+/* ---------- Просмотрено: картонные коробки ---------- */
+.wb-boxes{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 2px 0 16px; }
+.wb-box{
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 6px 2px 8px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    color: var(--text-dim);
+    transition: transform .12s ease, background .12s ease;
+}
+.wb-box:hover{ transform: translateY(-2px); background: var(--surface); }
+.wb-box.is-active{ background: var(--surface-2); border-color: var(--border-strong); color: var(--text); }
+.wb-box svg{ display: block; width: min(100%, 92px); height: auto; }
+.wb-box:not(.is-active) svg{ opacity: .72; }
+.wb-box b{ font-size: 13px; font-weight: 800; }
+.wb-box span{ font: 700 12px/1 ui-monospace, Consolas, monospace; color: var(--gold); }
+
+.vhs-crate{
+    position: relative;
+    margin-bottom: 14px;
+    padding: 34px 12px 14px;
+    border-radius: 4px;
+    background: linear-gradient(#b98a55, #9c7141);
+    box-shadow: inset 0 0 0 2px rgba(70,40,15,0.45), 0 14px 30px rgba(0,0,0,0.45);
+}
+.vhs-crate::before{
+    content: attr(data-label);
+    position: absolute;
+    left: 12px; top: 8px;
+    color: #2a1a0c;
+    font: 700 17px/1.1 "Segoe Print", "Comic Sans MS", cursive;
+    transform: rotate(-1deg);
+}
+.vhs-stacks{ display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 5px 10px; padding: 10px; border-radius: 3px; background: #1a100a; box-shadow: inset 0 3px 10px rgba(0,0,0,0.7); }
+.vhs-lying{
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    height: 40px;
+    min-width: 0;
+    padding: 0 6px 0 8px;
+    box-sizing: border-box;
+    border-radius: 2px;
+    background: linear-gradient(90deg, hsl(var(--h) 68% 36%), hsl(var(--h) 72% 27%));
+    box-shadow: inset 0 2px 0 rgba(255,255,255,0.22), inset 0 -3px 0 rgba(0,0,0,0.35);
+    color: #fff;
+    text-align: left;
+    transition: transform .1s ease;
+}
+.vhs-lying:hover{ transform: translateX(4px); }
+.vhs-lying-name{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+.vhs-lying-year{ flex: none; font: 700 10.5px/1 ui-monospace, Consolas, monospace; color: rgba(255,255,255,0.86); }
+.vhs-lying .vhs-mark{ flex: none; }
+
+/* ---------- Рандомайзер: ярмарочное колесо и билетики ---------- */
+.modal-content.randomizer-modal-content::before{ display: none !important; }
+.randomizer-modal-content h3{
+    display: inline-block;
+    margin: 0 auto 20px;
+    padding: 6px 18px 7px;
+    border-radius: 7px;
+    background: linear-gradient(#c8102e, #8f0b20);
+    box-shadow: 0 0 0 2px #ffd15c, 0 5px 12px rgba(0,0,0,0.45);
+    color: #fff4d0;
+    font-size: 18px;
+    letter-spacing: .04em;
+}
+.randomizer-wheel-area{ margin: 14px 0 6px; }
+.randomizer-wheel-stage{ width: 232px; height: 232px; margin: 0 auto; }
+/* Деревянный обод с лампочками */
+.rz-rim{
+    position: absolute;
+    inset: -22px;
+    border-radius: 50%;
+    background: conic-gradient(#74492a, #9a6a3f, #6a4125, #9a6a3f, #74492a, #9a6a3f, #6a4125, #9a6a3f, #74492a);
+    box-shadow: 0 12px 26px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(0,0,0,0.3);
+}
+.rz-bulb{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 9px;
+    height: 9px;
+    margin: -4.5px;
+    border-radius: 50%;
+    background: #ffe29a;
+    box-shadow: 0 0 6px #ffd15c;
+    transform: rotate(var(--a)) translateY(calc(-116px - 9px));
+}
+.rz-spinning .rz-bulb{ animation: rzBulb .5s steps(1) infinite; animation-delay: calc(var(--i) * -0.05s); }
+@keyframes rzBulb{ 50%{ background: #5f4a24; box-shadow: none; } }
+.randomizer-wheel-canvas{ box-shadow: 0 0 0 3px #1a100a; }
+.randomizer-wheel-pointer{ top: -32px; border-left-width: 13px; border-right-width: 13px; border-top: 24px solid #e5e5ea; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.6)); }
+.randomizer-wheel-hub{ background: radial-gradient(circle at 35% 30%, #ffd98f, #b77e2e 70%); border: 2px solid #5e3a12; box-shadow: 0 2px 6px rgba(0,0,0,0.6); }
+.randomizer-wheel-canvas.randomizer-wheel-empty{ opacity: .4; filter: saturate(.25); }
+.randomizer-result{ margin: 28px 0 8px; }
+.randomizer-result.randomizer-result-hit{ display: inline-block; max-width: 100%; padding: 8px 18px; border-radius: 4px; background: #f5f1e3; color: #18141e; font-family: var(--font-display); font-weight: 700; text-shadow: none; box-shadow: 0 8px 18px rgba(0,0,0,0.45); overflow-wrap: anywhere; }
+.rz-mode{ display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 8px; padding: 3px; border-radius: 7px; background: #08070b; }
+.rz-mode button{ height: 34px; border-radius: 5px; font-size: 13px; font-weight: 700; color: var(--text-dim); }
+.rz-mode button.is-active{ background: linear-gradient(#55525c, #34313a); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,0.22); }
+.rz-input{ height: 44px; border-radius: 5px; background: rgba(0,0,0,0.35); }
+.rz-add-btn{ height: 44px; width: 44px; border-radius: 5px; background: linear-gradient(#55525c, #34313a); border-color: #000; box-shadow: inset 0 1px 0 rgba(255,255,255,0.28); }
+.rz-suggest{ display: grid; gap: 3px; margin-top: 5px; text-align: left; }
+.rz-suggest[hidden]{ display: none; }
+.rz-suggest button{ justify-content: flex-start; min-height: 34px; padding: 4px 11px; border-radius: 4px; background: rgba(255,255,255,0.05); font-size: 13.5px; font-weight: 600; text-align: left; }
+.rz-suggest button:hover{ background: rgba(255,255,255,0.12); }
+.rz-suggest small{ margin-left: 6px; color: var(--text-faint); }
+.rz-suggest-empty{ padding: 6px 2px; font-size: 13px; color: var(--text-faint); text-align: center; }
+/* Варианты — билетики */
+.rz-chip{
+    height: 31px;
+    padding: 0 3px 0 13px;
+    border: 0;
+    border-left: 5px dotted #17141d;
+    border-radius: 2px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--c) 45%, #f5f1e3), #f5f1e3 42%);
+    color: #18141e;
+    font-weight: 700;
+}
+.rz-chip-x{ color: #5d5661; }
+.rz-chip-x:hover{ background: rgba(0,0,0,0.12); color: #18141e; }
+.rz-presets{ flex-wrap: wrap; gap: 8px 18px; }
+.rz-buttons .ui-pill{ border-radius: 5px; }
+.rz-spin.ui-pill-accent, .rz-spin.ui-pill-accent:hover{ background: linear-gradient(#e0355a, #a81a3c); box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 3px 0 #4e0c1b; }
+@media (max-width: 400px){
+    .randomizer-wheel-stage{ width: 200px; height: 200px; }
+    .rz-bulb{ transform: rotate(var(--a)) translateY(calc(-100px - 9px)); }
+}
+
+/* Сцена входа на весь экран: анимация #app держит transform, и fixed считался бы от него */
+#app:has(.login-scene){ animation: none; transform: none; }

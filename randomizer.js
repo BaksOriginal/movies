@@ -146,9 +146,29 @@ function spawnRandomizerSparks(container) {
 // Последний набор вариантов колеса запоминается между открытиями —
 // обычно крутят одно и то же ("кто выбирает фильм", "пицца или суши")
 const RANDOMIZER_ITEMS_KEY = "randomizerItems";
+const RANDOMIZER_BULBS = 20;
+const RANDOMIZER_SUGGEST_MAX = 6;
+const RANDOMIZER_LUCKY_COUNT = 6;
+let randomizerCatalog = null;   // названия фильмов из каталога, загружаются при первой нужде
+
+// Фильмы для подсказок. Отдельный запрос, а не данные главной: рандомайзер
+// открывается и на других страницах сайта. «Секрет» в подсказки не попадает.
+async function loadRandomizerCatalog() {
+    if (randomizerCatalog) return randomizerCatalog;
+    const { data, error } = await db.from("titles").select("title, year, category");
+    if (error) throw error;
+    randomizerCatalog = (data || []).filter(r => r.title && !String(r.category || "").includes("Секрет"));
+    return randomizerCatalog;
+}
+
+async function loadRandomizerWishlist() {
+    if (typeof wishlistTitles !== "undefined") return Array.from(wishlistTitles);
+    const { data, error } = await db.from("wishlist_items").select("title");
+    if (error) throw error;
+    return Array.from(new Set((data || []).map(r => r.title)));
+}
 
 function showRandomizerModal() {
-    const hasWishlist = typeof wishlistTitles !== "undefined" && wishlistTitles.size > 0;
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "randomizerModal";
@@ -160,6 +180,8 @@ function showRandomizerModal() {
             <h3>🎲 Рандомайзер</h3>
             <div class="randomizer-wheel-area randomizer-wheel-area-visible" id="randomizerWheelArea">
                 <div class="randomizer-wheel-stage" id="randomizerWheelStage">
+                    <div class="rz-rim" aria-hidden="true"></div>
+                    ${Array.from({ length: RANDOMIZER_BULBS }, (_, i) => `<i class="rz-bulb" aria-hidden="true" style="--a:${i * 360 / RANDOMIZER_BULBS}deg;--i:${i}"></i>`).join("")}
                     <div class="randomizer-wheel-glow" id="randomizerWheelGlow"></div>
                     <div class="randomizer-sparks" id="randomizerSparks"></div>
                     <div class="randomizer-wheel-pointer"></div>
@@ -169,13 +191,19 @@ function showRandomizerModal() {
             </div>
             <div id="randomizerResult" class="randomizer-result"></div>
 
+            <div class="rz-mode" role="group" aria-label="Что добавить">
+                <button type="button" class="ui-btn is-active" data-mode="own">✍️ Своё</button>
+                <button type="button" class="ui-btn" data-mode="film">🎬 Фильм</button>
+            </div>
             <form class="rz-add" id="randomizerAddForm">
-                <input type="text" id="randomizerInput" class="rz-input" placeholder="Добавить вариант" enterkeyhint="done" autocomplete="off">
+                <input type="text" id="randomizerInput" class="rz-input" placeholder="Вариант, можно несколько через запятую" enterkeyhint="done" autocomplete="off">
                 <button type="submit" class="ui-btn rz-add-btn" title="Добавить">+</button>
             </form>
+            <div class="rz-suggest" id="randomizerSuggest" hidden></div>
             <div class="rz-chips" id="randomizerChips"></div>
             <div class="rz-presets">
-                ${hasWishlist ? `<button type="button" class="ui-btn ui-link" id="randomizerFromWishlist">🍿 Из «Будем смотреть»</button>` : ""}
+                <button type="button" class="ui-btn ui-link" id="randomizerFromWishlist">🍿 Из «Будем смотреть»</button>
+                <button type="button" class="ui-btn ui-link" id="randomizerLucky">🎲 ${RANDOMIZER_LUCKY_COUNT} случайных фильмов</button>
                 <button type="button" class="ui-btn ui-link" id="randomizerClear">Очистить</button>
             </div>
 
@@ -257,24 +285,102 @@ function showRandomizerModal() {
         redraw();
     }
 
-    // Можно вставить сразу несколько вариантов через запятую
+    // Два способа пополнить колесо: своё (любой текст) и фильм из каталога
+    let mode = "own";
+    const suggestEl = overlay.querySelector("#randomizerSuggest");
+
+    function addItems(added) {
+        if (isSpinning || added.length === 0) return;
+        items.push(...added);
+        inputEl.value = "";
+        suggestEl.hidden = true;
+        thingSound("paper");
+        update();
+    }
+
+    overlay.querySelectorAll(".rz-mode button").forEach((btn) => {
+        btn.onclick = () => {
+            mode = btn.dataset.mode;
+            overlay.querySelectorAll(".rz-mode button").forEach(b => b.classList.toggle("is-active", b === btn));
+            inputEl.placeholder = mode === "film" ? "Начните вводить название" : "Вариант, можно несколько через запятую";
+            suggestEl.hidden = true;
+            inputEl.value = "";
+            inputEl.focus();
+        };
+    });
+
+    async function renderSuggestions() {
+        const q = inputEl.value.trim().toLowerCase();
+        if (mode !== "film" || !q) { suggestEl.hidden = true; return; }
+        let catalog;
+        try {
+            catalog = await loadRandomizerCatalog();
+        } catch (e) {
+            suggestEl.hidden = false;
+            suggestEl.innerHTML = `<div class="rz-suggest-empty">Не получилось загрузить каталог</div>`;
+            return;
+        }
+        if (mode !== "film" || inputEl.value.trim().toLowerCase() !== q) return;
+        const found = catalog.filter(r => r.title.toLowerCase().includes(q)).slice(0, RANDOMIZER_SUGGEST_MAX);
+        suggestEl.hidden = false;
+        suggestEl.innerHTML = found.length ? "" : `<div class="rz-suggest-empty">В каталоге не нашлось</div>`;
+        found.forEach((r) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "ui-btn";
+            b.textContent = r.title;
+            if (r.year) {
+                const y = document.createElement("small");
+                y.textContent = r.year;
+                b.appendChild(y);
+            }
+            b.onclick = () => addItems([r.title]);
+            suggestEl.appendChild(b);
+        });
+    }
+    inputEl.addEventListener("input", renderSuggestions);
+
+    // Своё можно вставить сразу несколькими вариантами через запятую; у фильма
+    // запятая — часть названия, поэтому добавляется целиком или первая подсказка
     overlay.querySelector("#randomizerAddForm").onsubmit = (e) => {
         e.preventDefault();
         if (isSpinning) return;
-        const added = inputEl.value.split(",").map(s => s.trim()).filter(Boolean);
-        if (added.length === 0) return;
-        items.push(...added);
-        inputEl.value = "";
+        if (mode === "film") {
+            const first = suggestEl.hidden ? null : suggestEl.querySelector("button");
+            if (first) first.click();
+            else if (inputEl.value.trim()) addItems([inputEl.value.trim()]);
+            return;
+        }
+        addItems(inputEl.value.split(",").map(s => s.trim()).filter(Boolean));
+    };
+
+    overlay.querySelector("#randomizerFromWishlist").onclick = async () => {
+        if (isSpinning) return;
+        let wish;
+        try {
+            wish = await loadRandomizerWishlist();
+        } catch (e) {
+            resultEl.textContent = "Не получилось загрузить список";
+            return;
+        }
+        if (wish.length === 0) { resultEl.textContent = "В «Будем смотреть» пока пусто"; return; }
+        // Колесо с сотней секторов нечитаемо — берём до 12 случайных
+        items = wish.sort(() => Math.random() - 0.5).slice(0, 12).map(t => t.replace(/\s*\(\d{4}\)$/, ""));
+        thingSound("tape");
         update();
     };
 
-    if (hasWishlist) overlay.querySelector("#randomizerFromWishlist").onclick = () => {
+    overlay.querySelector("#randomizerLucky").onclick = async () => {
         if (isSpinning) return;
-        const wish = Array.from(wishlistTitles);
-        if (wish.length === 0) return;
-        // Колесо с сотней секторов нечитаемо — берём до 12 случайных
-        items = wish.sort(() => Math.random() - 0.5).slice(0, 12).map(t => t.replace(/\s*\(\d{4}\)$/, ""));
-        update();
+        let catalog;
+        try {
+            catalog = await loadRandomizerCatalog();
+        } catch (e) {
+            resultEl.textContent = "Не получилось загрузить каталог";
+            return;
+        }
+        const picked = catalog.slice().sort(() => Math.random() - 0.5).slice(0, RANDOMIZER_LUCKY_COUNT).map(r => r.title);
+        addItems(picked);
     };
 
     overlay.querySelector("#randomizerClear").onclick = () => {
@@ -315,6 +421,23 @@ function showRandomizerModal() {
         canvas.style.transition = `transform ${SPIN_DURATION_MS / 1000}s cubic-bezier(0.16, 0.72, 0.14, 1)`;
         canvas.style.transform = `rotate(${currentRotation}deg)`;
 
+        // Щелчок язычка на каждом проходе сектора: звук сам замедляется вместе с колесом
+        let lastSector = null, lastTickAt = 0;
+        const tickLoop = () => {
+            if (!isSpinning || !overlay.isConnected) return;
+            const m = new DOMMatrix(getComputedStyle(canvas).transform);
+            const deg = (Math.atan2(m.b, m.a) * 180 / Math.PI + 360) % 360;
+            const sector = Math.floor(deg / segAngleDeg);
+            const now = performance.now();
+            if (sector !== lastSector && now - lastTickAt > 45) {
+                if (lastSector !== null) thingSound("knob");
+                lastSector = sector;
+                lastTickAt = now;
+            }
+            requestAnimationFrame(tickLoop);
+        };
+        requestAnimationFrame(tickLoop);
+
         setTimeout(() => {
             isSpinning = false;
             overlay.classList.remove("rz-spinning");
@@ -324,6 +447,7 @@ function showRandomizerModal() {
             resultEl.textContent = "🎯 " + items[winnerIndex];
             resultEl.classList.add("randomizer-result-hit");
             vibrate([40, 30, 60]);
+            thingSound("win");
 
             // Вспышка на колесе, расширяющееся свечение и разлетающиеся искры
             void wheelStage.offsetWidth;

@@ -556,6 +556,7 @@ function dkMount(container, ctx) {
     return {
         update(state, info) {
             const changed = !S || JSON.stringify(S) !== JSON.stringify(state);
+            if (S && changed) thingSound("card");
             S = state;
             if (selected && !state.hands[me].includes(selected)) selected = null;
             if (changed) render();

@@ -733,10 +733,10 @@ function bdBindBoard() {
     board.addEventListener("pointercancel", end);
 
     // Кнопки счётчика
-    board.addEventListener("click", (e) => {
+    board.addEventListener("click", async (e) => {
         const hit = e.target.closest("[data-from]");
         if (hit) {
-            if (confirm("Убрать эту нить?")) bdRemoveThread(hit.dataset.from, hit.dataset.to);
+            if (await siteConfirm("Убрать эту нить?", "Убрать")) bdRemoveThread(hit.dataset.from, hit.dataset.to);
             return;
         }
         const btn = e.target.closest("[data-act]");
@@ -860,7 +860,7 @@ function bdOpenEditor(note) {
     };
     const del = $("#bdDelete");
     if (del) del.onclick = async () => {
-        if (!confirm("Удалить заметку? Она пропадёт у обоих.")) return;
+        if (!(await siteConfirm("Удалить заметку? Она пропадёт у обоих.", "Удалить"))) return;
         close();
         const backup = bd.notes.get(note.id);
         bdRemoveNote(note.id);

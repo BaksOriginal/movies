@@ -408,6 +408,7 @@ function showPlayOverlay(canvas, onPlay) {
         holder.className = "game-canvas-wrap" + (canvas.tagName !== "CANVAS" ? " game-canvas-wrap-fluid" : "");
         canvas.parentNode.insertBefore(holder, canvas);
         holder.appendChild(canvas);
+        if (canvas.tagName === "CANVAS") buildArcadeCabinet(canvas, holder);
     }
 
     const overlay = document.createElement("div");
@@ -420,6 +421,27 @@ function showPlayOverlay(canvas, onPlay) {
         overlay.remove();
         onPlay();
     });
+}
+
+// Аркады стоят в корпусе игрового автомата: вывеска сверху, панель с кнопками снизу.
+// Игра автомата определяется по id холста ("snakeCanvas" → snake).
+function buildArcadeCabinet(canvas, holder) {
+    const wrap = canvas.closest(".game-wrap");
+    if (!wrap) return;
+    const meta = GAMES_META.find(g => g.id + "Canvas" === canvas.id);
+    const cab = document.createElement("div");
+    cab.className = "arcade-cab";
+    cab.style.setProperty("--h", meta ? meta.hue : 300);
+    cab.innerHTML = `<div class="arcade-marquee"></div>`;
+    cab.firstChild.textContent = meta ? meta.title : "Аркада";
+    holder.parentNode.insertBefore(cab, holder);
+    cab.appendChild(holder);
+    const deck = document.createElement("div");
+    deck.className = "arcade-deck";
+    deck.setAttribute("aria-hidden", "true");
+    deck.innerHTML = `<i class="arcade-stick"></i><i class="arcade-btn"></i><i class="arcade-btn is-b"></i><i class="arcade-coin"></i>`;
+    cab.appendChild(deck);
+    wrap.classList.add("is-arcade");
 }
 
 // Определяем "настоящий десктоп" — устройство с мышью (точный поинтер +

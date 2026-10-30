@@ -169,6 +169,7 @@ function tttMount(container, ctx) {
         update(state, info) {
             const prev = S;
             const changed = !S || JSON.stringify(S) !== JSON.stringify(state);
+            if (S && changed) thingSound("pencil");
             S = state;
             pending = false;
             if (changed) render(prev);

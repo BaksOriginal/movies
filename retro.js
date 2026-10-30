@@ -102,12 +102,35 @@ function retroThunk(ctx, at, freq, dur, vol) {
     o.stop(at + dur + 0.02);
 }
 
+let retroLastThingAt = 0;
+
 function thingSound(name) {
     if (thingsMuted()) return;
     const ctx = retroCtx();
     if (!ctx) return;
+    retroLastThingAt = performance.now();
     const t = ctx.currentTime + 0.005;
     switch (name) {
+        case "tick":    // любая кнопка: еле слышный щелчок
+            retroBurst(ctx, t, 0.018, { freq: 2100, q: 3, vol: 0.05 });
+            break;
+        case "card":    // карта ложится на стол
+            retroBurst(ctx, t, 0.07, { type: "highpass", freq: 2200, vol: 0.07, sweep: 900 });
+            retroThunk(ctx, t + 0.03, 210, 0.04, 0.05);
+            break;
+        case "clack":   // фишка стукнула о доску
+            retroThunk(ctx, t, 720, 0.04, 0.12);
+            retroBurst(ctx, t, 0.025, { freq: 3000, q: 2, vol: 0.09 });
+            break;
+        case "pencil":  // карандаш по бумаге
+            retroBurst(ctx, t, 0.07, { freq: 3600, q: 1.5, vol: 0.05, sweep: 2600 });
+            break;
+        case "erase":
+            retroBurst(ctx, t, 0.1, { type: "lowpass", freq: 1500, vol: 0.05 });
+            break;
+        case "win":
+            [523, 659, 784, 1047].forEach((f, k) => retroThunk(ctx, t + k * 0.09, f, 0.16, 0.07));
+            break;
         case "tape":    // кассету достали с полки: пластиковый стук
             retroBurst(ctx, t, 0.05, { freq: 2200, q: 2, vol: 0.12 });
             retroThunk(ctx, t, 190, 0.09, 0.14);
@@ -145,6 +168,13 @@ function thingSound(name) {
             break;
     }
 }
+
+// Любая кнопка без своего звука тихо щёлкает. Слушаем в конце всплытия: если
+// обработчик уже сыграл свой звук, второй не добавляем.
+document.addEventListener("click", (e) => {
+    if (!e.target.closest || !e.target.closest("button, a, label, select, .movie-item, .chip, .calendar-day-active")) return;
+    if (performance.now() - retroLastThingAt > 60) thingSound("tick");
+});
 
 // ---------- Атмосферный звук каналов ----------
 const retroAmbience = { stop: null, gain: null };
