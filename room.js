@@ -183,9 +183,8 @@ function buildRoomHome(onViewChange) {
     const radio = addObj({ id: "radio", ar: "110/80", wide: [80, 2.5, 9], tall: [63, 15.3, 17], label: "Музыка", html: ROOM_ART.radio, go: hasMusic ? () => {
         toggleBgMusic();
         thingSound("knob");
-        radio.classList.toggle("is-on", isMusicPlaying);
     } : null });
-    radio.classList.toggle("is-on", hasMusic && isMusicPlaying);
+    if (hasMusic) watchMusicControl(radio, () => radio.classList.toggle("is-on", isMusicPlaying));
 
     const lamp = addObj({ id: "lamp", ar: "70/260", wide: [1, 37, 5], tall: [51, 45, 9], label: "Свет", html: ROOM_ART.lamp, go: () => {
         thingSound("switch");

@@ -336,9 +336,9 @@ function renderShellUser() {
             music.innerHTML = shellIcon(isMusicPlaying ? "musicOn" : "musicOff");
             music.title = isMusicPlaying ? "Выключить музыку" : "Включить музыку";
         };
-        paint();
-        music.onclick = () => { toggleBgMusic(); paint(); };
+        music.onclick = () => toggleBgMusic();
         buttons.appendChild(music);
+        watchMusicControl(music, paint);
     }
     const logout = document.createElement("button");
     logout.type = "button";
@@ -355,6 +355,20 @@ function shellLogout() {
     else performLogout().then(() => { location.href = "../"; });
 }
 
+// Все переключатели музыки (меню, шторка «Ещё», радио в комнате) показывают
+// одно состояние: кто бы ни переключил, перерисовываются все, кто на экране.
+const musicControls = new Set();
+function watchMusicControl(el, paint) {
+    musicControls.add({ el, paint });
+    paint();
+}
+function paintMusicControls() {
+    musicControls.forEach((control) => {
+        if (control.el.isConnected) control.paint();
+        else musicControls.delete(control);
+    });
+}
+
 function toggleBgMusic() {
     const audio = document.getElementById("bgMusic");
     if (!audio) return;
@@ -366,6 +380,7 @@ function toggleBgMusic() {
         isMusicPlaying = false;
     }
     localStorage.setItem("musicEnabled", String(isMusicPlaying));
+    paintMusicControls();
 }
 
 function escapeShellText(str) {
@@ -504,9 +519,9 @@ function openShellMoreSheet() {
         const paint = () => {
             music.innerHTML = `${shellIcon(isMusicPlaying ? "musicOn" : "musicOff")}<span>${isMusicPlaying ? "Музыка включена" : "Музыка выключена"}</span>`;
         };
-        paint();
-        music.onclick = () => { toggleBgMusic(); paint(); };
+        music.onclick = () => toggleBgMusic();
         row.appendChild(music);
+        watchMusicControl(music, paint);
     }
     if (typeof thingSound === "function") {
         const things = document.createElement("button");
