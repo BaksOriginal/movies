@@ -11,17 +11,15 @@
 // ==========================================
 // Состояние совместного просмотра (Watch Party)
 // ==========================================
-// Синхронизация построена на Supabase Realtime: канал с двумя механизмами —
-// Broadcast (мгновенные события play/pause/seek/load, без записи в БД и без
-// каких-либо лимитов на "N запросов в час") и Presence (кто сейчас находится
-// на экране совместного просмотра — на этом строится автопауза при потере
-// интернета у собеседника: событие "leave" присылает сам сервер Supabase,
-// как только соединение реально обрывается).
+// Канал на Supabase Realtime: Broadcast (кассета, вставленная одним, появляется
+// у другого — событие load) и Presence (кто сейчас на экране совместного
+// просмотра и что у него играет). Паузы и перемотки НЕ синхронизируются:
+// каждый управляет своим плеером сам.
 let isWatchPartyScreenOpen = false;
 let watchPartyChannel = null; // Supabase Realtime канал (broadcast + presence)
 let watchPartyPlayer = null; // Унифицированная обёртка над текущим плеером (video/YouTube/Rutube)
 let isApplyingRemoteWPUpdate = false; // Пока true — наши же события play/pause/seek не рассылаются обратно
-let watchPartyHeartbeat = null; // Интервал, который раз в 5 сек досылает текущее время (коррекция рассинхрона)
+let watchPartyHeartbeat = null; // Интервал, который раз в 5 сек запоминает своё время (для «Присоединиться» у партнёра)
 let watchPartySelfState = { url: null, sourceType: null, playing: false, time: 0 }; // То, что мы транслируем партнёру
 let watchPartyPartnerPresence = null; // Последнее известное состояние партнёра (из Presence)
 let watchPartyPartnerOnline = false;
@@ -615,22 +613,19 @@ async function loadWatchPartySource(rawUrl, opts) {
     }
 }
 
-// ---------- Локальные действия -> рассылка партнёру ----------
+// ---------- Локальные действия: партнёру не рассылаются, только в presence ----------
 function handleLocalWPPlay(time) {
     watchPartySelfState.playing = true;
     watchPartySelfState.time = time;
-    broadcastWP("play", { time: time });
     trackWPPresence();
 }
 function handleLocalWPPause(time) {
     watchPartySelfState.playing = false;
     watchPartySelfState.time = time;
-    broadcastWP("pause", { time: time });
     trackWPPresence();
 }
 function handleLocalWPSeek(time) {
     watchPartySelfState.time = time;
-    broadcastWP("seek", { time: time });
     trackWPPresence();
 }
 
@@ -683,37 +678,8 @@ function handleRemoteWPPayload(payload) {
     if (payload.type === "load") {
         showWPStatusNote(senderName + " включил(а): " + describeWPSource(payload.sourceType));
         loadWatchPartySource(payload.url, { initialTime: payload.time || 0, announce: false, autoplay: false });
-        return;
     }
-
-    if (!watchPartyPlayer) return;
-
-    if (payload.type === "play") {
-        applyRemoteWP(() => {
-            const drift = Math.abs(watchPartyPlayer.getCurrentTime() - (payload.time || 0));
-            if (drift > 1.2) watchPartyPlayer.seekTo(payload.time || 0);
-            watchPartyPlayer.play();
-        });
-        watchPartySelfState.playing = true;
-        renderWatchPartyTvLed();
-        showWPStatusNote(senderName + " нажал(а) ▶️ Play");
-    } else if (payload.type === "pause") {
-        applyRemoteWP(() => {
-            watchPartyPlayer.pause();
-            watchPartyPlayer.seekTo(payload.time || 0);
-        });
-        watchPartySelfState.playing = false;
-        renderWatchPartyTvLed();
-        showWPStatusNote(senderName + " поставил(а) ⏸ на паузу");
-    } else if (payload.type === "seek") {
-        applyRemoteWP(() => watchPartyPlayer.seekTo(payload.time || 0));
-        watchPartySelfState.time = payload.time || 0;
-    } else if (payload.type === "heartbeat") {
-        const drift = Math.abs(watchPartyPlayer.getCurrentTime() - (payload.time || 0));
-        if (drift > 2.5) {
-            applyRemoteWP(() => watchPartyPlayer.seekTo(payload.time || 0));
-        }
-    }
+    // play/pause/seek/heartbeat от старых версий страницы игнорируются
 }
 
 // ---------- Presence: кто сейчас в комнате совместного просмотра ----------
@@ -816,13 +782,8 @@ function initWatchPartyChannel() {
                 watchPartyPartnerOnline = false;
                 watchPartyPartnerPresence = null;
                 renderWPStatusBar();
-                if (watchPartyPlayer && watchPartySelfState.playing) {
-                    applyRemoteWP(() => watchPartyPlayer.pause());
-                    watchPartySelfState.playing = false;
-                    renderWatchPartyTvLed();
-                }
                 closeWatchPartyPeerConnectionOnly(); // сам звонок разорвался вместе с партнёром — сохраняем состояние наших кнопок mic/cam, но чистим RTC
-                showWPStatusNote("⚠️ Партнёр отключился — видео поставлено на паузу");
+                showWPStatusNote("⚠️ Партнёр отключился");
             }, WP_LEAVE_GRACE_MS);
         })
         .subscribe(async (status) => {
@@ -864,9 +825,7 @@ function initWatchPartyChannel() {
     if (watchPartyHeartbeat) clearInterval(watchPartyHeartbeat);
     watchPartyHeartbeat = setInterval(() => {
         if (!isWatchPartyScreenOpen || !watchPartyPlayer || !watchPartySelfState.playing) return;
-        const t = watchPartyPlayer.getCurrentTime();
-        watchPartySelfState.time = t;
-        broadcastWP("heartbeat", { time: t });
+        watchPartySelfState.time = watchPartyPlayer.getCurrentTime();
     }, 5000);
 }
 
